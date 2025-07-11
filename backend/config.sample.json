@@ -1,0 +1,41 @@
+{
+    "servers": {
+        "source": {
+            "name": "Main Media Server",
+            "host": "192.168.1.100",
+            "port": 21,
+            "user": "mediauser",
+            "password": "",
+            "path": "/media/movies"
+        },
+        "target": {
+            "name": "Backup Media Server",
+            "host": "192.168.1.101",
+            "port": 21,
+            "user": "backupuser",
+            "password": "",
+            "path": "/backup/movies"
+        }
+    },
+    "sync_settings": {
+        "file_extensions": [
+            "mp4",
+            "mkv",
+            "avi",
+            "mov",
+            "wmv"
+        ],
+        "min_file_size_mb": 10,
+        "max_file_size_gb": 100,
+        "include_subdirs": true,
+        "overwrite_existing": false,
+        "dry_run_default": true,
+        "connection_timeout": 30,
+        "transfer_timeout": 600
+    },
+    "ui_settings": {
+        "auto_save_config": true,
+        "show_file_paths": true,
+        "max_files_display": 1000
+    }
+}

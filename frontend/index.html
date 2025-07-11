@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FTP Media Server Sync</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔄 FTP Media Server Sync</h1>
+            <p>Synchronize files between two FTP media servers</p>
+        </div>
+
+        <div class="card">
+            <h3>⚙️ Configuration Management</h3>
+            <div class="sync-controls">
+                <button class="button" onclick="loadConfig()">Load Config</button>
+                <button class="button" onclick="saveConfig()">Save Config</button>
+                <button class="button secondary" onclick="createSampleConfig()">Create Sample</button>
+                <button class="button secondary" onclick="resetForm()">Reset Form</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="server-config">
+                <div class="server-section">
+                    <h3>📁 Source Server</h3>
+                    <div class="form-group">
+                        <label for="sourceHost">Host</label>
+                        <input type="text" id="sourceHost" placeholder="192.168.1.100" value="192.168.1.100">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePort">Port</label>
+                        <input type="number" id="sourcePort" placeholder="21" value="21">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourceUser">Username</label>
+                        <input type="text" id="sourceUser" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePass">Password</label>
+                        <input type="password" id="sourcePass" placeholder="password">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePath">Path</label>
+                        <input type="text" id="sourcePath" placeholder="/media/videos" value="/media/videos">
+                    </div>
+                    <button class="button secondary" onclick="testConnection('source')">Test Connection</button>
+                </div>
+
+                <div class="server-section">
+                    <h3>📂 Target Server</h3>
+                    <div class="form-group">
+                        <label for="targetHost">Host</label>
+                        <input type="text" id="targetHost" placeholder="192.168.1.101" value="192.168.1.101">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetPort">Port</label>
+                        <input type="number" id="targetPort" placeholder="21" value="21">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetUser">Username</label>
+                        <input type="text" id="targetUser" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetPass">Password</label>
+                        <input type="password" id="targetPass" placeholder="password">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetPath">Path</label>
+                        <input type="text" id="targetPath" placeholder="/media/videos" value="/media/videos">
+                    </div>
+                    <button class="button secondary" onclick="testConnection('target')">Test Connection</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>⚙️ Sync Settings</h3>
+            <div class="form-group">
+                <label for="fileFilter">File Filter (extensions, comma-separated)</label>
+                <input type="text" id="fileFilter" placeholder="mp4,mkv,avi,mov,wmv" value="mp4,mkv,avi,mov,wmv">
+            </div>
+            <div class="form-group">
+                <label for="minFileSize">Minimum File Size (MB)</label>
+                <input type="number" id="minFileSize" placeholder="1" value="1">
+            </div>
+            <div class="form-group">
+                <label for="maxFileSize">Maximum File Size (GB)</label>
+                <input type="number" id="maxFileSize" placeholder="50" value="50">
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="includeSubdirs" checked>
+                <label for="includeSubdirs">Include subdirectories</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="overwriteExisting">
+                <label for="overwriteExisting">Overwrite existing files with size differences</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="dryRun" checked>
+                <label for="dryRun">Dry run (preview changes without actual sync)</label>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>🔍 File Analysis</h3>
+            <div class="sync-controls">
+                <button class="button" onclick="scanFiles()">Scan Files</button>
+                <button class="button" onclick="compareFiles()" disabled>Compare Files</button>
+                <button class="button" onclick="startSync()" id="syncButton" disabled>Start Sync</button>
+                <button class="button danger" onclick="stopSync()" id="stopButton" disabled>Stop Sync</button>
+                <button class="button secondary" onclick="clearScannedFiles()">Clear Results</button>
+            </div>
+            
+            <div class="progress-bar" id="progressBar" style="display: none;">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+
+        <!-- Scanned Files Display -->
+        <div class="card" id="scannedFilesCard" style="display: none;">
+            <h3>📋 Scanned Files</h3>
+            <div class="scanned-files-container">
+                <div class="scanned-files-section">
+                    <h4>📁 Source Server Files</h4>
+                    <div class="file-count" id="sourceFileCount">No files scanned</div>
+                    <div id="sourceFilesList" class="file-list"></div>
+                </div>
+                <div class="scanned-files-section">
+                    <h4>📂 Target Server Files</h4>
+                    <div class="file-count" id="targetFileCount">No files scanned</div>
+                    <div id="targetFilesList" class="file-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- File Comparison Results -->
+        <div class="card" id="comparisonCard" style="display: none;">
+            <h3>🔄 File Comparison Results</h3>
+            <div id="fileList" class="file-list"></div>
+        </div>
+
+        <div class="card">
+            <h3>📊 Status & Logs</h3>
+            <div id="status" class="status">Ready to sync. Configure your servers and click "Scan Files" to begin.</div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
