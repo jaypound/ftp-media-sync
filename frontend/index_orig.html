@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FTP Media Server Sync</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .server-config {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 20px;
+        }
+
+        .server-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+        }
+
+        .server-section h3 {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .button.secondary {
+            background: #6c757d;
+        }
+
+        .button.danger {
+            background: #dc3545;
+        }
+
+        .status {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .file-item {
+            padding: 10px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-item.different {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+
+        .file-item.missing {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .file-size {
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .sync-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+
+        .scanned-files-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .scanned-files-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .scanned-files-section h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+            font-size: 1.1em;
+        }
+
+        .file-count {
+            background: #e9ecef;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #495057;
+            text-align: center;
+        }
+
+        .file-count.has-files {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .scanned-file-item {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 8px;
+            transition: background-color 0.2s;
+        }
+
+        .scanned-file-item:hover {
+            background: #f8f9fa;
+        }
+
+        .scanned-file-name {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 4px;
+        }
+
+        .scanned-file-details {
+            font-size: 12px;
+            color: #6c757d;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .scanned-file-path {
+            font-size: 11px;
+            color: #868e96;
+            margin-top: 4px;
+            font-family: monospace;
+        }
+
+        @media (max-width: 768px) {
+            .server-config {
+                grid-template-columns: 1fr;
+            }
+            
+            .sync-controls {
+                flex-direction: column;
+            }
+
+            .scanned-files-container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔄 FTP Media Server Sync</h1>
+            <p>Synchronize files between two FTP media servers</p>
+        </div>
+
+        <div class="card">
+            <h3>⚙️ Configuration Management</h3>
+            <div class="sync-controls">
+                <button class="button" onclick="loadConfig()">Load Config</button>
+                <button class="button" onclick="saveConfig()">Save Config</button>
+                <button class="button secondary" onclick="createSampleConfig()">Create Sample</button>
+                <button class="button secondary" onclick="resetForm()">Reset Form</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="server-config">
+                <div class="server-section">
+                    <h3>📁 Source Server</h3>
+                    <div class="form-group">
+                        <label for="sourceHost">Host</label>
+                        <input type="text" id="sourceHost" placeholder="192.168.1.100" value="192.168.1.100">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePort">Port</label>
+                        <input type="number" id="sourcePort" placeholder="21" value="21">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourceUser">Username</label>
+                        <input type="text" id="sourceUser" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePass">Password</label>
+                        <input type="password" id="sourcePass" placeholder="password">
+                    </div>
+                    <div class="form-group">
+                        <label for="sourcePath">Path</label>
+                        <input type="text" id="sourcePath" placeholder="/media/videos" value="/media/videos">
+                    </div>
+                    <button class="button secondary" onclick="testConnection('source')">Test Connection</button>
+                </div>
+
+                <div class="server-section">
+                    <h3>📂 Target Server</h3>
+                    <div class="form-group">
+                        <label for="targetHost">Host</label>
+                        <input type="text" id="targetHost" placeholder="192.168.1.101" value="192.168.1.101">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetPort">Port</label>
+                        <input type="number" id="targetPort" placeholder="21" value="21">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetUser">Username</label>
+                        <input type="text" id="targetUser" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetPass">Password</label>
+                        <input type="password" id="targetPass" placeholder="password">
+                    </div>
+                    <div class="form-group">
+                        <label for="targetPath">Path</label>
+                        <input type="text" id="targetPath" placeholder="/media/videos" value="/media/videos">
+                    </div>
+                    <button class="button secondary" onclick="testConnection('target')">Test Connection</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>⚙️ Sync Settings</h3>
+            <div class="form-group">
+                <label for="fileFilter">File Filter (extensions, comma-separated)</label>
+                <input type="text" id="fileFilter" placeholder="mp4,mkv,avi,mov,wmv" value="mp4,mkv,avi,mov,wmv">
+            </div>
+            <div class="form-group">
+                <label for="minFileSize">Minimum File Size (MB)</label>
+                <input type="number" id="minFileSize" placeholder="1" value="1">
+            </div>
+            <div class="form-group">
+                <label for="maxFileSize">Maximum File Size (GB)</label>
+                <input type="number" id="maxFileSize" placeholder="50" value="50">
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="includeSubdirs" checked>
+                <label for="includeSubdirs">Include subdirectories</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="overwriteExisting">
+                <label for="overwriteExisting">Overwrite existing files with size differences</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="dryRun" checked>
+                <label for="dryRun">Dry run (preview changes without actual sync)</label>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>🔍 File Analysis</h3>
+            <div class="sync-controls">
+                <button class="button" onclick="scanFiles()">Scan Files</button>
+                <button class="button" onclick="compareFiles()" disabled>Compare Files</button>
+                <button class="button" onclick="startSync()" id="syncButton" disabled>Start Sync</button>
+                <button class="button danger" onclick="stopSync()" id="stopButton" disabled>Stop Sync</button>
+                <button class="button secondary" onclick="clearScannedFiles()">Clear Results</button>
+            </div>
+            
+            <div class="progress-bar" id="progressBar" style="display: none;">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+
+        <!-- Scanned Files Display -->
+        <div class="card" id="scannedFilesCard" style="display: none;">
+            <h3>📋 Scanned Files</h3>
+            <div class="scanned-files-container">
+                <div class="scanned-files-section">
+                    <h4>📁 Source Server Files</h4>
+                    <div class="file-count" id="sourceFileCount">No files scanned</div>
+                    <div id="sourceFilesList" class="file-list"></div>
+                </div>
+                <div class="scanned-files-section">
+                    <h4>📂 Target Server Files</h4>
+                    <div class="file-count" id="targetFileCount">No files scanned</div>
+                    <div id="targetFilesList" class="file-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- File Comparison Results -->
+        <div class="card" id="comparisonCard" style="display: none;">
+            <h3>🔄 File Comparison Results</h3>
+            <div id="fileList" class="file-list"></div>
+        </div>
+
+        <div class="card">
+            <h3>📊 Status & Logs</h3>
+            <div id="status" class="status">Ready to sync. Configure your servers and click "Scan Files" to begin.</div>
+        </div>
+    </div>
+
+    <script>
+        let sourceFiles = [];
+        let targetFiles = [];
+        let syncQueue = [];
+        let isScanning = false;
+        let isSyncing = false;
+        let syncStats = { processed: 0, total: 0, errors: 0 };
+
+        function log(message, type = 'info') {
+            const status = document.getElementById('status');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+            status.innerHTML += `[${timestamp}] ${prefix} ${message}\n`;
+            status.scrollTop = status.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('status').innerHTML = '';
+        }
+
+        function updateProgress(current, total) {
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            
+            if (total > 0) {
+                const percentage = (current / total) * 100;
+                progressFill.style.width = percentage + '%';
+                progressBar.style.display = 'block';
+            } else {
+                progressBar.style.display = 'none';
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function getFileExtension(filename) {
+            return filename.split('.').pop().toLowerCase();
+        }
+
+        function shouldIncludeFile(filename, size) {
+            const filterInput = document.getElementById('fileFilter').value;
+            const minSize = parseInt(document.getElementById('minFileSize').value) * 1024 * 1024;
+            const maxSize = parseInt(document.getElementById('maxFileSize').value) * 1024 * 1024 * 1024;
+            
+            // Check file extension
+            if (filterInput) {
+                const extensions = filterInput.split(',').map(ext => ext.trim().toLowerCase());
+                const fileExt = getFileExtension(filename);
+                if (!extensions.includes(fileExt)) {
+                    return false;
+                }
+            }
+            
+            // Check file size
+            if (size < minSize || size > maxSize) {
+                return false;
+            }
+            
+            return true;
+        }
+
+        async function compareFiles() {
+            log('Comparing files between servers...');
+            
+            const fileListDiv = document.getElementById('fileList');
+            const comparisonCard = document.getElementById('comparisonCard');
+            fileListDiv.innerHTML = '';
+            comparisonCard.style.display = 'block';
+            
+            syncQueue = [];
+            
+            // Create a map of target files for quick lookup
+            const targetFileMap = new Map();
+            targetFiles.forEach(file => {
+                targetFileMap.set(file.name, file);
+            });
+            
+            sourceFiles.forEach(sourceFile => {
+                const targetFile = targetFileMap.get(sourceFile.name);
+                
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                
+                if (!targetFile) {
+                    // File missing on target
+                    fileItem.classList.add('missing');
+                    fileItem.innerHTML = `
+                        <div class="file-info">
+                            <div class="file-name">${sourceFile.name}</div>
+                            <div class="file-size">${formatFileSize(sourceFile.size)} - Missing on target</div>
+                        </div>
+                        <button class="button" onclick="addToSyncQueue('${sourceFile.name}')">Add to Sync</button>
+                    `;
+                    syncQueue.push({ type: 'copy', file: sourceFile });
+                } else if (sourceFile.size !== targetFile.size) {
+                    // File size different
+                    fileItem.classList.add('different');
+                    fileItem.innerHTML = `
+                        <div class="file-info">
+                            <div class="file-name">${sourceFile.name}</div>
+                            <div class="file-size">Source: ${formatFileSize(sourceFile.size)} | Target: ${formatFileSize(targetFile.size)}</div>
+                        </div>
+                        <button class="button" onclick="addToSyncQueue('${sourceFile.name}')">Update</button>
+                    `;
+                    syncQueue.push({ type: 'update', file: sourceFile });
+                } else {
+                    // File identical
+                    fileItem.innerHTML = `
+                        <div class="file-info">
+                            <div class="file-name">${sourceFile.name}</div>
+                            <div class="file-size">${formatFileSize(sourceFile.size)} - Identical</div>
+                        </div>
+                        <span style="color: #28a745;">✅ Synced</span>
+                    `;
+                }
+                
+                fileListDiv.appendChild(fileItem);
+            });
+            
+            log(`Comparison complete. Found ${syncQueue.length} files to sync`, 'success');
+            
+            // Enable sync button if there are files to sync
+            document.getElementById('syncButton').disabled = syncQueue.length === 0;
+        }
+
+        function displayScannedFiles() {
+            const scannedFilesCard = document.getElementById('scannedFilesCard');
+            const sourceFilesList = document.getElementById('sourceFilesList');
+            const targetFilesList = document.getElementById('targetFilesList');
+            const sourceFileCount = document.getElementById('sourceFileCount');
+            const targetFileCount = document.getElementById('targetFileCount');
+            
+            // Show the scanned files card
+            scannedFilesCard.style.display = 'block';
+            
+            // Update file counts
+            sourceFileCount.textContent = `${sourceFiles.length} files found`;
+            sourceFileCount.className = sourceFiles.length > 0 ? 'file-count has-files' : 'file-count';
+            
+            targetFileCount.textContent = `${targetFiles.length} files found`;
+            targetFileCount.className = targetFiles.length > 0 ? 'file-count has-files' : 'file-count';
+            
+            // Display source files
+            sourceFilesList.innerHTML = '';
+            sourceFiles.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'scanned-file-item';
+                fileItem.innerHTML = `
+                    <div class="scanned-file-name">${file.name}</div>
+                    <div class="scanned-file-details">
+                        <span>Size: ${formatFileSize(file.size)}</span>
+                        <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
+                    </div>
+                    <div class="scanned-file-path">${file.path}</div>
+                `;
+                sourceFilesList.appendChild(fileItem);
+            });
+            
+            // Display target files
+            targetFilesList.innerHTML = '';
+            targetFiles.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'scanned-file-item';
+                fileItem.innerHTML = `
+                    <div class="scanned-file-name">${file.name}</div>
+                    <div class="scanned-file-details">
+                        <span>Size: ${formatFileSize(file.size)}</span>
+                        <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
+                    </div>
+                    <div class="scanned-file-path">${file.path}</div>
+                `;
+                targetFilesList.appendChild(fileItem);
+            });
+        }
+
+        function clearScannedFiles() {
+            // Hide display cards
+            document.getElementById('scannedFilesCard').style.display = 'none';
+            document.getElementById('comparisonCard').style.display = 'none';
+            
+            // Clear data
+            sourceFiles = [];
+            targetFiles = [];
+            syncQueue = [];
+            
+            // Reset UI
+            document.querySelector('button[onclick="compareFiles()"]').disabled = true;
+            document.getElementById('syncButton').disabled = true;
+            
+            // Clear file lists
+            document.getElementById('sourceFilesList').innerHTML = '';
+            document.getElementById('targetFilesList').innerHTML = '';
+            document.getElementById('fileList').innerHTML = '';
+            
+            log('Cleared all scanned file results', 'success');
+        }
+
+        function addToSyncQueue(filename) {
+            log(`Added ${filename} to sync queue`);
+        }
+
+        function stopSync() {
+            isSyncing = false;
+            log('Sync stopped by user', 'error');
+            document.getElementById('syncButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+        }
+
+        // Configuration management functions
+        async function loadConfig() {
+            try {
+                log('Loading configuration...');
+                const response = await fetch('http://127.0.0.1:5000/api/config');
+                const result = await response.json();
+                
+                if (result.success) {
+                    populateFormFromConfig(result.config);
+                    log('✅ Configuration loaded successfully', 'success');
+                } else {
+                    log(`❌ Failed to load config: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error loading config: ${error.message}`, 'error');
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                log('Saving configuration...');
+                const config = getConfigFromForm();
+                
+                const response = await fetch('http://127.0.0.1:5000/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    log('✅ Configuration saved successfully', 'success');
+                } else {
+                    log(`❌ Failed to save config: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error saving config: ${error.message}`, 'error');
+            }
+        }
+
+        async function createSampleConfig() {
+            try {
+                log('Creating sample configuration file...');
+                const response = await fetch('http://127.0.0.1:5000/api/config/sample', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    log('✅ Sample configuration file created: config.sample.json', 'success');
+                    log('Edit this file with your server details and rename to config.json');
+                } else {
+                    log(`❌ Failed to create sample config: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error creating sample config: ${error.message}`, 'error');
+            }
+        }
+
+        function populateFormFromConfig(config) {
+            // Populate server settings
+            if (config.servers) {
+                if (config.servers.source) {
+                    const src = config.servers.source;
+                    document.getElementById('sourceHost').value = src.host || '';
+                    document.getElementById('sourcePort').value = src.port || 21;
+                    document.getElementById('sourceUser').value = src.user || '';
+                    document.getElementById('sourcePath').value = src.path || '';
+                    // Note: passwords are not loaded for security
+                }
+                
+                if (config.servers.target) {
+                    const tgt = config.servers.target;
+                    document.getElementById('targetHost').value = tgt.host || '';
+                    document.getElementById('targetPort').value = tgt.port || 21;
+                    document.getElementById('targetUser').value = tgt.user || '';
+                    document.getElementById('targetPath').value = tgt.path || '';
+                }
+            }
+            
+            // Populate sync settings
+            if (config.sync_settings) {
+                const sync = config.sync_settings;
+                document.getElementById('fileFilter').value = (sync.file_extensions || []).join(',');
+                document.getElementById('minFileSize').value = sync.min_file_size_mb || 1;
+                document.getElementById('maxFileSize').value = sync.max_file_size_gb || 50;
+                document.getElementById('includeSubdirs').checked = sync.include_subdirs !== false;
+                document.getElementById('overwriteExisting').checked = sync.overwrite_existing === true;
+                document.getElementById('dryRun').checked = sync.dry_run_default !== false;
+            }
+        }
+
+        function getConfigFromForm() {
+            return {
+                servers: {
+                    source: {
+                        name: "Source Server",
+                        host: document.getElementById('sourceHost').value,
+                        port: parseInt(document.getElementById('sourcePort').value) || 21,
+                        user: document.getElementById('sourceUser').value,
+                        password: document.getElementById('sourcePass').value,
+                        path: document.getElementById('sourcePath').value
+                    },
+                    target: {
+                        name: "Target Server",
+                        host: document.getElementById('targetHost').value,
+                        port: parseInt(document.getElementById('targetPort').value) || 21,
+                        user: document.getElementById('targetUser').value,
+                        password: document.getElementById('targetPass').value,
+                        path: document.getElementById('targetPath').value
+                    }
+                },
+                sync_settings: {
+                    file_extensions: document.getElementById('fileFilter').value.split(',').map(ext => ext.trim()).filter(ext => ext),
+                    min_file_size_mb: parseInt(document.getElementById('minFileSize').value) || 1,
+                    max_file_size_gb: parseInt(document.getElementById('maxFileSize').value) || 50,
+                    include_subdirs: document.getElementById('includeSubdirs').checked,
+                    overwrite_existing: document.getElementById('overwriteExisting').checked,
+                    dry_run_default: document.getElementById('dryRun').checked
+                }
+            };
+        }
+
+        function resetForm() {
+            // Reset all form fields to defaults
+            document.getElementById('sourceHost').value = '';
+            document.getElementById('sourcePort').value = '21';
+            document.getElementById('sourceUser').value = '';
+            document.getElementById('sourcePass').value = '';
+            document.getElementById('sourcePath').value = '/media/videos';
+            
+            document.getElementById('targetHost').value = '';
+            document.getElementById('targetPort').value = '21';
+            document.getElementById('targetUser').value = '';
+            document.getElementById('targetPass').value = '';
+            document.getElementById('targetPath').value = '/media/videos';
+            
+            document.getElementById('fileFilter').value = 'mp4,mkv,avi,mov,wmv';
+            document.getElementById('minFileSize').value = '1';
+            document.getElementById('maxFileSize').value = '50';
+            document.getElementById('includeSubdirs').checked = true;
+            document.getElementById('overwriteExisting').checked = false;
+            document.getElementById('dryRun').checked = true;
+            
+            log('Form reset to defaults', 'success');
+        }
+
+        // API Functions for backend integration
+        async function testConnection(serverType) {
+            const config = {
+                server_type: serverType,
+                host: document.getElementById(`${serverType}Host`).value,
+                port: document.getElementById(`${serverType}Port`).value,
+                user: document.getElementById(`${serverType}User`).value,
+                password: document.getElementById(`${serverType}Pass`).value
+            };
+            
+            if (!config.host || !config.user || !config.password) {
+                log(`Please fill in all ${serverType} server details`, 'error');
+                return;
+            }
+            
+            log(`Testing connection to ${serverType} server (${config.host}:${config.port})...`);
+            
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    log(`✅ ${result.message}`, 'success');
+                } else {
+                    log(`❌ ${result.message}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Connection test failed: ${error.message}`, 'error');
+                log('Make sure the Python backend is running on 127.0.0.1:5000', 'error');
+            }
+        }
+
+        async function scanFiles() {
+            if (isScanning) return;
+            
+            isScanning = true;
+            clearLog();
+            log('Starting file scan...');
+            
+            const sourceHost = document.getElementById('sourceHost').value;
+            const targetHost = document.getElementById('targetHost').value;
+            const sourcePath = document.getElementById('sourcePath').value;
+            const targetPath = document.getElementById('targetPath').value;
+            
+            if (!sourceHost || !targetHost) {
+                log('Please configure both source and target servers', 'error');
+                isScanning = false;
+                return;
+            }
+            
+            try {
+                // Get file filters
+                const filterInput = document.getElementById('fileFilter').value;
+                const extensions = filterInput ? filterInput.split(',').map(ext => ext.trim()) : [];
+                const minSize = parseInt(document.getElementById('minFileSize').value) * 1024 * 1024;
+                const maxSize = parseInt(document.getElementById('maxFileSize').value) * 1024 * 1024 * 1024;
+                const includeSubdirs = document.getElementById('includeSubdirs').checked;
+                
+                const filters = {
+                    extensions: extensions,
+                    min_size: minSize,
+                    max_size: maxSize,
+                    include_subdirs: includeSubdirs
+                };
+                
+                // Scan source server
+                log(`Scanning source server: ${sourceHost}${sourcePath}`);
+                const sourceResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        server_type: 'source',
+                        path: sourcePath,
+                        filters: filters
+                    })
+                });
+                
+                const sourceResult = await sourceResponse.json();
+                if (!sourceResult.success) {
+                    throw new Error(sourceResult.message);
+                }
+                
+                sourceFiles = sourceResult.files;
+                log(`Found ${sourceFiles.length} files on source server`);
+                
+                // Scan target server
+                log(`Scanning target server: ${targetHost}${targetPath}`);
+                const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        server_type: 'target',
+                        path: targetPath,
+                        filters: filters
+                    })
+                });
+                
+                const targetResult = await targetResponse.json();
+                if (!targetResult.success) {
+                    throw new Error(targetResult.message);
+                }
+                
+                targetFiles = targetResult.files;
+                log(`Found ${targetFiles.length} files on target server`);
+                
+                log('File scan completed', 'success');
+                
+                // Display scanned files
+                displayScannedFiles();
+                
+                // Enable compare button
+                document.querySelector('button[onclick="compareFiles()"]').disabled = false;
+                
+            } catch (error) {
+                log(`Error during file scan: ${error.message}`, 'error');
+            }
+            
+            isScanning = false;
+        }
+
+        async function startSync() {
+            if (isSyncing || syncQueue.length === 0) return;
+            
+            const dryRun = document.getElementById('dryRun').checked;
+            
+            isSyncing = true;
+            document.getElementById('syncButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+            
+            syncStats = { processed: 0, total: syncQueue.length, errors: 0 };
+            
+            log(`Starting ${dryRun ? 'dry run' : 'sync'} of ${syncQueue.length} files...`);
+            
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/sync-files', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sync_queue: syncQueue,
+                        dry_run: dryRun
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    result.results.forEach((item, index) => {
+                        updateProgress(index + 1, result.results.length);
+                        
+                        if (item.status === 'would_sync') {
+                            log(`[DRY RUN] Would ${item.action} ${item.file} (${formatFileSize(item.size)})`);
+                        } else if (item.status === 'success') {
+                            log(`✅ ${item.action === 'copy' ? 'Copied' : 'Updated'} ${item.file}`, 'success');
+                            syncStats.processed++;
+                        } else {
+                            log(`❌ Error with ${item.file}: ${item.error || 'Unknown error'}`, 'error');
+                            syncStats.errors++;
+                        }
+                    });
+                    
+                    log(`Sync completed! Processed: ${syncStats.processed}, Errors: ${syncStats.errors}`, 'success');
+                } else {
+                    log(`Sync failed: ${result.message}`, 'error');
+                }
+                
+            } catch (error) {
+                log(`Sync error: ${error.message}`, 'error');
+            }
+            
+            isSyncing = false;
+            document.getElementById('syncButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+        }
+
+        // Initialize the app
+        window.addEventListener('load', function() {
+            log('FTP Media Server Sync initialized');
+            log('Click "Load Config" to load saved settings, or configure manually');
+            log('Use "Save Config" to remember your settings for next time');
+            
+            // Auto-load config on startup
+            loadConfig();
+        });
