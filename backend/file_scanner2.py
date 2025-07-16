@@ -17,12 +17,9 @@ class FileScanner:
         base_path = path.rstrip('/')
         files = []
         
-        logger.debug(f"Starting scan of: {path} (base: {base_path})")
-        
         try:
             # Get files from current directory
             current_files = self.ftp_manager.list_files(path)
-            logger.debug(f"Found {len(current_files)} files in {path}")
             
             for file_info in current_files:
                 if self._should_include_file(file_info, filters):
@@ -33,50 +30,22 @@ class FileScanner:
             # Recursively scan subdirectories if enabled
             if filters.get('include_subdirs', True):
                 subdirs = self._get_subdirectories(path)
-                logger.debug(f"Found subdirectories in {path}: {subdirs}")
                 for subdir in subdirs:
                     subdir_path = os.path.join(path, subdir).replace('\\', '/')
-                    logger.debug(f"Recursively scanning: {subdir_path}")
-                    subdir_files = self._scan_directory_recursive(subdir_path, base_path, filters)
+                    subdir_files = self.scan_directory(subdir_path, filters)
+                    
+                    # Update relative paths for subdirectory files
+                    for file_info in subdir_files:
+                        if 'path' not in file_info or not file_info['path']:
+                            file_info = self._add_relative_path(file_info, subdir_path, base_path)
+                    
                     files.extend(subdir_files)
             
-            logger.debug(f"Total files found in scan: {len(files)}")
             return files
             
         except Exception as e:
-            logger.error(f"Scan error in {path}: {str(e)}")
+            logger.error(f"Scan error: {str(e)}")
             return []
-    
-    def _scan_directory_recursive(self, current_path, base_path, filters):
-        """Recursively scan a subdirectory"""
-        files = []
-        
-        logger.debug(f"Recursive scan: {current_path} (base: {base_path})")
-        
-        try:
-            # Get files from current directory
-            current_files = self.ftp_manager.list_files(current_path)
-            logger.debug(f"Found {len(current_files)} files in {current_path}")
-            
-            for file_info in current_files:
-                if self._should_include_file(file_info, filters):
-                    # Add relative path information
-                    file_info = self._add_relative_path(file_info, current_path, base_path)
-                    files.append(file_info)
-            
-            # Continue recursively scanning subdirectories
-            subdirs = self._get_subdirectories(current_path)
-            logger.debug(f"Found subdirectories in {current_path}: {subdirs}")
-            for subdir in subdirs:
-                subdir_path = os.path.join(current_path, subdir).replace('\\', '/')
-                subdir_files = self._scan_directory_recursive(subdir_path, base_path, filters)
-                files.extend(subdir_files)
-                
-        except Exception as e:
-            logger.error(f"Recursive scan error in {current_path}: {str(e)}")
-            
-        logger.debug(f"Recursive scan of {current_path} found {len(files)} files")
-        return files
     
     def _add_relative_path(self, file_info, current_path, base_path):
         """Add relative path information to file_info"""
@@ -89,21 +58,12 @@ class FileScanner:
             relative_path = file_info['name']
         else:
             # File is in a subdirectory
-            # Remove the base path to get the relative directory
-            if current_path_clean.startswith(base_path_clean + '/'):
-                relative_dir = current_path_clean[len(base_path_clean + '/'):]
-                relative_path = os.path.join(relative_dir, file_info['name']).replace('\\', '/')
-            else:
-                # Fallback if path calculation fails
-                logger.warning(f"Path calculation failed for {file_info['name']} in {current_path}")
-                relative_path = file_info['name']
+            relative_dir = current_path_clean[len(base_path_clean):].lstrip('/')
+            relative_path = os.path.join(relative_dir, file_info['name']).replace('\\', '/')
         
         # Create a new file_info dict with path information
         updated_file_info = file_info.copy()
         updated_file_info['path'] = relative_path
-        
-        # Debug logging
-        logger.debug(f"File: {file_info['name']} -> Relative path: {relative_path}")
         
         return updated_file_info
     

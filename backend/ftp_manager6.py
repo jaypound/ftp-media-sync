@@ -140,7 +140,6 @@ class FTPManager:
             
             # Change to the base directory (from config)
             base_path = self.config.get('path', '/')
-            logger.debug(f"Config contents: {self.config}")
             logger.debug(f"Changing to base directory: {base_path}")
             try:
                 self.ftp.cwd(base_path)
@@ -163,9 +162,7 @@ class FTPManager:
                     
                 # Change to the target directory for upload
                 try:
-                    target_dir = os.path.join(base_path, remote_dir).replace('\\', '/')
-                    logger.debug(f"Changing to target directory: {target_dir}")
-                    self.ftp.cwd(target_dir)
+                    self.ftp.cwd(os.path.join(base_path, remote_dir).replace('\\', '/'))
                     upload_dir = self.ftp.pwd()
                     logger.debug(f"Changed to upload directory: {upload_dir}")
                     # Upload just the filename since we're in the right directory
@@ -225,13 +222,9 @@ class FTPManager:
                 return False
         
         try:
-            # Get current directory as base
-            base_dir = self.ftp.pwd()
-            logger.debug(f"Creating directory '{path}' relative to: {base_dir}")
-            
             # Split path into parts and create each level
             parts = path.strip('/').split('/')
-            current_path = base_dir.rstrip('/')
+            current_path = ''
             
             for part in parts:
                 if part:  # Skip empty parts

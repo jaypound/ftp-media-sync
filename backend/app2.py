@@ -88,11 +88,10 @@ def test_connection():
             'host': data.get('host'),
             'port': int(data.get('port', 21)),
             'user': data.get('user'),
-            'password': '***', # Don't log passwords
-            'path': data.get('path', '/')  # Include the path field
+            'password': '***' # Don't log passwords
         }
         
-        logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}, path={ftp_config['path']}")
+        logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}")
         
         # Create FTP manager with actual password
         ftp_config['password'] = data.get('password')
@@ -158,9 +157,8 @@ def sync_files():
         data = request.json
         sync_queue = data.get('sync_queue', [])
         dry_run = data.get('dry_run', True)
-        keep_temp_files = data.get('keep_temp_files', False)
         
-        logger.info(f"Sync queue length: {len(sync_queue)}, Dry run: {dry_run}, Keep temp files: {keep_temp_files}")
+        logger.info(f"Sync queue length: {len(sync_queue)}, Dry run: {dry_run}")
         
         if 'source' not in ftp_managers or 'target' not in ftp_managers:
             error_msg = 'Both servers must be connected'
@@ -200,10 +198,10 @@ def sync_files():
                     try:
                         if action == 'copy':
                             logger.info(f"  Copying file: {filename}")
-                            success = source_ftp.copy_file_to(file_info, target_ftp, keep_temp=keep_temp_files)
+                            success = source_ftp.copy_file_to(file_info, target_ftp)
                         else:  # update
                             logger.info(f"  Updating file: {filename}")
-                            success = source_ftp.update_file_to(file_info, target_ftp, keep_temp=keep_temp_files)
+                            success = source_ftp.update_file_to(file_info, target_ftp)
                         
                         logger.info(f"  Sync result for {filename}: {success}")
                         

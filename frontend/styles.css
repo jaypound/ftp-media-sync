@@ -115,6 +115,30 @@ input:focus, select:focus, textarea:focus {
     background: #dc3545;
 }
 
+/* Add to Sync button styles */
+.add-to-sync-btn {
+    transition: all 0.3s ease;
+    min-width: 120px;
+}
+
+.add-to-sync-btn.added {
+    background-color: #28a745 !important;
+    border-color: #28a745 !important;
+    color: white !important;
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+.add-to-sync-btn.added:hover {
+    background-color: #28a745 !important;
+    border-color: #28a745 !important;
+    opacity: 0.8;
+}
+
+.add-to-sync-btn:disabled {
+    pointer-events: none;
+}
+
 .status {
     background: #f8f9fa;
     border-radius: 8px;

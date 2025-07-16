@@ -88,11 +88,10 @@ def test_connection():
             'host': data.get('host'),
             'port': int(data.get('port', 21)),
             'user': data.get('user'),
-            'password': '***', # Don't log passwords
-            'path': data.get('path', '/')  # Include the path field
+            'password': '***' # Don't log passwords
         }
         
-        logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}, path={ftp_config['path']}")
+        logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}")
         
         # Create FTP manager with actual password
         ftp_config['password'] = data.get('password')
@@ -158,9 +157,8 @@ def sync_files():
         data = request.json
         sync_queue = data.get('sync_queue', [])
         dry_run = data.get('dry_run', True)
-        keep_temp_files = data.get('keep_temp_files', False)
         
-        logger.info(f"Sync queue length: {len(sync_queue)}, Dry run: {dry_run}, Keep temp files: {keep_temp_files}")
+        logger.info(f"Sync queue length: {len(sync_queue)}, Dry run: {dry_run}")
         
         if 'source' not in ftp_managers or 'target' not in ftp_managers:
             error_msg = 'Both servers must be connected'
@@ -173,89 +171,42 @@ def sync_files():
         results = []
         
         for item in sync_queue:
-            file_info = item['file']
-            action = item['type']
-            filename = file_info['name']
-            relative_path = file_info.get('path', filename)
-            
-            logger.info(f"Processing file: {filename}")
-            logger.info(f"  Relative path: {relative_path}")
-            logger.info(f"  Full path: {file_info.get('full_path', 'Not set')}")
-            logger.info(f"  Action: {action}")
-            logger.info(f"  Dry run: {dry_run}")
-            
             try:
                 if dry_run:
                     results.append({
-                        'file': filename,
-                        'action': action,
+                        'file': item['file']['name'],
+                        'action': item['type'],
                         'status': 'would_sync',
-                        'size': file_info['size']
+                        'size': item['file']['size']
                     })
-                    logger.info(f"  Would sync {filename}")
                 else:
-                    logger.info(f"  Starting actual sync for {filename}")
+                    # Actual sync logic here
+                    if item['type'] == 'copy':
+                        success = source_ftp.copy_file_to(item['file'], target_ftp)
+                    else:  # update
+                        success = source_ftp.update_file_to(item['file'], target_ftp)
                     
-                    # Perform actual sync
-                    try:
-                        if action == 'copy':
-                            logger.info(f"  Copying file: {filename}")
-                            success = source_ftp.copy_file_to(file_info, target_ftp, keep_temp=keep_temp_files)
-                        else:  # update
-                            logger.info(f"  Updating file: {filename}")
-                            success = source_ftp.update_file_to(file_info, target_ftp, keep_temp=keep_temp_files)
-                        
-                        logger.info(f"  Sync result for {filename}: {success}")
-                        
-                        if success:
-                            results.append({
-                                'file': filename,
-                                'action': action,
-                                'status': 'success',
-                                'size': file_info['size']
-                            })
-                            logger.info(f"  ✅ Successfully synced {filename}")
-                        else:
-                            results.append({
-                                'file': filename,
-                                'action': action,
-                                'status': 'failed',
-                                'error': 'File transfer failed - check FTP connection and permissions',
-                                'details': f'Failed to {action} {relative_path}'
-                            })
-                            logger.error(f"  ❌ Failed to sync {filename}")
-                            
-                    except Exception as sync_error:
-                        error_msg = str(sync_error)
-                        logger.error(f"  ❌ Sync exception for {filename}: {error_msg}", exc_info=True)
-                        
-                        results.append({
-                            'file': filename,
-                            'action': action,
-                            'status': 'failed',
-                            'error': error_msg,
-                            'details': f'Exception during {action} of {relative_path}'
-                        })
+                    results.append({
+                        'file': item['file']['name'],
+                        'action': item['type'],
+                        'status': 'success' if success else 'failed',
+                        'size': item['file']['size']
+                    })
                     
-            except Exception as item_error:
-                error_msg = str(item_error)
-                logger.error(f"Error processing item {filename}: {error_msg}", exc_info=True)
-                
+            except Exception as e:
                 results.append({
-                    'file': filename,
-                    'action': action,
+                    'file': item['file']['name'],
+                    'action': item['type'],
                     'status': 'error',
-                    'error': error_msg,
-                    'details': f'Error processing sync item for {relative_path}'
+                    'error': str(e)
                 })
         
-        logger.info(f"Sync completed. Results: {len(results)} items processed")
         return jsonify({'success': True, 'results': results})
         
     except Exception as e:
         error_msg = f"Sync error: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        return jsonify({'success': False, 'message': error_msg, 'details': error_msg})
+        return jsonify({'success': False, 'message': error_msg})
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
