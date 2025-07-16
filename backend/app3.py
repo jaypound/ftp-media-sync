@@ -88,11 +88,10 @@ def test_connection():
             'host': data.get('host'),
             'port': int(data.get('port', 21)),
             'user': data.get('user'),
-            'password': '***', # Don't log passwords
-            'path': data.get('path', '/')  # Include the path field
+            'password': '***' # Don't log passwords
         }
         
-        logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}, path={ftp_config['path']}")
+        logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}")
         
         # Create FTP manager with actual password
         ftp_config['password'] = data.get('password')

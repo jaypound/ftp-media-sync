@@ -344,9 +344,6 @@ function stopSync() {
 
 // Configuration management functions
 async function loadConfig() {
-    const loadButton = document.querySelector('button[onclick="loadConfig()"]');
-    const originalText = loadButton.textContent;
-    
     try {
         log('Loading configuration...');
         const response = await fetch('http://127.0.0.1:5000/api/config');
@@ -355,54 +352,15 @@ async function loadConfig() {
         if (result.success) {
             populateFormFromConfig(result.config);
             log('✅ Configuration loaded successfully', 'success');
-            
-            // Update button to show success
-            loadButton.textContent = '✅ Config Loaded';
-            loadButton.style.backgroundColor = '#28a745';
-            loadButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                loadButton.textContent = originalText;
-                loadButton.style.backgroundColor = '';
-                loadButton.style.color = '';
-            }, 3000);
         } else {
             log(`❌ Failed to load config: ${result.message}`, 'error');
-            
-            // Show error state
-            loadButton.textContent = '❌ Load Failed';
-            loadButton.style.backgroundColor = '#dc3545';
-            loadButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                loadButton.textContent = originalText;
-                loadButton.style.backgroundColor = '';
-                loadButton.style.color = '';
-            }, 3000);
         }
     } catch (error) {
         log(`❌ Error loading config: ${error.message}`, 'error');
-        
-        // Show error state
-        loadButton.textContent = '❌ Load Failed';
-        loadButton.style.backgroundColor = '#dc3545';
-        loadButton.style.color = 'white';
-        
-        // Reset button after 3 seconds
-        setTimeout(() => {
-            loadButton.textContent = originalText;
-            loadButton.style.backgroundColor = '';
-            loadButton.style.color = '';
-        }, 3000);
     }
 }
 
 async function saveConfig() {
-    const saveButton = document.querySelector('button[onclick="saveConfig()"]');
-    const originalText = saveButton.textContent;
-    
     try {
         log('Saving configuration...');
         const config = getConfigFromForm();
@@ -417,47 +375,11 @@ async function saveConfig() {
         
         if (result.success) {
             log('✅ Configuration saved successfully', 'success');
-            
-            // Update button to show success
-            saveButton.textContent = '✅ Config Saved';
-            saveButton.style.backgroundColor = '#28a745';
-            saveButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                saveButton.textContent = originalText;
-                saveButton.style.backgroundColor = '';
-                saveButton.style.color = '';
-            }, 3000);
         } else {
             log(`❌ Failed to save config: ${result.message}`, 'error');
-            
-            // Show error state
-            saveButton.textContent = '❌ Save Failed';
-            saveButton.style.backgroundColor = '#dc3545';
-            saveButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                saveButton.textContent = originalText;
-                saveButton.style.backgroundColor = '';
-                saveButton.style.color = '';
-            }, 3000);
         }
     } catch (error) {
         log(`❌ Error saving config: ${error.message}`, 'error');
-        
-        // Show error state
-        saveButton.textContent = '❌ Save Failed';
-        saveButton.style.backgroundColor = '#dc3545';
-        saveButton.style.color = 'white';
-        
-        // Reset button after 3 seconds
-        setTimeout(() => {
-            saveButton.textContent = originalText;
-            saveButton.style.backgroundColor = '';
-            saveButton.style.color = '';
-        }, 3000);
     }
 }
 
@@ -571,28 +493,18 @@ function resetForm() {
 
 // API Functions for backend integration
 async function testConnection(serverType) {
-    const testButton = document.querySelector(`button[onclick="testConnection('${serverType}')"]`);
-    const originalText = testButton.textContent;
-    
     const config = {
         server_type: serverType,
         host: document.getElementById(`${serverType}Host`).value,
         port: document.getElementById(`${serverType}Port`).value,
         user: document.getElementById(`${serverType}User`).value,
-        password: document.getElementById(`${serverType}Pass`).value,
-        path: document.getElementById(`${serverType}Path`).value
+        password: document.getElementById(`${serverType}Pass`).value
     };
     
     if (!config.host || !config.user || !config.password) {
         log(`Please fill in all ${serverType} server details`, 'error');
         return;
     }
-    
-    // Show loading state
-    testButton.textContent = 'Testing...';
-    testButton.style.backgroundColor = '#007bff';
-    testButton.style.color = 'white';
-    testButton.disabled = true;
     
     log(`Testing connection to ${serverType} server (${config.host}:${config.port})...`);
     
@@ -607,51 +519,12 @@ async function testConnection(serverType) {
         
         if (result.success) {
             log(`✅ ${result.message}`, 'success');
-            
-            // Show success state
-            testButton.textContent = '✅ Connected';
-            testButton.style.backgroundColor = '#28a745';
-            testButton.style.color = 'white';
-            
-            // Reset button after 5 seconds
-            setTimeout(() => {
-                testButton.textContent = originalText;
-                testButton.style.backgroundColor = '';
-                testButton.style.color = '';
-                testButton.disabled = false;
-            }, 5000);
         } else {
             log(`❌ ${result.message}`, 'error');
-            
-            // Show error state
-            testButton.textContent = '❌ Failed';
-            testButton.style.backgroundColor = '#dc3545';
-            testButton.style.color = 'white';
-            
-            // Reset button after 5 seconds
-            setTimeout(() => {
-                testButton.textContent = originalText;
-                testButton.style.backgroundColor = '';
-                testButton.style.color = '';
-                testButton.disabled = false;
-            }, 5000);
         }
     } catch (error) {
         log(`❌ Connection test failed: ${error.message}`, 'error');
         log('Make sure the Python backend is running on 127.0.0.1:5000', 'error');
-        
-        // Show error state
-        testButton.textContent = '❌ Failed';
-        testButton.style.backgroundColor = '#dc3545';
-        testButton.style.color = 'white';
-        
-        // Reset button after 5 seconds
-        setTimeout(() => {
-            testButton.textContent = originalText;
-            testButton.style.backgroundColor = '';
-            testButton.style.color = '';
-            testButton.disabled = false;
-        }, 5000);
     }
 }
 
@@ -763,7 +636,6 @@ async function startSync() {
     if (isSyncing || syncQueue.length === 0) return;
     
     const dryRun = document.getElementById('dryRun').checked;
-    const keepTemp = document.getElementById('keepTempFiles') ? document.getElementById('keepTempFiles').checked : false;
     
     isSyncing = true;
     document.getElementById('syncButton').disabled = true;
@@ -772,9 +644,6 @@ async function startSync() {
     syncStats = { processed: 0, total: syncQueue.length, errors: 0 };
     
     log(`Starting ${dryRun ? 'dry run' : 'sync'} of ${syncQueue.length} selected files...`);
-    if (keepTemp) {
-        log(`Debug mode: Keeping temp files in /tmp/ for inspection`);
-    }
     
     // Log the sync queue for debugging
     log(`Debug: Sync queue contents:`);
@@ -785,8 +654,7 @@ async function startSync() {
     try {
         const requestBody = {
             sync_queue: syncQueue,
-            dry_run: dryRun,
-            keep_temp_files: keepTemp
+            dry_run: dryRun
         };
         
         log(`Debug: Request body: ${JSON.stringify(requestBody, null, 2)}`);
@@ -826,16 +694,9 @@ async function startSync() {
                     syncStats.processed++;
                 } else {
                     // Enhanced error logging
-                    const errorMsg = item.error || item.message || 'No error details provided by server';
+                    const errorMsg = item.error || item.message || 'Unknown error';
                     const fileName = item.file || item.filename || 'Unknown file';
-                    
-                    if (item.status === 'failed' && !item.error && !item.message) {
-                        log(`❌ Error with ${fileName}: Sync failed - check backend logs for details`, 'error');
-                        log(`   Server returned failed status without error message`, 'error');
-                        log(`   File details: ${JSON.stringify(item, null, 2)}`, 'error');
-                    } else {
-                        log(`❌ Error with ${fileName}: ${errorMsg}`, 'error');
-                    }
+                    log(`❌ Error with ${fileName}: ${errorMsg}`, 'error');
                     
                     // Log additional error details if available
                     if (item.details) {
@@ -850,10 +711,6 @@ async function startSync() {
             });
             
             log(`Sync completed! Processed: ${syncStats.processed}, Errors: ${syncStats.errors}`, 'success');
-            
-            if (keepTemp && syncStats.processed > 0) {
-                log(`Debug: Check /tmp/ directory on your server for downloaded files`, 'info');
-            }
             
             // Clear the sync queue after successful sync
             if (!dryRun && syncStats.errors === 0) {

@@ -80,22 +80,17 @@ async function compareFiles() {
     syncQueue = [];
     availableFiles = [];
     
-    // Create a map of target files for quick lookup using relative path
+    // Create a map of target files for quick lookup
     const targetFileMap = new Map();
     targetFiles.forEach(file => {
-        const relativePath = file.path || file.name;
-        targetFileMap.set(relativePath, file);
+        targetFileMap.set(file.name, file);
     });
     
     sourceFiles.forEach(sourceFile => {
-        const sourceRelativePath = sourceFile.path || sourceFile.name;
-        const targetFile = targetFileMap.get(sourceRelativePath);
+        const targetFile = targetFileMap.get(sourceFile.name);
         
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
-        
-        // Create a unique identifier for the file (using relative path)
-        const fileId = btoa(sourceRelativePath).replace(/[^a-zA-Z0-9]/g, ''); // Base64 encode and clean for HTML ID
         
         if (!targetFile) {
             // File missing on target
@@ -103,32 +98,29 @@ async function compareFiles() {
             fileItem.innerHTML = `
                 <div class="file-info">
                     <div class="file-name">${sourceFile.name}</div>
-                    <div class="file-path">${sourceRelativePath !== sourceFile.name ? sourceRelativePath : ''}</div>
                     <div class="file-size">${formatFileSize(sourceFile.size)} - Missing on target</div>
                 </div>
-                <button class="button add-to-sync-btn" onclick="addToSyncQueue('${fileId}', this)">Add to Sync</button>
+                <button class="button add-to-sync-btn" onclick="addToSyncQueue('${sourceFile.name}', this)">Add to Sync</button>
             `;
             // Add to available files but NOT to sync queue
-            availableFiles.push({ type: 'copy', file: sourceFile, id: fileId });
+            availableFiles.push({ type: 'copy', file: sourceFile });
         } else if (sourceFile.size !== targetFile.size) {
             // File size different
             fileItem.classList.add('different');
             fileItem.innerHTML = `
                 <div class="file-info">
                     <div class="file-name">${sourceFile.name}</div>
-                    <div class="file-path">${sourceRelativePath !== sourceFile.name ? sourceRelativePath : ''}</div>
                     <div class="file-size">Source: ${formatFileSize(sourceFile.size)} | Target: ${formatFileSize(targetFile.size)}</div>
                 </div>
-                <button class="button add-to-sync-btn" onclick="addToSyncQueue('${fileId}', this)">Add to Sync</button>
+                <button class="button add-to-sync-btn" onclick="addToSyncQueue('${sourceFile.name}', this)">Add to Sync</button>
             `;
             // Add to available files but NOT to sync queue
-            availableFiles.push({ type: 'update', file: sourceFile, id: fileId });
+            availableFiles.push({ type: 'update', file: sourceFile });
         } else {
             // File identical
             fileItem.innerHTML = `
                 <div class="file-info">
                     <div class="file-name">${sourceFile.name}</div>
-                    <div class="file-path">${sourceRelativePath !== sourceFile.name ? sourceRelativePath : ''}</div>
                     <div class="file-size">${formatFileSize(sourceFile.size)} - Identical</div>
                 </div>
                 <span style="color: #28a745;">✅ Synced</span>
@@ -139,14 +131,6 @@ async function compareFiles() {
     });
     
     log(`Comparison complete. Found ${availableFiles.length} files that can be synced`, 'success');
-    
-    // Debug: Log available files for sync
-    if (availableFiles.length > 0) {
-        log(`Debug: Available files for sync:`);
-        availableFiles.forEach((item, index) => {
-            log(`  ${index + 1}. ${item.type} - ${item.file.name} (path: ${item.file.path || 'no path'}) - ${formatFileSize(item.file.size)} - ID: ${item.id}`);
-        });
-    }
     
     // Disable sync button initially since no files are selected
     document.getElementById('syncButton').disabled = true;
@@ -181,7 +165,7 @@ function displayScannedFiles() {
                 <span>Size: ${formatFileSize(file.size)}</span>
                 <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
             </div>
-            <div class="scanned-file-path">${file.path || file.name}</div>
+            <div class="scanned-file-path">${file.path}</div>
         `;
         sourceFilesList.appendChild(fileItem);
     });
@@ -197,7 +181,7 @@ function displayScannedFiles() {
                 <span>Size: ${formatFileSize(file.size)}</span>
                 <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
             </div>
-            <div class="scanned-file-path">${file.path || file.name}</div>
+            <div class="scanned-file-path">${file.path}</div>
         `;
         targetFilesList.appendChild(fileItem);
     });
@@ -226,24 +210,24 @@ function clearScannedFiles() {
     log('Cleared all scanned file results', 'success');
 }
 
-function addToSyncQueue(fileId, buttonElement) {
-    // Find the file in availableFiles using the unique ID
-    const availableFile = availableFiles.find(item => item.id === fileId);
+function addToSyncQueue(filename, buttonElement) {
+    // Find the file in availableFiles
+    const availableFile = availableFiles.find(item => item.file.name === filename);
     if (!availableFile) {
-        log(`Error: File with ID ${fileId} not found in available files`, 'error');
+        log(`Error: File ${filename} not found in available files`, 'error');
         return;
     }
     
     // Check if already in sync queue
-    const alreadyInQueue = syncQueue.find(item => item.id === fileId);
+    const alreadyInQueue = syncQueue.find(item => item.file.name === filename);
     if (alreadyInQueue) {
-        log(`${availableFile.file.path || availableFile.file.name} is already in sync queue`, 'error');
+        log(`${filename} is already in sync queue`, 'error');
         return;
     }
     
     // Add to sync queue
     syncQueue.push(availableFile);
-    log(`Added ${availableFile.file.path || availableFile.file.name} to sync queue (${syncQueue.length} files selected)`);
+    log(`Added ${filename} to sync queue (${syncQueue.length} files selected)`);
     
     // Update button appearance and disable it
     if (buttonElement) {
@@ -259,18 +243,17 @@ function addToSyncQueue(fileId, buttonElement) {
     updateSyncButtonState();
 }
 
-function removeFromSyncQueue(fileId) {
+function removeFromSyncQueue(filename) {
     // Remove from sync queue
-    const index = syncQueue.findIndex(item => item.id === fileId);
+    const index = syncQueue.findIndex(item => item.file.name === filename);
     if (index !== -1) {
-        const file = syncQueue[index];
         syncQueue.splice(index, 1);
-        log(`Removed ${file.file.path || file.file.name} from sync queue (${syncQueue.length} files selected)`);
+        log(`Removed ${filename} from sync queue (${syncQueue.length} files selected)`);
         
         // Find and re-enable the button
         const buttons = document.querySelectorAll('.add-to-sync-btn');
         buttons.forEach(button => {
-            if (button.onclick && button.onclick.toString().includes(fileId)) {
+            if (button.onclick && button.onclick.toString().includes(filename)) {
                 button.textContent = 'Add to Sync';
                 button.className = 'button add-to-sync-btn';
                 button.disabled = false;
@@ -297,14 +280,14 @@ function updateSyncButtonState() {
 function addAllToSyncQueue() {
     // Add all available files to sync queue
     availableFiles.forEach(item => {
-        const alreadyInQueue = syncQueue.find(queueItem => queueItem.id === item.id);
+        const alreadyInQueue = syncQueue.find(queueItem => queueItem.file.name === item.file.name);
         if (!alreadyInQueue) {
             syncQueue.push(item);
             
             // Update corresponding button
             const buttons = document.querySelectorAll('.add-to-sync-btn');
             buttons.forEach(button => {
-                if (button.onclick && button.onclick.toString().includes(item.id) && !button.disabled) {
+                if (button.onclick && button.onclick.toString().includes(item.file.name) && !button.disabled) {
                     button.textContent = 'Added to Sync';
                     button.className = 'button add-to-sync-btn added';
                     button.disabled = true;
@@ -344,9 +327,6 @@ function stopSync() {
 
 // Configuration management functions
 async function loadConfig() {
-    const loadButton = document.querySelector('button[onclick="loadConfig()"]');
-    const originalText = loadButton.textContent;
-    
     try {
         log('Loading configuration...');
         const response = await fetch('http://127.0.0.1:5000/api/config');
@@ -355,54 +335,15 @@ async function loadConfig() {
         if (result.success) {
             populateFormFromConfig(result.config);
             log('✅ Configuration loaded successfully', 'success');
-            
-            // Update button to show success
-            loadButton.textContent = '✅ Config Loaded';
-            loadButton.style.backgroundColor = '#28a745';
-            loadButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                loadButton.textContent = originalText;
-                loadButton.style.backgroundColor = '';
-                loadButton.style.color = '';
-            }, 3000);
         } else {
             log(`❌ Failed to load config: ${result.message}`, 'error');
-            
-            // Show error state
-            loadButton.textContent = '❌ Load Failed';
-            loadButton.style.backgroundColor = '#dc3545';
-            loadButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                loadButton.textContent = originalText;
-                loadButton.style.backgroundColor = '';
-                loadButton.style.color = '';
-            }, 3000);
         }
     } catch (error) {
         log(`❌ Error loading config: ${error.message}`, 'error');
-        
-        // Show error state
-        loadButton.textContent = '❌ Load Failed';
-        loadButton.style.backgroundColor = '#dc3545';
-        loadButton.style.color = 'white';
-        
-        // Reset button after 3 seconds
-        setTimeout(() => {
-            loadButton.textContent = originalText;
-            loadButton.style.backgroundColor = '';
-            loadButton.style.color = '';
-        }, 3000);
     }
 }
 
 async function saveConfig() {
-    const saveButton = document.querySelector('button[onclick="saveConfig()"]');
-    const originalText = saveButton.textContent;
-    
     try {
         log('Saving configuration...');
         const config = getConfigFromForm();
@@ -417,47 +358,11 @@ async function saveConfig() {
         
         if (result.success) {
             log('✅ Configuration saved successfully', 'success');
-            
-            // Update button to show success
-            saveButton.textContent = '✅ Config Saved';
-            saveButton.style.backgroundColor = '#28a745';
-            saveButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                saveButton.textContent = originalText;
-                saveButton.style.backgroundColor = '';
-                saveButton.style.color = '';
-            }, 3000);
         } else {
             log(`❌ Failed to save config: ${result.message}`, 'error');
-            
-            // Show error state
-            saveButton.textContent = '❌ Save Failed';
-            saveButton.style.backgroundColor = '#dc3545';
-            saveButton.style.color = 'white';
-            
-            // Reset button after 3 seconds
-            setTimeout(() => {
-                saveButton.textContent = originalText;
-                saveButton.style.backgroundColor = '';
-                saveButton.style.color = '';
-            }, 3000);
         }
     } catch (error) {
         log(`❌ Error saving config: ${error.message}`, 'error');
-        
-        // Show error state
-        saveButton.textContent = '❌ Save Failed';
-        saveButton.style.backgroundColor = '#dc3545';
-        saveButton.style.color = 'white';
-        
-        // Reset button after 3 seconds
-        setTimeout(() => {
-            saveButton.textContent = originalText;
-            saveButton.style.backgroundColor = '';
-            saveButton.style.color = '';
-        }, 3000);
     }
 }
 
@@ -571,28 +476,18 @@ function resetForm() {
 
 // API Functions for backend integration
 async function testConnection(serverType) {
-    const testButton = document.querySelector(`button[onclick="testConnection('${serverType}')"]`);
-    const originalText = testButton.textContent;
-    
     const config = {
         server_type: serverType,
         host: document.getElementById(`${serverType}Host`).value,
         port: document.getElementById(`${serverType}Port`).value,
         user: document.getElementById(`${serverType}User`).value,
-        password: document.getElementById(`${serverType}Pass`).value,
-        path: document.getElementById(`${serverType}Path`).value
+        password: document.getElementById(`${serverType}Pass`).value
     };
     
     if (!config.host || !config.user || !config.password) {
         log(`Please fill in all ${serverType} server details`, 'error');
         return;
     }
-    
-    // Show loading state
-    testButton.textContent = 'Testing...';
-    testButton.style.backgroundColor = '#007bff';
-    testButton.style.color = 'white';
-    testButton.disabled = true;
     
     log(`Testing connection to ${serverType} server (${config.host}:${config.port})...`);
     
@@ -607,51 +502,12 @@ async function testConnection(serverType) {
         
         if (result.success) {
             log(`✅ ${result.message}`, 'success');
-            
-            // Show success state
-            testButton.textContent = '✅ Connected';
-            testButton.style.backgroundColor = '#28a745';
-            testButton.style.color = 'white';
-            
-            // Reset button after 5 seconds
-            setTimeout(() => {
-                testButton.textContent = originalText;
-                testButton.style.backgroundColor = '';
-                testButton.style.color = '';
-                testButton.disabled = false;
-            }, 5000);
         } else {
             log(`❌ ${result.message}`, 'error');
-            
-            // Show error state
-            testButton.textContent = '❌ Failed';
-            testButton.style.backgroundColor = '#dc3545';
-            testButton.style.color = 'white';
-            
-            // Reset button after 5 seconds
-            setTimeout(() => {
-                testButton.textContent = originalText;
-                testButton.style.backgroundColor = '';
-                testButton.style.color = '';
-                testButton.disabled = false;
-            }, 5000);
         }
     } catch (error) {
         log(`❌ Connection test failed: ${error.message}`, 'error');
         log('Make sure the Python backend is running on 127.0.0.1:5000', 'error');
-        
-        // Show error state
-        testButton.textContent = '❌ Failed';
-        testButton.style.backgroundColor = '#dc3545';
-        testButton.style.color = 'white';
-        
-        // Reset button after 5 seconds
-        setTimeout(() => {
-            testButton.textContent = originalText;
-            testButton.style.backgroundColor = '';
-            testButton.style.color = '';
-            testButton.disabled = false;
-        }, 5000);
     }
 }
 
@@ -708,14 +564,6 @@ async function scanFiles() {
         sourceFiles = sourceResult.files;
         log(`Found ${sourceFiles.length} files on source server`);
         
-        // Debug: Log a sample of source files
-        if (sourceFiles.length > 0) {
-            log(`Debug: Sample source files (first 3):`);
-            sourceFiles.slice(0, 3).forEach((file, index) => {
-                log(`  ${index + 1}. ${JSON.stringify(file, null, 2)}`);
-            });
-        }
-        
         // Scan target server
         log(`Scanning target server: ${targetHost}${targetPath}`);
         const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
@@ -736,14 +584,6 @@ async function scanFiles() {
         targetFiles = targetResult.files;
         log(`Found ${targetFiles.length} files on target server`);
         
-        // Debug: Log a sample of target files
-        if (targetFiles.length > 0) {
-            log(`Debug: Sample target files (first 3):`);
-            targetFiles.slice(0, 3).forEach((file, index) => {
-                log(`  ${index + 1}. ${JSON.stringify(file, null, 2)}`);
-            });
-        }
-        
         log('File scan completed', 'success');
         
         // Display scanned files
@@ -763,7 +603,6 @@ async function startSync() {
     if (isSyncing || syncQueue.length === 0) return;
     
     const dryRun = document.getElementById('dryRun').checked;
-    const keepTemp = document.getElementById('keepTempFiles') ? document.getElementById('keepTempFiles').checked : false;
     
     isSyncing = true;
     document.getElementById('syncButton').disabled = true;
@@ -772,52 +611,22 @@ async function startSync() {
     syncStats = { processed: 0, total: syncQueue.length, errors: 0 };
     
     log(`Starting ${dryRun ? 'dry run' : 'sync'} of ${syncQueue.length} selected files...`);
-    if (keepTemp) {
-        log(`Debug mode: Keeping temp files in /tmp/ for inspection`);
-    }
-    
-    // Log the sync queue for debugging
-    log(`Debug: Sync queue contents:`);
-    syncQueue.forEach((item, index) => {
-        log(`  ${index + 1}. ${item.type} - ${item.file.name} (${item.file.path || 'no path'}) - ${formatFileSize(item.file.size)}`);
-    });
     
     try {
-        const requestBody = {
-            sync_queue: syncQueue,
-            dry_run: dryRun,
-            keep_temp_files: keepTemp
-        };
-        
-        log(`Debug: Request body: ${JSON.stringify(requestBody, null, 2)}`);
-        
         const response = await fetch('http://127.0.0.1:5000/api/sync-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify({
+                sync_queue: syncQueue,
+                dry_run: dryRun
+            })
         });
         
-        log(`Debug: Response status: ${response.status}`);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            log(`Debug: Response error text: ${errorText}`, 'error');
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-        
         const result = await response.json();
-        log(`Debug: Full response: ${JSON.stringify(result, null, 2)}`);
         
         if (result.success) {
-            if (!result.results || result.results.length === 0) {
-                log('Debug: No results returned from sync operation', 'error');
-                return;
-            }
-            
             result.results.forEach((item, index) => {
                 updateProgress(index + 1, result.results.length);
-                
-                log(`Debug: Processing result ${index + 1}: ${JSON.stringify(item, null, 2)}`);
                 
                 if (item.status === 'would_sync') {
                     log(`[DRY RUN] Would ${item.action} ${item.file} (${formatFileSize(item.size)})`);
@@ -825,53 +634,23 @@ async function startSync() {
                     log(`✅ ${item.action === 'copy' ? 'Copied' : 'Updated'} ${item.file}`, 'success');
                     syncStats.processed++;
                 } else {
-                    // Enhanced error logging
-                    const errorMsg = item.error || item.message || 'No error details provided by server';
-                    const fileName = item.file || item.filename || 'Unknown file';
-                    
-                    if (item.status === 'failed' && !item.error && !item.message) {
-                        log(`❌ Error with ${fileName}: Sync failed - check backend logs for details`, 'error');
-                        log(`   Server returned failed status without error message`, 'error');
-                        log(`   File details: ${JSON.stringify(item, null, 2)}`, 'error');
-                    } else {
-                        log(`❌ Error with ${fileName}: ${errorMsg}`, 'error');
-                    }
-                    
-                    // Log additional error details if available
-                    if (item.details) {
-                        log(`   Error details: ${item.details}`, 'error');
-                    }
-                    if (item.traceback) {
-                        log(`   Traceback: ${item.traceback}`, 'error');
-                    }
-                    
+                    log(`❌ Error with ${item.file}: ${item.error || 'Unknown error'}`, 'error');
                     syncStats.errors++;
                 }
             });
             
             log(`Sync completed! Processed: ${syncStats.processed}, Errors: ${syncStats.errors}`, 'success');
             
-            if (keepTemp && syncStats.processed > 0) {
-                log(`Debug: Check /tmp/ directory on your server for downloaded files`, 'info');
-            }
-            
             // Clear the sync queue after successful sync
-            if (!dryRun && syncStats.errors === 0) {
+            if (!dryRun) {
                 clearSyncQueue();
             }
         } else {
-            log(`Sync failed: ${result.message || 'Unknown error'}`, 'error');
-            if (result.details) {
-                log(`Error details: ${result.details}`, 'error');
-            }
-            if (result.traceback) {
-                log(`Traceback: ${result.traceback}`, 'error');
-            }
+            log(`Sync failed: ${result.message}`, 'error');
         }
         
     } catch (error) {
         log(`Sync error: ${error.message}`, 'error');
-        log(`Debug: Full error object: ${JSON.stringify(error, null, 2)}`, 'error');
     }
     
     isSyncing = false;

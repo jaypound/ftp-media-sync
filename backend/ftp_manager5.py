@@ -140,7 +140,6 @@ class FTPManager:
             
             # Change to the base directory (from config)
             base_path = self.config.get('path', '/')
-            logger.debug(f"Config contents: {self.config}")
             logger.debug(f"Changing to base directory: {base_path}")
             try:
                 self.ftp.cwd(base_path)
@@ -163,9 +162,7 @@ class FTPManager:
                     
                 # Change to the target directory for upload
                 try:
-                    target_dir = os.path.join(base_path, remote_dir).replace('\\', '/')
-                    logger.debug(f"Changing to target directory: {target_dir}")
-                    self.ftp.cwd(target_dir)
+                    self.ftp.cwd(os.path.join(base_path, remote_dir).replace('\\', '/'))
                     upload_dir = self.ftp.pwd()
                     logger.debug(f"Changed to upload directory: {upload_dir}")
                     # Upload just the filename since we're in the right directory
@@ -225,13 +222,9 @@ class FTPManager:
                 return False
         
         try:
-            # Get current directory as base
-            base_dir = self.ftp.pwd()
-            logger.debug(f"Creating directory '{path}' relative to: {base_dir}")
-            
             # Split path into parts and create each level
             parts = path.strip('/').split('/')
-            current_path = base_dir.rstrip('/')
+            current_path = ''
             
             for part in parts:
                 if part:  # Skip empty parts
@@ -251,47 +244,32 @@ class FTPManager:
             logger.error(f"Error creating directory {path}: {str(e)}")
             return False
     
-    def copy_file_to(self, file_info, target_ftp, keep_temp=False):
+    def copy_file_to(self, file_info, target_ftp):
         """Copy file to another FTP server"""
         try:
             # Use the full_path for download, but path for upload (relative path)
             source_path = file_info.get('full_path', file_info.get('path', file_info['name']))
             target_path = file_info.get('path', file_info['name'])
             
-            logger.debug(f"=== COPY FILE DEBUG ===")
-            logger.debug(f"Source path: {source_path}")
-            logger.debug(f"Target path: {target_path}")
-            logger.debug(f"File info: {file_info}")
-            logger.debug(f"Keep temp file: {keep_temp}")
+            logger.debug(f"Copying file: {source_path} -> {target_path}")
             
             # Download to temp file
             temp_path = f"/tmp/{file_info['name']}"
-            logger.debug(f"Temp file path: {temp_path}")
             
-            logger.debug(f"Starting download from source...")
             if self.download_file(source_path, temp_path):
-                logger.debug(f"Download successful, starting upload to target...")
                 success = target_ftp.upload_file(temp_path, target_path)
-                logger.debug(f"Upload result: {success}")
-                
-                if not keep_temp:
-                    try:
-                        os.remove(temp_path)  # Clean up temp file
-                        logger.debug(f"Cleaned up temp file")
-                    except:
-                        pass
-                else:
-                    logger.debug(f"Keeping temp file for debugging: {temp_path}")
-                    
+                try:
+                    os.remove(temp_path)  # Clean up temp file
+                except:
+                    pass
                 return success
-            else:
-                logger.error(f"Download failed for {source_path}")
-                return False
+            
+            return False
             
         except Exception as e:
-            logger.error(f"Copy failed: {str(e)}", exc_info=True)
+            logger.error(f"Copy failed: {str(e)}")
             return False
-        
+    
     def update_file_to(self, file_info, target_ftp, keep_temp=False):
         """Update file on another FTP server"""
         return self.copy_file_to(file_info, target_ftp, keep_temp)  # Same as copy for now

@@ -131,28 +131,9 @@ class FTPManager:
             if os.path.exists(local_path):
                 logger.debug(f"Local file size: {os.path.getsize(local_path)} bytes")
             
-            # Get current working directory before we start
-            try:
-                current_dir = self.ftp.pwd()
-                logger.debug(f"Current FTP directory before upload: {current_dir}")
-            except Exception as e:
-                logger.debug(f"Could not get current directory: {e}")
-            
-            # Change to the base directory (from config)
-            base_path = self.config.get('path', '/')
-            logger.debug(f"Config contents: {self.config}")
-            logger.debug(f"Changing to base directory: {base_path}")
-            try:
-                self.ftp.cwd(base_path)
-                new_dir = self.ftp.pwd()
-                logger.debug(f"Now in directory: {new_dir}")
-            except Exception as e:
-                logger.error(f"Failed to change to base directory {base_path}: {e}")
-                return False
-            
             # Create directory if it doesn't exist
             remote_dir = os.path.dirname(remote_path)
-            logger.debug(f"Remote directory to create: {remote_dir}")
+            logger.debug(f"Remote directory: {remote_dir}")
             
             if remote_dir and remote_dir != '/' and remote_dir != '.':
                 logger.debug(f"Creating remote directory: {remote_dir}")
@@ -160,33 +141,24 @@ class FTPManager:
                 if not success:
                     logger.error(f"Failed to create directory: {remote_dir}")
                     return False
-                    
-                # Change to the target directory for upload
-                try:
-                    target_dir = os.path.join(base_path, remote_dir).replace('\\', '/')
-                    logger.debug(f"Changing to target directory: {target_dir}")
-                    self.ftp.cwd(target_dir)
-                    upload_dir = self.ftp.pwd()
-                    logger.debug(f"Changed to upload directory: {upload_dir}")
-                    # Upload just the filename since we're in the right directory
-                    upload_filename = os.path.basename(remote_path)
-                except Exception as e:
-                    logger.error(f"Failed to change to upload directory: {e}")
-                    return False
-            else:
-                # Uploading to root directory
-                upload_filename = remote_path
+            
+            # Get current working directory
+            try:
+                current_dir = self.ftp.pwd()
+                logger.debug(f"Current FTP directory: {current_dir}")
+            except Exception as e:
+                logger.debug(f"Could not get current directory: {e}")
             
             # Upload the file
-            logger.debug(f"Starting upload with STOR command for: {upload_filename}")
+            logger.debug(f"Starting upload with STOR command...")
             with open(local_path, 'rb') as local_file:
-                result = self.ftp.storbinary(f'STOR {upload_filename}', local_file)
+                result = self.ftp.storbinary(f'STOR {remote_path}', local_file)
                 logger.debug(f"STOR command result: {result}")
             
             # Verify the upload by checking if file exists
             try:
                 logger.debug(f"Verifying upload by checking file size...")
-                remote_size = self.ftp.size(upload_filename)
+                remote_size = self.ftp.size(remote_path)
                 local_size = os.path.getsize(local_path)
                 logger.debug(f"Remote file size: {remote_size}, Local file size: {local_size}")
                 
@@ -203,7 +175,7 @@ class FTPManager:
                 try:
                     logger.debug(f"Trying alternative verification with LIST...")
                     file_list = []
-                    self.ftp.retrlines(f'LIST {upload_filename}', file_list.append)
+                    self.ftp.retrlines(f'LIST {remote_path}', file_list.append)
                     if file_list:
                         logger.debug(f"File exists in LIST: {file_list[0]}")
                         return True
@@ -225,13 +197,9 @@ class FTPManager:
                 return False
         
         try:
-            # Get current directory as base
-            base_dir = self.ftp.pwd()
-            logger.debug(f"Creating directory '{path}' relative to: {base_dir}")
-            
             # Split path into parts and create each level
             parts = path.strip('/').split('/')
-            current_path = base_dir.rstrip('/')
+            current_path = ''
             
             for part in parts:
                 if part:  # Skip empty parts
@@ -291,7 +259,7 @@ class FTPManager:
         except Exception as e:
             logger.error(f"Copy failed: {str(e)}", exc_info=True)
             return False
-        
+    
     def update_file_to(self, file_info, target_ftp, keep_temp=False):
         """Update file on another FTP server"""
         return self.copy_file_to(file_info, target_ftp, keep_temp)  # Same as copy for now

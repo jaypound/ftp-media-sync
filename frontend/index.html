@@ -20,6 +20,7 @@
                 <button class="button" onclick="saveConfig()">Save Config</button>
                 <button class="button secondary" onclick="createSampleConfig()">Create Sample</button>
                 <button class="button secondary" onclick="resetForm()">Reset Form</button>
+        
             </div>
         </div>
 
@@ -103,6 +104,11 @@
                 <input type="checkbox" id="dryRun" checked>
                 <label for="dryRun">Dry run (preview changes without actual sync)</label>
             </div>
+            <div class="checkbox-group">
+                <label>
+                    <input type="checkbox" id="keepTempFiles"> Keep temp files for debugging
+                </label>
+        </div>
         </div>
 
         <div class="card">
@@ -110,6 +116,8 @@
             <div class="sync-controls">
                 <button class="button" onclick="scanFiles()">Scan Files</button>
                 <button class="button" onclick="compareFiles()" disabled>Compare Files</button>
+                <button type="button" class="button" onclick="addAllToSyncQueue()">Add All to Sync</button>
+                <button type="button" class="button" onclick="clearSyncQueue()">Clear Sync Queue</button>   
                 <button class="button" onclick="startSync()" id="syncButton" disabled>Start Sync</button>
                 <button class="button danger" onclick="stopSync()" id="stopButton" disabled>Stop Sync</button>
                 <button class="button secondary" onclick="clearScannedFiles()">Clear Results</button>
