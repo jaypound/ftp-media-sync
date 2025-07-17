@@ -284,6 +284,10 @@ function removeFromSyncQueue(fileId) {
 
 function updateSyncButtonState() {
     const syncButton = document.getElementById('syncButton');
+    const addAllButton = document.getElementById('addAllButton');
+    const addFolderButton = document.getElementById('addFolderButton');
+    
+    // Update sync button
     syncButton.disabled = syncQueue.length === 0;
     
     // Update button text to show count
@@ -292,29 +296,94 @@ function updateSyncButtonState() {
     } else {
         syncButton.textContent = 'Start Sync';
     }
+    
+    // Update add all button
+    if (addAllButton) {
+        const remainingFiles = availableFiles.length - syncQueue.length;
+        addAllButton.disabled = remainingFiles === 0;
+        if (remainingFiles > 0) {
+            addAllButton.textContent = `Add All (${remainingFiles} files)`;
+        } else {
+            addAllButton.textContent = 'Add All';
+        }
+    }
+    
+    // Update add folder button
+    if (addFolderButton) {
+        const folderStats = getFolderStats();
+        if (folderStats && folderStats.availableToAdd > 0) {
+            addFolderButton.disabled = false;
+            addFolderButton.textContent = `Add Folder (${folderStats.availableToAdd} files)`;
+            addFolderButton.title = `Add all files from "${folderStats.folderPath}" folder`;
+        } else if (folderStats) {
+            addFolderButton.disabled = true;
+            addFolderButton.textContent = 'Add Folder (0 files)';
+            addFolderButton.title = `All files from "${folderStats.folderPath}" already added`;
+        } else {
+            addFolderButton.disabled = true;
+            addFolderButton.textContent = 'Add Folder';
+            addFolderButton.title = 'Add a file first to determine folder';
+        }
+    }
 }
 
-function addAllToSyncQueue() {
-    // Add all available files to sync queue
+function addAllFromFolderToSyncQueue() {
+    if (syncQueue.length === 0) {
+        log('No files in sync queue - add a file first to determine the folder', 'error');
+        return;
+    }
+    
+    // Get the folder path from the last added file
+    const lastFile = syncQueue[syncQueue.length - 1];
+    const targetFolderPath = lastFile.file.path ? 
+        lastFile.file.path.substring(0, lastFile.file.path.lastIndexOf('/')) : 
+        '';
+    
+    // If the file is in root directory, handle appropriately
+    const isRootFile = !targetFolderPath;
+    
+    log(`Adding all files from folder: ${targetFolderPath || 'root directory'}`);
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Find all available files in the same folder
     availableFiles.forEach(item => {
-        const alreadyInQueue = syncQueue.find(queueItem => queueItem.id === item.id);
-        if (!alreadyInQueue) {
-            syncQueue.push(item);
-            
-            // Update corresponding button
-            const buttons = document.querySelectorAll('.add-to-sync-btn');
-            buttons.forEach(button => {
-                if (button.onclick && button.onclick.toString().includes(item.id) && !button.disabled) {
-                    button.textContent = 'Added to Sync';
-                    button.className = 'button add-to-sync-btn added';
-                    button.disabled = true;
-                    button.innerHTML = '✅ Added to Sync';
-                }
-            });
+        const itemFolderPath = item.file.path ? 
+            item.file.path.substring(0, item.file.path.lastIndexOf('/')) : 
+            '';
+        
+        // Check if file is in the same folder
+        const isSameFolder = isRootFile ? !itemFolderPath : itemFolderPath === targetFolderPath;
+        
+        if (isSameFolder) {
+            // Check if already in sync queue
+            const alreadyInQueue = syncQueue.find(queueItem => queueItem.id === item.id);
+            if (!alreadyInQueue) {
+                syncQueue.push(item);
+                addedCount++;
+                
+                // Update corresponding button
+                const buttons = document.querySelectorAll('.add-to-sync-btn');
+                buttons.forEach(button => {
+                    if (button.onclick && button.onclick.toString().includes(item.id) && !button.disabled) {
+                        button.textContent = 'Added to Sync';
+                        button.className = 'button add-to-sync-btn added';
+                        button.disabled = true;
+                        button.innerHTML = '✅ Added to Sync';
+                    }
+                });
+            } else {
+                skippedCount++;
+            }
         }
     });
     
-    log(`Added all ${availableFiles.length} files to sync queue`);
+    log(`Added ${addedCount} files from folder "${targetFolderPath || 'root'}" to sync queue`);
+    if (skippedCount > 0) {
+        log(`Skipped ${skippedCount} files (already in queue)`);
+    }
+    
     updateSyncButtonState();
 }
 
