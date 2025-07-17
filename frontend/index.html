@@ -3,42 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FTP Media Server Sync</title>
+    <title>FTP Media Sync for Castus Servers</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔄 FTP Media Server Sync</h1>
-            <p>Synchronize files between two FTP media servers</p>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <i class="fas fa-sync-alt"></i>
+                <span>FTP Media Sync for Castus Servers</span>
+            </div>
+            <div class="nav-menu">
+                <button class="nav-item active" onclick="showPanel('dashboard')">
+                    <i class="fas fa-home"></i>
+                    Dashboard
+                </button>
+                <button class="nav-item" onclick="showPanel('servers')">
+                    <i class="fas fa-server"></i>
+                    Servers
+                </button>
+                <button class="nav-item" onclick="showPanel('settings')">
+                    <i class="fas fa-cog"></i>
+                    Settings
+                </button>
+                <button class="nav-item" onclick="showPanel('admin')">
+                    <i class="fas fa-tools"></i>
+                    Admin
+                </button>
+                <button class="nav-item dark-mode-toggle" onclick="toggleDarkMode()" id="darkModeToggle">
+                    <i class="fas fa-moon"></i>
+                    Dark
+                </button>
+            </div>
         </div>
+    </nav>
 
-        <div class="card">
-            <h3>⚙️ Configuration Management</h3>
-            <div class="sync-controls">
-                <button class="button" onclick="loadConfig()">Load Config</button>
-                <button class="button" onclick="saveConfig()">Save Config</button>
-                <button class="button secondary" onclick="createSampleConfig()">Create Sample</button>
-                <button class="button secondary" onclick="resetForm()">Reset Form</button>
-        
+    <div class="container">
+
+        <!-- Dashboard Panel -->
+        <div id="dashboard" class="panel active">
+            <div class="panel-header">
+                <h2><i class="fas fa-home"></i> Dashboard</h2>
+                <p>Monitor and control your FTP synchronization</p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-server"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="sourceStatus">Source Server</h3>
+                        <p id="sourceStatusText">Not Connected</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-server"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="targetStatus">Target Server</h3>
+                        <p id="targetStatusText">Not Connected</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-file"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="fileCount">Files Scanned</h3>
+                        <p id="fileCountText">0 files</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-sync-alt"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3 id="syncStatus">Sync Queue</h3>
+                        <p id="syncStatusText">0 files queued</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3><i class="fas fa-search"></i> File Analysis</h3>
+                <div class="action-buttons">
+                    <button class="button primary" onclick="scanFiles()">
+                        <i class="fas fa-search"></i> Scan Files
+                    </button>
+                    <button class="button" onclick="compareFiles()" disabled>
+                        <i class="fas fa-balance-scale"></i> Compare Files
+                    </button>
+                    <button class="button success" onclick="addAllToSyncQueue()">
+                        <i class="fas fa-plus"></i> Add All to Sync
+                    </button>
+                    <button class="button" id="addFolderButton" onclick="addAllFromFolderToSyncQueue()" disabled>
+                        <i class="fas fa-folder-plus"></i> Add Folder
+                    </button>
+                    <button class="button warning" onclick="clearSyncQueue()">
+                        <i class="fas fa-trash"></i> Clear Queue
+                    </button>
+                </div>
+                
+                <div class="sync-actions">
+                    <button class="button primary large" onclick="startSync()" id="syncButton" disabled>
+                        <i class="fas fa-sync-alt"></i> Start Sync
+                    </button>
+                    <button class="button danger" onclick="stopSync()" id="stopButton" disabled>
+                        <i class="fas fa-stop"></i> Stop Sync
+                    </button>
+                    <button class="button secondary" onclick="clearScannedFiles()">
+                        <i class="fas fa-broom"></i> Clear Results
+                    </button>
+                </div>
+                
+                <div class="progress-container" id="progressContainer" style="display: none;">
+                    <div class="progress-text" id="progressText">Preparing sync...</div>
+                    <div class="progress-bar" id="progressBar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-stats" id="progressStats">0 / 0 files</div>
+                </div>
             </div>
         </div>
 
-        <div class="card">
-            <div class="server-config">
-                <div class="server-section">
-                    <h3>📁 Source Server</h3>
+        <!-- Servers Panel -->
+        <div id="servers" class="panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-server"></i> Server Configuration</h2>
+                <p>Configure your source and target FTP servers</p>
+            </div>
+            
+            <div class="server-grid">
+                <div class="server-card">
+                    <div class="server-header">
+                        <h3><i class="fas fa-upload"></i> Source Server</h3>
+                        <button class="button small" onclick="testConnection('source')" id="sourceTestBtn">
+                            <i class="fas fa-plug"></i> Test Connection
+                        </button>
+                    </div>
                     <div class="form-group">
                         <label for="sourceHost">Host</label>
                         <input type="text" id="sourceHost" placeholder="192.168.1.100" value="192.168.1.100">
                     </div>
-                    <div class="form-group">
-                        <label for="sourcePort">Port</label>
-                        <input type="number" id="sourcePort" placeholder="21" value="21">
-                    </div>
-                    <div class="form-group">
-                        <label for="sourceUser">Username</label>
-                        <input type="text" id="sourceUser" placeholder="username">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sourcePort">Port</label>
+                            <input type="number" id="sourcePort" placeholder="21" value="21">
+                        </div>
+                        <div class="form-group">
+                            <label for="sourceUser">Username</label>
+                            <input type="text" id="sourceUser" placeholder="username">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="sourcePass">Password</label>
@@ -48,22 +167,28 @@
                         <label for="sourcePath">Path</label>
                         <input type="text" id="sourcePath" placeholder="/media/videos" value="/media/videos">
                     </div>
-                    <button class="button secondary" onclick="testConnection('source')">Test Connection</button>
                 </div>
 
-                <div class="server-section">
-                    <h3>📂 Target Server</h3>
+                <div class="server-card">
+                    <div class="server-header">
+                        <h3><i class="fas fa-download"></i> Target Server</h3>
+                        <button class="button small" onclick="testConnection('target')" id="targetTestBtn">
+                            <i class="fas fa-plug"></i> Test Connection
+                        </button>
+                    </div>
                     <div class="form-group">
                         <label for="targetHost">Host</label>
                         <input type="text" id="targetHost" placeholder="192.168.1.101" value="192.168.1.101">
                     </div>
-                    <div class="form-group">
-                        <label for="targetPort">Port</label>
-                        <input type="number" id="targetPort" placeholder="21" value="21">
-                    </div>
-                    <div class="form-group">
-                        <label for="targetUser">Username</label>
-                        <input type="text" id="targetUser" placeholder="username">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="targetPort">Port</label>
+                            <input type="number" id="targetPort" placeholder="21" value="21">
+                        </div>
+                        <div class="form-group">
+                            <label for="targetUser">Username</label>
+                            <input type="text" id="targetUser" placeholder="username">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="targetPass">Password</label>
@@ -73,75 +198,115 @@
                         <label for="targetPath">Path</label>
                         <input type="text" id="targetPath" placeholder="/media/videos" value="/media/videos">
                     </div>
-                    <button class="button secondary" onclick="testConnection('target')">Test Connection</button>
                 </div>
             </div>
         </div>
 
-        <div class="card">
-            <h3>⚙️ Sync Settings</h3>
-            <div class="form-group">
-                <label for="fileFilter">File Filter (extensions, comma-separated)</label>
-                <input type="text" id="fileFilter" placeholder="mp4,mkv,avi,mov,wmv" value="mp4,mkv,avi,mov,wmv">
-            </div>
-            <div class="form-group">
-                <label for="minFileSize">Minimum File Size (MB)</label>
-                <input type="number" id="minFileSize" placeholder="1" value="1">
-            </div>
-            <div class="form-group">
-                <label for="maxFileSize">Maximum File Size (GB)</label>
-                <input type="number" id="maxFileSize" placeholder="50" value="50">
-            </div>
-            <div class="checkbox-group">
-                <input type="checkbox" id="includeSubdirs" checked>
-                <label for="includeSubdirs">Include subdirectories</label>
-            </div>
-            <div class="checkbox-group">
-                <input type="checkbox" id="overwriteExisting">
-                <label for="overwriteExisting">Overwrite existing files with size differences</label>
-            </div>
-            <div class="checkbox-group">
-                <input type="checkbox" id="dryRun" checked>
-                <label for="dryRun">Dry run (preview changes without actual sync)</label>
-            </div>
-            <div class="checkbox-group">
-                <label>
-                    <input type="checkbox" id="keepTempFiles"> Keep temp files for debugging
-                </label>
-        </div>
-        </div>
-
-        <div class="card">
-            <h3>🔍 File Analysis</h3>
-            <div class="sync-controls">
-                <button class="button" onclick="scanFiles()">Scan Files</button>
-                <button class="button" onclick="compareFiles()" disabled>Compare Files</button>
-                <button type="button" class="button" onclick="addAllToSyncQueue()">Add All to Sync</button>
-                <button type="button" id="addFolderButton" class="button" onclick="addAllFromFolderToSyncQueue()" disabled title="Add a file first to determine folder">
-                    Add Folder
-                </button>
-                <button type="button" class="button" onclick="clearSyncQueue()">Clear Sync Queue</button>   
-                <button class="button" onclick="startSync()" id="syncButton" disabled>Start Sync</button>
-                <button class="button danger" onclick="stopSync()" id="stopButton" disabled>Stop Sync</button>
-                <button class="button secondary" onclick="clearScannedFiles()">Clear Results</button>
+        <!-- Settings Panel -->
+        <div id="settings" class="panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-cog"></i> Sync Settings</h2>
+                <p>Configure file filtering and synchronization options</p>
             </div>
             
-            <div class="progress-bar" id="progressBar" style="display: none;">
-                <div class="progress-fill" id="progressFill"></div>
+            <div class="settings-grid">
+                <div class="settings-card">
+                    <h3><i class="fas fa-filter"></i> File Filters</h3>
+                    <div class="form-group">
+                        <label for="fileFilter">File Extensions</label>
+                        <input type="text" id="fileFilter" placeholder="mp4,mkv,avi,mov,wmv" value="mp4,mkv,avi,mov,wmv">
+                        <small>Comma-separated list of file extensions</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="minFileSize">Min Size (MB)</label>
+                            <input type="number" id="minFileSize" placeholder="1" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="maxFileSize">Max Size (GB)</label>
+                            <input type="number" id="maxFileSize" placeholder="50" value="50">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-card">
+                    <h3><i class="fas fa-sliders-h"></i> Sync Options</h3>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="includeSubdirs" checked>
+                        <label for="includeSubdirs">Include subdirectories</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="overwriteExisting">
+                        <label for="overwriteExisting">Overwrite existing files with size differences</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="dryRun" checked>
+                        <label for="dryRun">Dry run (preview changes without actual sync)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="keepTempFiles">
+                        <label for="keepTempFiles">Keep temp files for debugging</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Panel -->
+        <div id="admin" class="panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-tools"></i> Administration</h2>
+                <p>Configuration management and system tools</p>
+            </div>
+            
+            <div class="admin-grid">
+                <div class="admin-card">
+                    <h3><i class="fas fa-save"></i> Configuration</h3>
+                    <div class="admin-buttons">
+                        <button class="button primary" onclick="loadConfig()">
+                            <i class="fas fa-upload"></i> Load Config
+                        </button>
+                        <button class="button success" onclick="saveConfig()">
+                            <i class="fas fa-save"></i> Save Config
+                        </button>
+                        <button class="button secondary" onclick="createSampleConfig()">
+                            <i class="fas fa-file-code"></i> Create Sample
+                        </button>
+                        <button class="button warning" onclick="resetForm()">
+                            <i class="fas fa-undo"></i> Reset Form
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="admin-card">
+                    <h3><i class="fas fa-chart-line"></i> System Status</h3>
+                    <div class="status-info">
+                        <p><strong>Backend:</strong> <span id="backendStatus">Checking...</span></p>
+                        <p><strong>Version:</strong> <span id="versionInfo">1.0.0</span></p>
+                        <p><strong>Uptime:</strong> <span id="uptimeInfo">--</span></p>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Scanned Files Display -->
         <div class="card" id="scannedFilesCard" style="display: none;">
-            <h3>📋 Scanned Files</h3>
-            <div class="scanned-files-container">
+            <div class="card-header">
+                <h3><i class="fas fa-list"></i> Scanned Files</h3>
+                <div class="scanned-files-summary" id="scannedFilesSummary" style="display: none;">
+                    <span id="scannedFilesSummaryText">No files scanned yet</span>
+                </div>
+                <button class="button secondary small" id="toggleScannedFilesBtn" onclick="toggleScannedFiles()">
+                    <i class="fas fa-eye"></i> Show Details
+                </button>
+            </div>
+            <div class="scanned-files-container" id="scannedFilesDetails" style="display: none;">
                 <div class="scanned-files-section">
-                    <h4>📁 Source Server Files</h4>
+                    <h4><i class="fas fa-upload"></i> Source Server Files</h4>
                     <div class="file-count" id="sourceFileCount">No files scanned</div>
                     <div id="sourceFilesList" class="file-list"></div>
                 </div>
                 <div class="scanned-files-section">
-                    <h4>📂 Target Server Files</h4>
+                    <h4><i class="fas fa-download"></i> Target Server Files</h4>
                     <div class="file-count" id="targetFileCount">No files scanned</div>
                     <div id="targetFilesList" class="file-list"></div>
                 </div>
@@ -150,13 +315,31 @@
 
         <!-- File Comparison Results -->
         <div class="card" id="comparisonCard" style="display: none;">
-            <h3>🔄 File Comparison Results</h3>
+            <div class="card-header">
+                <h3><i class="fas fa-balance-scale"></i> File Comparison Results</h3>
+                <div class="comparison-summary" id="comparisonSummary">
+                    <span id="comparisonSummaryText">No comparison results yet</span>
+                </div>
+                <div class="comparison-buttons">
+                    <button class="button secondary small" id="toggleComparisonBtn" onclick="toggleComparisonView()">
+                        <i class="fas fa-eye"></i> Show All Files
+                    </button>
+                    <button class="button secondary small" id="toggleTargetOnlyBtn" onclick="toggleTargetOnlyView()">
+                        <i class="fas fa-eye"></i> Show Target-Only Files
+                    </button>
+                </div>
+            </div>
             <div id="fileList" class="file-list"></div>
         </div>
 
         <div class="card">
-            <h3>📊 Status & Logs</h3>
-            <div id="status" class="status">Ready to sync. Configure your servers and click "Scan Files" to begin.</div>
+            <div class="card-header">
+                <h3><i class="fas fa-terminal"></i> Status & Logs</h3>
+                <button class="button secondary small" id="toggleStatusBtn" onclick="toggleStatus()">
+                    <i class="fas fa-eye"></i> Show Logs
+                </button>
+            </div>
+            <div id="status" class="status" style="display: none;">Ready to sync. Configure your servers and click "Scan Files" to begin.</div>
         </div>
     </div>
 

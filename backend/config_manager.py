@@ -69,13 +69,10 @@ class ConfigManager:
     def save_config(self) -> bool:
         """Save current configuration to file"""
         try:
-            # Don't save passwords in plain text - remove them
-            config_to_save = json.loads(json.dumps(self.config))  # Deep copy
-            config_to_save["servers"]["source"]["password"] = ""
-            config_to_save["servers"]["target"]["password"] = ""
-            
+            # Save passwords to config file for convenience
+            # Note: File should have appropriate permissions (600) for security
             with open(self.config_file, 'w') as f:
-                json.dump(config_to_save, f, indent=4)
+                json.dump(self.config, f, indent=4)
             logger.info(f"Configuration saved to {self.config_file}")
             return True
         except Exception as e:
