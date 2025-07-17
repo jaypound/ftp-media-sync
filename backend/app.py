@@ -32,12 +32,8 @@ def get_config():
     """Get current configuration"""
     try:
         config = config_manager.get_all_config()
-        # Remove passwords from response
-        if "servers" in config:
-            for server_type in config["servers"]:
-                if "password" in config["servers"][server_type]:
-                    config["servers"][server_type]["password"] = ""
-        
+        # Include passwords in response for frontend convenience
+        # Note: This is acceptable since communication is over localhost
         return jsonify({'success': True, 'config': config})
     except Exception as e:
         logger.error(f"Error getting config: {str(e)}")

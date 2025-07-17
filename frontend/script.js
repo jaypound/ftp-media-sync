@@ -3,6 +3,10 @@ let sourceFiles = [];
 let targetFiles = [];
 let syncQueue = [];
 let availableFiles = []; // New: tracks files that CAN be synced
+let allComparisonResults = []; // Store all comparison results
+let targetOnlyFiles = []; // Files that exist on target but not on source
+let showAllFiles = false; // Toggle for showing all files vs unsynced only
+let showTargetOnly = false; // Toggle for showing target-only files
 let isScanning = false;
 let isSyncing = false;
 let syncStats = { processed: 0, total: 0, errors: 0 };
@@ -20,17 +24,52 @@ function clearLog() {
     document.getElementById('status').innerHTML = '';
 }
 
-function updateProgress(current, total) {
+function updateProgress(current, total, currentFile = null) {
+    const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
     const progressFill = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    const progressStats = document.getElementById('progressStats');
     
     if (total > 0) {
         const percentage = (current / total) * 100;
         progressFill.style.width = percentage + '%';
-        progressBar.style.display = 'block';
+        progressContainer.style.display = 'block';
+        
+        // Update progress text
+        if (currentFile) {
+            progressText.textContent = `Syncing: ${currentFile}`;
+        } else if (current === total) {
+            progressText.textContent = 'Sync completed!';
+        } else {
+            progressText.textContent = `Processing file ${current} of ${total}`;
+        }
+        
+        // Update stats
+        progressStats.textContent = `${current} / ${total} files`;
+        progressStats.setAttribute('data-percentage', `${Math.round(percentage)}%`);
+        
     } else {
-        progressBar.style.display = 'none';
+        progressContainer.style.display = 'none';
     }
+}
+
+function showProgress(text = 'Preparing sync...') {
+    const progressContainer = document.getElementById('progressContainer');
+    const progressText = document.getElementById('progressText');
+    const progressStats = document.getElementById('progressStats');
+    const progressFill = document.getElementById('progressFill');
+    
+    progressContainer.style.display = 'block';
+    progressText.textContent = text;
+    progressStats.textContent = '0 / 0 files';
+    progressStats.setAttribute('data-percentage', '0%');
+    progressFill.style.width = '0%';
+}
+
+function hideProgress() {
+    const progressContainer = document.getElementById('progressContainer');
+    progressContainer.style.display = 'none';
 }
 
 function formatFileSize(bytes) {
@@ -71,14 +110,14 @@ function shouldIncludeFile(filename, size) {
 async function compareFiles() {
     log('Comparing files between servers...');
     
-    const fileListDiv = document.getElementById('fileList');
     const comparisonCard = document.getElementById('comparisonCard');
-    fileListDiv.innerHTML = '';
     comparisonCard.style.display = 'block';
     
-    // Clear both queues
+    // Clear queues and results
     syncQueue = [];
     availableFiles = [];
+    allComparisonResults = [];
+    targetOnlyFiles = [];
     
     // Create a map of target files for quick lookup using relative path
     const targetFileMap = new Map();
@@ -87,58 +126,73 @@ async function compareFiles() {
         targetFileMap.set(relativePath, file);
     });
     
+    // Create a map of source files for quick lookup using relative path
+    const sourceFileMap = new Map();
+    sourceFiles.forEach(file => {
+        const relativePath = file.path || file.name;
+        sourceFileMap.set(relativePath, file);
+    });
+    
+    // Process source files (existing logic)
     sourceFiles.forEach(sourceFile => {
         const sourceRelativePath = sourceFile.path || sourceFile.name;
         const targetFile = targetFileMap.get(sourceRelativePath);
         
-        const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
-        
         // Create a unique identifier for the file (using relative path)
         const fileId = btoa(sourceRelativePath).replace(/[^a-zA-Z0-9]/g, ''); // Base64 encode and clean for HTML ID
         
+        const comparisonResult = {
+            sourceFile: sourceFile,
+            targetFile: targetFile,
+            fileId: fileId,
+            relativePath: sourceRelativePath,
+            status: 'identical' // default
+        };
+        
         if (!targetFile) {
             // File missing on target
-            fileItem.classList.add('missing');
-            fileItem.innerHTML = `
-                <div class="file-info">
-                    <div class="file-name">${sourceFile.name}</div>
-                    <div class="file-path">${sourceRelativePath !== sourceFile.name ? sourceRelativePath : ''}</div>
-                    <div class="file-size">${formatFileSize(sourceFile.size)} - Missing on target</div>
-                </div>
-                <button class="button add-to-sync-btn" onclick="addToSyncQueue('${fileId}', this)">Add to Sync</button>
-            `;
-            // Add to available files but NOT to sync queue
+            comparisonResult.status = 'missing';
             availableFiles.push({ type: 'copy', file: sourceFile, id: fileId });
         } else if (sourceFile.size !== targetFile.size) {
             // File size different
-            fileItem.classList.add('different');
-            fileItem.innerHTML = `
-                <div class="file-info">
-                    <div class="file-name">${sourceFile.name}</div>
-                    <div class="file-path">${sourceRelativePath !== sourceFile.name ? sourceRelativePath : ''}</div>
-                    <div class="file-size">Source: ${formatFileSize(sourceFile.size)} | Target: ${formatFileSize(targetFile.size)}</div>
-                </div>
-                <button class="button add-to-sync-btn" onclick="addToSyncQueue('${fileId}', this)">Add to Sync</button>
-            `;
-            // Add to available files but NOT to sync queue
+            comparisonResult.status = 'different';
             availableFiles.push({ type: 'update', file: sourceFile, id: fileId });
         } else {
             // File identical
-            fileItem.innerHTML = `
-                <div class="file-info">
-                    <div class="file-name">${sourceFile.name}</div>
-                    <div class="file-path">${sourceRelativePath !== sourceFile.name ? sourceRelativePath : ''}</div>
-                    <div class="file-size">${formatFileSize(sourceFile.size)} - Identical</div>
-                </div>
-                <span style="color: #28a745;">✅ Synced</span>
-            `;
+            comparisonResult.status = 'identical';
         }
         
-        fileListDiv.appendChild(fileItem);
+        allComparisonResults.push(comparisonResult);
     });
     
-    log(`Comparison complete. Found ${availableFiles.length} files that can be synced`, 'success');
+    // Process target files to find target-only files
+    targetFiles.forEach(targetFile => {
+        const targetRelativePath = targetFile.path || targetFile.name;
+        const sourceFile = sourceFileMap.get(targetRelativePath);
+        
+        if (!sourceFile) {
+            // File exists on target but not on source
+            const fileId = btoa(targetRelativePath + '_target_only').replace(/[^a-zA-Z0-9]/g, '');
+            
+            const targetOnlyResult = {
+                targetFile: targetFile,
+                sourceFile: null,
+                fileId: fileId,
+                relativePath: targetRelativePath,
+                status: 'target_only'
+            };
+            
+            targetOnlyFiles.push(targetOnlyResult);
+        }
+    });
+    
+    // Update summary
+    updateComparisonSummary();
+    
+    // Render results (default to unsynced only)
+    renderComparisonResults();
+    
+    log(`Comparison complete. Found ${availableFiles.length} files that can be synced, ${targetOnlyFiles.length} target-only files`, 'success');
     
     // Debug: Log available files for sync
     if (availableFiles.length > 0) {
@@ -148,9 +202,104 @@ async function compareFiles() {
         });
     }
     
+    // Debug: Log target-only files
+    if (targetOnlyFiles.length > 0) {
+        log(`Debug: Target-only files:`);
+        targetOnlyFiles.forEach((item, index) => {
+            log(`  ${index + 1}. ${item.targetFile.name} (path: ${item.targetFile.path || 'no path'}) - ${formatFileSize(item.targetFile.size)} - ID: ${item.fileId}`);
+        });
+    }
+    
     // Disable sync button initially since no files are selected
     document.getElementById('syncButton').disabled = true;
     updateSyncButtonState();
+}
+
+function renderComparisonResults() {
+    const fileListDiv = document.getElementById('fileList');
+    fileListDiv.innerHTML = '';
+    
+    if (showTargetOnly) {
+        // Show only target-only files
+        targetOnlyFiles.forEach(result => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item target-only';
+            
+            fileItem.innerHTML = `
+                <div class="file-info">
+                    <div class="file-name">${result.targetFile.name}</div>
+                    <div class="file-path">${result.relativePath !== result.targetFile.name ? result.relativePath : ''}</div>
+                    <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
+                </div>
+                <span style="color: #0288d1;">📁 Target Only</span>
+            `;
+            
+            fileListDiv.appendChild(fileItem);
+        });
+    } else {
+        // Show source/target comparison results
+        const resultsToShow = showAllFiles ? allComparisonResults : allComparisonResults.filter(result => result.status !== 'identical');
+        
+        resultsToShow.forEach(result => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            
+            if (result.status === 'missing') {
+                // File missing on target
+                fileItem.classList.add('missing');
+                fileItem.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-name">${result.sourceFile.name}</div>
+                        <div class="file-path">${result.relativePath !== result.sourceFile.name ? result.relativePath : ''}</div>
+                        <div class="file-size">${formatFileSize(result.sourceFile.size)} - Missing on target</div>
+                    </div>
+                    <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">Add to Sync</button>
+                `;
+            } else if (result.status === 'different') {
+                // File size different
+                fileItem.classList.add('different');
+                fileItem.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-name">${result.sourceFile.name}</div>
+                        <div class="file-path">${result.relativePath !== result.sourceFile.name ? result.relativePath : ''}</div>
+                        <div class="file-size">Source: ${formatFileSize(result.sourceFile.size)} | Target: ${formatFileSize(result.targetFile.size)}</div>
+                    </div>
+                    <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">Add to Sync</button>
+                `;
+            } else {
+                // File identical
+                fileItem.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-name">${result.sourceFile.name}</div>
+                        <div class="file-path">${result.relativePath !== result.sourceFile.name ? result.relativePath : ''}</div>
+                        <div class="file-size">${formatFileSize(result.sourceFile.size)} - Identical</div>
+                    </div>
+                    <span style="color: #28a745;">✅ Synced</span>
+                `;
+            }
+            
+            fileListDiv.appendChild(fileItem);
+        });
+        
+        // Add target-only files when showing all files
+        if (showAllFiles) {
+            targetOnlyFiles.forEach(result => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item target-only';
+                
+                fileItem.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-name">${result.targetFile.name}</div>
+                        <div class="file-path">${result.relativePath !== result.targetFile.name ? result.relativePath : ''}</div>
+                        <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
+                    </div>
+                    <span style="color: #0288d1;">📁 Target Only</span>
+                `;
+                
+                fileListDiv.appendChild(fileItem);
+            });
+        }
+    }
 }
 
 function displayScannedFiles() {
@@ -159,9 +308,14 @@ function displayScannedFiles() {
     const targetFilesList = document.getElementById('targetFilesList');
     const sourceFileCount = document.getElementById('sourceFileCount');
     const targetFileCount = document.getElementById('targetFileCount');
+    const summaryDiv = document.getElementById('scannedFilesSummary');
     
     // Show the scanned files card
     scannedFilesCard.style.display = 'block';
+    
+    // Show summary and update it
+    summaryDiv.style.display = 'block';
+    updateScannedFilesSummary();
     
     // Update file counts
     sourceFileCount.textContent = `${sourceFiles.length} files found`;
@@ -208,11 +362,24 @@ function clearScannedFiles() {
     document.getElementById('scannedFilesCard').style.display = 'none';
     document.getElementById('comparisonCard').style.display = 'none';
     
+    // Hide summary and reset details visibility
+    document.getElementById('scannedFilesSummary').style.display = 'none';
+    document.getElementById('scannedFilesDetails').style.display = 'none';
+    document.getElementById('toggleScannedFilesBtn').innerHTML = '<i class="fas fa-eye"></i> Show Details';
+    
+    // Reset comparison view
+    showAllFiles = false;
+    showTargetOnly = false;
+    document.getElementById('toggleComparisonBtn').innerHTML = '<i class="fas fa-eye"></i> Show All Files';
+    document.getElementById('toggleTargetOnlyBtn').innerHTML = '<i class="fas fa-eye"></i> Show Target-Only Files';
+    
     // Clear data
     sourceFiles = [];
     targetFiles = [];
     syncQueue = [];
     availableFiles = [];
+    allComparisonResults = [];
+    targetOnlyFiles = [];
     
     // Reset UI
     document.querySelector('button[onclick="compareFiles()"]').disabled = true;
@@ -327,6 +494,40 @@ function updateSyncButtonState() {
     }
 }
 
+function getFolderStats() {
+    if (syncQueue.length === 0) {
+        return null;
+    }
+    
+    // Get the folder path from the last added file
+    const lastFile = syncQueue[syncQueue.length - 1];
+    const targetFolderPath = lastFile.file.path ? 
+        lastFile.file.path.substring(0, lastFile.file.path.lastIndexOf('/')) : 
+        '';
+    
+    // Count available files in the same folder
+    let availableToAdd = 0;
+    availableFiles.forEach(item => {
+        const itemFolderPath = item.file.path ? 
+            item.file.path.substring(0, item.file.path.lastIndexOf('/')) : 
+            '';
+        
+        const isSameFolder = !targetFolderPath ? !itemFolderPath : itemFolderPath === targetFolderPath;
+        
+        if (isSameFolder) {
+            const alreadyInQueue = syncQueue.find(queueItem => queueItem.id === item.id);
+            if (!alreadyInQueue) {
+                availableToAdd++;
+            }
+        }
+    });
+    
+    return {
+        folderPath: targetFolderPath || 'root',
+        availableToAdd: availableToAdd
+    };
+}
+
 function addAllFromFolderToSyncQueue() {
     if (syncQueue.length === 0) {
         log('No files in sync queue - add a file first to determine the folder', 'error');
@@ -387,6 +588,46 @@ function addAllFromFolderToSyncQueue() {
     updateSyncButtonState();
 }
 
+function addAllToSyncQueue() {
+    if (availableFiles.length === 0) {
+        log('No files available to add to sync queue', 'error');
+        return;
+    }
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Add all available files to sync queue
+    availableFiles.forEach(item => {
+        // Check if already in sync queue
+        const alreadyInQueue = syncQueue.find(queueItem => queueItem.id === item.id);
+        if (!alreadyInQueue) {
+            syncQueue.push(item);
+            addedCount++;
+            
+            // Update corresponding button
+            const buttons = document.querySelectorAll('.add-to-sync-btn');
+            buttons.forEach(button => {
+                if (button.onclick && button.onclick.toString().includes(item.id) && !button.disabled) {
+                    button.textContent = 'Added to Sync';
+                    button.className = 'button add-to-sync-btn added';
+                    button.disabled = true;
+                    button.innerHTML = '✅ Added to Sync';
+                }
+            });
+        } else {
+            skippedCount++;
+        }
+    });
+    
+    log(`Added ${addedCount} files to sync queue`);
+    if (skippedCount > 0) {
+        log(`Skipped ${skippedCount} files (already in queue)`);
+    }
+    
+    updateSyncButtonState();
+}
+
 function clearSyncQueue() {
     // Clear sync queue
     syncQueue = [];
@@ -409,6 +650,52 @@ function stopSync() {
     log('Sync stopped by user', 'error');
     document.getElementById('syncButton').disabled = false;
     document.getElementById('stopButton').disabled = true;
+    hideProgress();
+}
+
+async function processResultsWithProgress(results) {
+    for (let index = 0; index < results.length; index++) {
+        if (!isSyncing) break; // Stop if user clicked stop
+        
+        const item = results[index];
+        const fileName = item.file || item.filename || 'Unknown file';
+        
+        // Update progress for current file
+        updateProgress(index + 1, results.length, fileName);
+        
+        // Add a small delay to show progress update
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        log(`Debug: Processing result ${index + 1}: ${JSON.stringify(item, null, 2)}`);
+        
+        if (item.status === 'would_sync') {
+            log(`[DRY RUN] Would ${item.action} ${item.file} (${formatFileSize(item.size)})`);
+        } else if (item.status === 'success') {
+            log(`✅ ${item.action === 'copy' ? 'Copied' : 'Updated'} ${item.file}`, 'success');
+            syncStats.processed++;
+        } else {
+            // Enhanced error logging
+            const errorMsg = item.error || item.message || 'No error details provided by server';
+            
+            if (item.status === 'failed' && !item.error && !item.message) {
+                log(`❌ Error with ${fileName}: Sync failed - check backend logs for details`, 'error');
+                log(`   Server returned failed status without error message`, 'error');
+                log(`   File details: ${JSON.stringify(item, null, 2)}`, 'error');
+            } else {
+                log(`❌ Error with ${fileName}: ${errorMsg}`, 'error');
+            }
+            
+            // Log additional error details if available
+            if (item.details) {
+                log(`   Error details: ${item.details}`, 'error');
+            }
+            if (item.traceback) {
+                log(`   Traceback: ${item.traceback}`, 'error');
+            }
+            
+            syncStats.errors++;
+        }
+    }
 }
 
 // Configuration management functions
@@ -558,8 +845,8 @@ function populateFormFromConfig(config) {
             document.getElementById('sourceHost').value = src.host || '';
             document.getElementById('sourcePort').value = src.port || 21;
             document.getElementById('sourceUser').value = src.user || '';
+            document.getElementById('sourcePass').value = src.password || '';
             document.getElementById('sourcePath').value = src.path || '';
-            // Note: passwords are not loaded for security
         }
         
         if (config.servers.target) {
@@ -567,6 +854,7 @@ function populateFormFromConfig(config) {
             document.getElementById('targetHost').value = tgt.host || '';
             document.getElementById('targetPort').value = tgt.port || 21;
             document.getElementById('targetUser').value = tgt.user || '';
+            document.getElementById('targetPass').value = tgt.password || '';
             document.getElementById('targetPath').value = tgt.path || '';
         }
     }
@@ -640,7 +928,7 @@ function resetForm() {
 
 // API Functions for backend integration
 async function testConnection(serverType) {
-    const testButton = document.querySelector(`button[onclick="testConnection('${serverType}')"]`);
+    const testButton = document.getElementById(`${serverType}TestBtn`);
     const originalText = testButton.textContent;
     
     const config = {
@@ -658,10 +946,9 @@ async function testConnection(serverType) {
     }
     
     // Show loading state
-    testButton.textContent = 'Testing...';
-    testButton.style.backgroundColor = '#007bff';
-    testButton.style.color = 'white';
+    testButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
     testButton.disabled = true;
+    testButton.classList.add('secondary');
     
     log(`Testing connection to ${serverType} server (${config.host}:${config.port})...`);
     
@@ -678,30 +965,33 @@ async function testConnection(serverType) {
             log(`✅ ${result.message}`, 'success');
             
             // Show success state
-            testButton.textContent = '✅ Connected';
-            testButton.style.backgroundColor = '#28a745';
-            testButton.style.color = 'white';
+            testButton.innerHTML = '<i class="fas fa-check"></i> Connected';
+            testButton.classList.remove('secondary');
+            testButton.classList.add('success');
+            
+            // Update dashboard status
+            updateDashboardStats();
             
             // Reset button after 5 seconds
             setTimeout(() => {
-                testButton.textContent = originalText;
-                testButton.style.backgroundColor = '';
-                testButton.style.color = '';
+                testButton.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+                testButton.classList.remove('success');
+                testButton.classList.add('secondary');
                 testButton.disabled = false;
             }, 5000);
         } else {
             log(`❌ ${result.message}`, 'error');
             
             // Show error state
-            testButton.textContent = '❌ Failed';
-            testButton.style.backgroundColor = '#dc3545';
-            testButton.style.color = 'white';
+            testButton.innerHTML = '<i class="fas fa-times"></i> Failed';
+            testButton.classList.remove('secondary');
+            testButton.classList.add('danger');
             
             // Reset button after 5 seconds
             setTimeout(() => {
-                testButton.textContent = originalText;
-                testButton.style.backgroundColor = '';
-                testButton.style.color = '';
+                testButton.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+                testButton.classList.remove('danger');
+                testButton.classList.add('secondary');
                 testButton.disabled = false;
             }, 5000);
         }
@@ -710,15 +1000,15 @@ async function testConnection(serverType) {
         log('Make sure the Python backend is running on 127.0.0.1:5000', 'error');
         
         // Show error state
-        testButton.textContent = '❌ Failed';
-        testButton.style.backgroundColor = '#dc3545';
-        testButton.style.color = 'white';
+        testButton.innerHTML = '<i class="fas fa-times"></i> Failed';
+        testButton.classList.remove('secondary');
+        testButton.classList.add('danger');
         
         // Reset button after 5 seconds
         setTimeout(() => {
-            testButton.textContent = originalText;
-            testButton.style.backgroundColor = '';
-            testButton.style.color = '';
+            testButton.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+            testButton.classList.remove('danger');
+            testButton.classList.add('secondary');
             testButton.disabled = false;
         }, 5000);
     }
@@ -840,6 +1130,9 @@ async function startSync() {
     
     syncStats = { processed: 0, total: syncQueue.length, errors: 0 };
     
+    // Show progress bar
+    showProgress(`Starting ${dryRun ? 'dry run' : 'sync'}...`);
+    
     log(`Starting ${dryRun ? 'dry run' : 'sync'} of ${syncQueue.length} selected files...`);
     if (keepTemp) {
         log(`Debug mode: Keeping temp files in /tmp/ for inspection`);
@@ -859,6 +1152,9 @@ async function startSync() {
         };
         
         log(`Debug: Request body: ${JSON.stringify(requestBody, null, 2)}`);
+        
+        // Update progress for request phase
+        updateProgress(0, syncQueue.length, null);
         
         const response = await fetch('http://127.0.0.1:5000/api/sync-files', {
             method: 'POST',
@@ -883,40 +1179,11 @@ async function startSync() {
                 return;
             }
             
-            result.results.forEach((item, index) => {
-                updateProgress(index + 1, result.results.length);
-                
-                log(`Debug: Processing result ${index + 1}: ${JSON.stringify(item, null, 2)}`);
-                
-                if (item.status === 'would_sync') {
-                    log(`[DRY RUN] Would ${item.action} ${item.file} (${formatFileSize(item.size)})`);
-                } else if (item.status === 'success') {
-                    log(`✅ ${item.action === 'copy' ? 'Copied' : 'Updated'} ${item.file}`, 'success');
-                    syncStats.processed++;
-                } else {
-                    // Enhanced error logging
-                    const errorMsg = item.error || item.message || 'No error details provided by server';
-                    const fileName = item.file || item.filename || 'Unknown file';
-                    
-                    if (item.status === 'failed' && !item.error && !item.message) {
-                        log(`❌ Error with ${fileName}: Sync failed - check backend logs for details`, 'error');
-                        log(`   Server returned failed status without error message`, 'error');
-                        log(`   File details: ${JSON.stringify(item, null, 2)}`, 'error');
-                    } else {
-                        log(`❌ Error with ${fileName}: ${errorMsg}`, 'error');
-                    }
-                    
-                    // Log additional error details if available
-                    if (item.details) {
-                        log(`   Error details: ${item.details}`, 'error');
-                    }
-                    if (item.traceback) {
-                        log(`   Traceback: ${item.traceback}`, 'error');
-                    }
-                    
-                    syncStats.errors++;
-                }
-            });
+            // Process results with delays to show incremental progress
+            await processResultsWithProgress(result.results);
+            
+            // Show completion
+            updateProgress(result.results.length, result.results.length, null);
             
             log(`Sync completed! Processed: ${syncStats.processed}, Errors: ${syncStats.errors}`, 'success');
             
@@ -943,17 +1210,245 @@ async function startSync() {
         log(`Debug: Full error object: ${JSON.stringify(error, null, 2)}`, 'error');
     }
     
+    // Hide progress bar after a delay
+    setTimeout(() => {
+        hideProgress();
+    }, 2000);
+    
     isSyncing = false;
     document.getElementById('syncButton').disabled = false;
     document.getElementById('stopButton').disabled = true;
 }
 
+// Panel Management
+function showPanel(panelName) {
+    // Hide all panels
+    const panels = document.querySelectorAll('.panel');
+    panels.forEach(panel => panel.classList.remove('active'));
+    
+    // Show selected panel
+    const selectedPanel = document.getElementById(panelName);
+    if (selectedPanel) {
+        selectedPanel.classList.add('active');
+    }
+    
+    // Update nav items
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => item.classList.remove('active'));
+    
+    // Find and activate the corresponding nav item
+    const activeNavItem = document.querySelector(`[onclick="showPanel('${panelName}')"]`);
+    if (activeNavItem) {
+        activeNavItem.classList.add('active');
+    }
+    
+    // Update dashboard stats when showing dashboard
+    if (panelName === 'dashboard') {
+        updateDashboardStats();
+    }
+}
+
+// Update dashboard statistics
+function updateDashboardStats() {
+    // Update source server status
+    const sourceStatusText = document.getElementById('sourceStatusText');
+    const sourceHost = document.getElementById('sourceHost').value;
+    if (sourceHost) {
+        sourceStatusText.textContent = `${sourceHost} - Ready`;
+        sourceStatusText.style.color = 'var(--success-color)';
+    } else {
+        sourceStatusText.textContent = 'Not Configured';
+        sourceStatusText.style.color = 'var(--text-secondary)';
+    }
+    
+    // Update target server status
+    const targetStatusText = document.getElementById('targetStatusText');
+    const targetHost = document.getElementById('targetHost').value;
+    if (targetHost) {
+        targetStatusText.textContent = `${targetHost} - Ready`;
+        targetStatusText.style.color = 'var(--success-color)';
+    } else {
+        targetStatusText.textContent = 'Not Configured';
+        targetStatusText.style.color = 'var(--text-secondary)';
+    }
+    
+    // Update file count
+    const fileCountText = document.getElementById('fileCountText');
+    const totalFiles = sourceFiles.length + targetFiles.length;
+    fileCountText.textContent = `${totalFiles} files scanned`;
+    
+    // Update sync status
+    const syncStatusText = document.getElementById('syncStatusText');
+    syncStatusText.textContent = `${syncQueue.length} files queued`;
+}
+
+
+
+// Check backend health
+async function checkBackendHealth() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/health');
+        const result = await response.json();
+        
+        const backendStatus = document.getElementById('backendStatus');
+        if (result.status === 'healthy') {
+            backendStatus.textContent = '✅ Online';
+            backendStatus.style.color = 'var(--success-color)';
+        } else {
+            backendStatus.textContent = '❌ Offline';
+            backendStatus.style.color = 'var(--danger-color)';
+        }
+    } catch (error) {
+        const backendStatus = document.getElementById('backendStatus');
+        backendStatus.textContent = '❌ Offline';
+        backendStatus.style.color = 'var(--danger-color)';
+    }
+}
+
+// Toggle visibility functions
+function toggleScannedFiles() {
+    const detailsDiv = document.getElementById('scannedFilesDetails');
+    const summaryDiv = document.getElementById('scannedFilesSummary');
+    const toggleBtn = document.getElementById('toggleScannedFilesBtn');
+    
+    if (detailsDiv.style.display === 'none') {
+        detailsDiv.style.display = 'grid';
+        summaryDiv.style.display = 'none';
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Details';
+    } else {
+        detailsDiv.style.display = 'none';
+        summaryDiv.style.display = 'block';
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show Details';
+    }
+}
+
+function toggleStatus() {
+    const statusDiv = document.getElementById('status');
+    const toggleBtn = document.getElementById('toggleStatusBtn');
+    
+    if (statusDiv.style.display === 'none') {
+        statusDiv.style.display = 'block';
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Logs';
+    } else {
+        statusDiv.style.display = 'none';
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show Logs';
+    }
+}
+
+function updateScannedFilesSummary() {
+    const summaryText = document.getElementById('scannedFilesSummaryText');
+    const totalFiles = sourceFiles.length + targetFiles.length;
+    
+    if (totalFiles === 0) {
+        summaryText.textContent = 'No files scanned yet';
+    } else {
+        summaryText.textContent = `Found ${sourceFiles.length} source files and ${targetFiles.length} target files`;
+    }
+}
+
+function toggleComparisonView() {
+    showAllFiles = !showAllFiles;
+    const toggleBtn = document.getElementById('toggleComparisonBtn');
+    
+    if (showAllFiles) {
+        toggleBtn.innerHTML = '<i class="fas fa-filter"></i> Show Unsynced Only';
+    } else {
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show All Files';
+    }
+    
+    // Re-render the comparison results with the new filter
+    renderComparisonResults();
+}
+
+function updateComparisonSummary() {
+    const summaryText = document.getElementById('comparisonSummaryText');
+    const unsyncedCount = availableFiles.length;
+    const totalCount = allComparisonResults.length;
+    const targetOnlyCount = targetOnlyFiles.length;
+    
+    if (totalCount === 0) {
+        summaryText.textContent = 'No comparison results yet';
+    } else {
+        summaryText.textContent = `${unsyncedCount} files need sync (${totalCount} total files, ${targetOnlyCount} target-only)`;
+    }
+}
+
+function toggleTargetOnlyView() {
+    showTargetOnly = !showTargetOnly;
+    const toggleBtn = document.getElementById('toggleTargetOnlyBtn');
+    
+    if (showTargetOnly) {
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Target-Only';
+        showAllFiles = false; // Reset other view
+        document.getElementById('toggleComparisonBtn').innerHTML = '<i class="fas fa-eye"></i> Show All Files';
+    } else {
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show Target-Only Files';
+    }
+    
+    // Re-render the comparison results with the new filter
+    renderComparisonResults();
+}
+
+// Dark mode functionality
+function toggleDarkMode() {
+    const body = document.body;
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    
+    if (body.getAttribute('data-theme') === 'dark') {
+        body.removeAttribute('data-theme');
+        darkModeToggle.innerHTML = '<i class="fas fa-moon"></i> Dark';
+        localStorage.setItem('theme', 'light');
+    } else {
+        body.setAttribute('data-theme', 'dark');
+        darkModeToggle.innerHTML = '<i class="fas fa-sun"></i> Light';
+        localStorage.setItem('theme', 'dark');
+    }
+}
+
+function initializeTheme() {
+    const savedTheme = localStorage.getItem('theme');
+    const body = document.body;
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    
+    if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        body.setAttribute('data-theme', 'dark');
+        darkModeToggle.innerHTML = '<i class="fas fa-sun"></i> Light';
+    } else {
+        body.removeAttribute('data-theme');
+        darkModeToggle.innerHTML = '<i class="fas fa-moon"></i> Dark';
+    }
+}
+
 // Initialize the app
 window.addEventListener('load', function() {
     log('FTP Media Server Sync initialized');
-    log('Click "Load Config" to load saved settings, or configure manually');
-    log('Use "Save Config" to remember your settings for next time');
+    log('Welcome to the modern FTP sync interface!');
+    log('Navigate using the menu above to configure servers and settings');
+    
+    // Initialize theme
+    initializeTheme();
+    
+    // Initialize with dashboard panel
+    showPanel('dashboard');
     
     // Auto-load config on startup
     loadConfig();
+    
+    // Check backend health
+    checkBackendHealth();
+    
+    // Update dashboard stats
+    updateDashboardStats();
+    
+    // Update uptime counter
+    const startTime = Date.now();
+    setInterval(() => {
+        const uptime = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(uptime / 60);
+        const seconds = uptime % 60;
+        const uptimeInfo = document.getElementById('uptimeInfo');
+        if (uptimeInfo) {
+            uptimeInfo.textContent = `${minutes}m ${seconds}s`;
+        }
+    }, 1000);
 });
