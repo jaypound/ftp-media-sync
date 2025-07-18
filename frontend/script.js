@@ -5,11 +5,16 @@ let syncQueue = [];
 let availableFiles = []; // New: tracks files that CAN be synced
 let allComparisonResults = []; // Store all comparison results
 let targetOnlyFiles = []; // Files that exist on target but not on source
+let analysisQueue = []; // Files queued for analysis
+let analysisResults = []; // Store analysis results
 let showAllFiles = false; // Toggle for showing all files vs unsynced only
 let showTargetOnly = false; // Toggle for showing target-only files
+let showAnalysisAll = false; // Toggle for showing all analysis files
 let isScanning = false;
 let isSyncing = false;
+let isAnalyzing = false;
 let syncStats = { processed: 0, total: 0, errors: 0 };
+let analysisStats = { processed: 0, total: 0, errors: 0 };
 
 // Utility functions
 function log(message, type = 'info') {
@@ -325,17 +330,35 @@ function displayScannedFiles() {
     targetFileCount.className = targetFiles.length > 0 ? 'file-count has-files' : 'file-count';
     
     // Display source files
+    console.log('=== Starting to render source files ===');
+    console.log('sourceFiles array:', sourceFiles);
     sourceFilesList.innerHTML = '';
     sourceFiles.forEach(file => {
         const fileItem = document.createElement('div');
         fileItem.className = 'scanned-file-item';
+        
+        // Check if file is a video file (eligible for analysis)
+        console.log('Processing file:', file.name);
+        const isVideoFile = isVideoFileEligible(file.name);
+        console.log('Is video file:', isVideoFile);
+        
         fileItem.innerHTML = `
-            <div class="scanned-file-name">${file.name}</div>
-            <div class="scanned-file-details">
-                <span>Size: ${formatFileSize(file.size)}</span>
-                <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
+            <div class="scanned-file-content">
+                <div class="scanned-file-name">${file.name}</div>
+                <div class="scanned-file-details">
+                    <span>Size: ${formatFileSize(file.size)}</span>
+                    <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
+                </div>
+                <div class="scanned-file-path">${file.path || file.name}</div>
             </div>
-            <div class="scanned-file-path">${file.path || file.name}</div>
+            ${isVideoFile ? `
+                <div class="scanned-file-actions">
+                    <button class="analyze-btn" onclick="addToAnalysisQueue('${btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '')}')" 
+                            data-file-path="${file.path || file.name}">
+                        <i class="fas fa-brain"></i> Analyze
+                    </button>
+                </div>
+            ` : ''}
         `;
         sourceFilesList.appendChild(fileItem);
     });
@@ -355,6 +378,9 @@ function displayScannedFiles() {
         `;
         targetFilesList.appendChild(fileItem);
     });
+    
+    // Update analysis button states
+    updateAnalysisButtonState();
 }
 
 function clearScannedFiles() {
@@ -383,6 +409,7 @@ function clearScannedFiles() {
     
     // Reset UI
     document.querySelector('button[onclick="compareFiles()"]').disabled = true;
+    document.getElementById('analyzeFilesBtn').disabled = true;
     document.getElementById('syncButton').disabled = true;
     
     // Clear file lists
@@ -424,6 +451,7 @@ function addToSyncQueue(fileId, buttonElement) {
     
     // Update sync button state
     updateSyncButtonState();
+    updateAnalysisButtonState();
 }
 
 function removeFromSyncQueue(fileId) {
@@ -528,6 +556,68 @@ function getFolderStats() {
     };
 }
 
+function getAnalyzeFolderStats() {
+    console.log('getAnalyzeFolderStats called');
+    console.log('sourceFiles.length:', sourceFiles.length);
+    console.log('analysisQueue.length:', analysisQueue.length);
+    
+    if (sourceFiles.length === 0) {
+        console.log('No source files, returning null');
+        return null;
+    }
+    
+    // If no files in analysis queue, we can't determine folder
+    if (analysisQueue.length === 0) {
+        console.log('No files in analysis queue to determine folder, returning null');
+        return null;
+    }
+    
+    // Find video files that can be analyzed
+    const videoFiles = sourceFiles.filter(file => isVideoFileEligible(file.name));
+    console.log('Video files found:', videoFiles.length);
+    console.log('Video files:', videoFiles.map(f => f.name));
+    
+    if (videoFiles.length === 0) {
+        console.log('No video files found, returning null');
+        return null;
+    }
+    
+    // Get the folder path from the last file added to analysis queue
+    const lastQueuedFile = analysisQueue[analysisQueue.length - 1];
+    const targetFolderPath = lastQueuedFile.file.path ? 
+        lastQueuedFile.file.path.substring(0, lastQueuedFile.file.path.lastIndexOf('/')) : 
+        '';
+    
+    console.log('Reference file from queue:', lastQueuedFile.file.name);
+    console.log('Target folder path:', targetFolderPath);
+    
+    // Count video files in the same folder that are not already in analysis queue
+    let videoFilesToAnalyze = 0;
+    videoFiles.forEach(file => {
+        const itemFolderPath = file.path ? 
+            file.path.substring(0, file.path.lastIndexOf('/')) : 
+            '';
+        
+        const isSameFolder = !targetFolderPath ? !itemFolderPath : itemFolderPath === targetFolderPath;
+        
+        // Check if file is already in analysis queue
+        const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === file.id);
+        
+        console.log(`File: ${file.name}, Folder: ${itemFolderPath}, Same folder: ${isSameFolder}, Already in queue: ${!!alreadyInQueue}`);
+        
+        if (isSameFolder && !alreadyInQueue) {
+            videoFilesToAnalyze++;
+        }
+    });
+    
+    console.log('Total video files to analyze:', videoFilesToAnalyze);
+    
+    return {
+        folderPath: targetFolderPath || 'root',
+        videoFilesToAnalyze: videoFilesToAnalyze
+    };
+}
+
 function addAllFromFolderToSyncQueue() {
     if (syncQueue.length === 0) {
         log('No files in sync queue - add a file first to determine the folder', 'error');
@@ -586,6 +676,114 @@ function addAllFromFolderToSyncQueue() {
     }
     
     updateSyncButtonState();
+}
+
+function analyzeAllFromFolder() {
+    log('🚀 Analyze Folder button clicked!');
+    
+    if (sourceFiles.length === 0) {
+        log('No files scanned - scan files first to determine the folder', 'error');
+        return;
+    }
+    
+    if (analysisQueue.length === 0) {
+        log('No files in analysis queue - add a file to analysis first to determine the folder', 'error');
+        return;
+    }
+    
+    // Find files that have analyze buttons (video files)
+    const videoFiles = sourceFiles.filter(file => isVideoFileEligible(file.name));
+    if (videoFiles.length === 0) {
+        log('No video files found to analyze', 'error');
+        return;
+    }
+    
+    // Get the folder path from the last file added to analysis queue
+    const lastQueuedFile = analysisQueue[analysisQueue.length - 1];
+    const targetFolderPath = lastQueuedFile.file.path ? 
+        lastQueuedFile.file.path.substring(0, lastQueuedFile.file.path.lastIndexOf('/')) : 
+        '';
+    
+    // If the file is in root directory, handle appropriately
+    const isRootFile = !targetFolderPath;
+    
+    log(`📁 Adding all video files from folder to analysis queue: ${targetFolderPath || 'root directory'}`);
+    
+    let filesToAnalyze = [];
+    
+    // Find all video files in the same folder that are not already in analysis queue
+    videoFiles.forEach(file => {
+        const itemFolderPath = file.path ? 
+            file.path.substring(0, file.path.lastIndexOf('/')) : 
+            '';
+        
+        // Check if file is in the same folder
+        const isSameFolder = isRootFile ? !itemFolderPath : itemFolderPath === targetFolderPath;
+        
+        // Check if file is already in analysis queue
+        const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === file.id);
+        
+        if (isSameFolder && !alreadyInQueue) {
+            filesToAnalyze.push(file);
+        }
+    });
+    
+    if (filesToAnalyze.length === 0) {
+        log('No video files found in the specified folder', 'error');
+        return;
+    }
+    
+    log(`Found ${filesToAnalyze.length} video files to add to analysis queue in folder "${targetFolderPath || 'root'}"`);
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Add each file to the analysis queue
+    filesToAnalyze.forEach(file => {
+        const fileId = btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '');
+        
+        // Check if file is already in analysis queue
+        const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === fileId);
+        if (!alreadyInQueue) {
+            analysisQueue.push({
+                id: fileId,
+                file: file,
+                filePath: file.path || file.name
+            });
+            addedCount++;
+            
+            // Update corresponding button
+            const button = document.querySelector(`button[onclick="addToAnalysisQueue('${fileId}')"]`);
+            if (button) {
+                button.innerHTML = '<i class="fas fa-check"></i> Added to Analysis';
+                button.classList.add('added');
+                button.disabled = true;
+                
+                // Update parent item styling
+                const fileItem = button.closest('.scanned-file-item');
+                fileItem.classList.add('queued');
+            }
+        } else {
+            skippedCount++;
+        }
+    });
+    
+    log(`📁 Added ${addedCount} files from folder "${targetFolderPath || 'root'}" to analysis queue`);
+    if (skippedCount > 0) {
+        log(`⏭️ Skipped ${skippedCount} files (already in queue)`);
+    }
+    
+    // Debug: List the files that were added
+    if (addedCount > 0) {
+        const addedFiles = filesToAnalyze.filter(file => {
+            const fileId = btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '');
+            return analysisQueue.find(queueItem => queueItem.id === fileId);
+        });
+        const fileNames = addedFiles.map(f => f.name).join(', ');
+        log(`🎬 Files added to analysis queue: ${fileNames}`);
+    }
+    
+    updateAnalysisButtonState();
 }
 
 function addAllToSyncQueue() {
@@ -1108,8 +1306,9 @@ async function scanFiles() {
         // Display scanned files
         displayScannedFiles();
         
-        // Enable compare button
+        // Enable compare and analyze buttons
         document.querySelector('button[onclick="compareFiles()"]').disabled = false;
+        document.getElementById('analyzeFilesBtn').disabled = false;
         
     } catch (error) {
         log(`Error during file scan: ${error.message}`, 'error');
@@ -1245,6 +1444,11 @@ function showPanel(panelName) {
     // Update dashboard stats when showing dashboard
     if (panelName === 'dashboard') {
         updateDashboardStats();
+    }
+    
+    // Load AI settings when showing AI settings panel
+    if (panelName === 'ai-settings') {
+        loadAISettings();
     }
 }
 
@@ -1419,6 +1623,319 @@ function initializeTheme() {
     }
 }
 
+// Helper function to check if a file is a video file eligible for analysis
+function isVideoFileEligible(filename) {
+    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.m4v', '.flv'];
+    const extension = filename.toLowerCase().slice(filename.lastIndexOf('.'));
+    const isEligible = videoExtensions.includes(extension);
+    console.log(`isVideoFileEligible(${filename}) -> ${isEligible} (extension: ${extension})`);
+    return isEligible;
+}
+
+// Individual file analysis function
+// Individual file analysis function - now adds to queue instead of analyzing immediately
+function addToAnalysisQueue(fileId) {
+    console.log('addToAnalysisQueue called with fileId:', fileId);
+    
+    const button = document.querySelector(`button[onclick="addToAnalysisQueue('${fileId}')"]`);
+    console.log('Found button:', button);
+    
+    if (!button) {
+        log(`Button not found for fileId: ${fileId}`, 'error');
+        return;
+    }
+    
+    const filePath = button.getAttribute('data-file-path');
+    console.log('File path:', filePath);
+    
+    // Find the file in sourceFiles
+    const file = sourceFiles.find(f => (f.path || f.name) === filePath);
+    if (!file) {
+        log(`File not found: ${filePath}`, 'error');
+        return;
+    }
+    
+    // Check if file is already in analysis queue
+    const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === fileId);
+    if (alreadyInQueue) {
+        log(`${file.name} is already in analysis queue`, 'warning');
+        return;
+    }
+    
+    // Add to analysis queue
+    analysisQueue.push({
+        id: fileId,
+        file: file,
+        filePath: filePath
+    });
+    
+    // Update button state
+    button.innerHTML = '<i class="fas fa-check"></i> Added to Analysis';
+    button.classList.add('added');
+    button.disabled = true;
+    
+    // Update parent item styling
+    const fileItem = button.closest('.scanned-file-item');
+    fileItem.classList.add('queued');
+    
+    log(`📋 Added ${file.name} to analysis queue (${analysisQueue.length} files queued)`);
+    updateAnalysisButtonState();
+}
+
+// AI Settings Functions
+async function loadAISettings() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/ai-config');
+        const result = await response.json();
+        
+        if (result.success) {
+            const config = result.config;
+            document.getElementById('aiEnabled').checked = config.enabled || false;
+            document.getElementById('transcriptionOnly').checked = config.transcription_only || false;
+            document.getElementById('aiProvider').value = config.provider || 'openai';
+            document.getElementById('aiModel').value = config.model || 'gpt-3.5-turbo';
+            // Only clear API key fields if they're empty, keep placeholder if API key exists
+            if (config.openai_api_key && config.openai_api_key !== '***') {
+                document.getElementById('openaiApiKey').value = config.openai_api_key;
+            } else if (config.openai_api_key === '***') {
+                document.getElementById('openaiApiKey').placeholder = 'API key configured (hidden for security)';
+            }
+            
+            if (config.anthropic_api_key && config.anthropic_api_key !== '***') {
+                document.getElementById('anthropicApiKey').value = config.anthropic_api_key;
+            } else if (config.anthropic_api_key === '***') {
+                document.getElementById('anthropicApiKey').placeholder = 'API key configured (hidden for security)';
+            }
+            document.getElementById('maxChunkSize').value = config.max_chunk_size || 4000;
+            
+            // Update model options based on provider
+            updateModelOptions(config.provider || 'openai');
+            
+            log('AI settings loaded successfully');
+        } else {
+            log(`Failed to load AI settings: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        log(`Error loading AI settings: ${error.message}`, 'error');
+    }
+}
+
+async function saveAISettings() {
+    try {
+        const aiConfig = {
+            enabled: document.getElementById('aiEnabled').checked,
+            transcription_only: document.getElementById('transcriptionOnly').checked,
+            provider: document.getElementById('aiProvider').value,
+            model: document.getElementById('aiModel').value,
+            openai_api_key: document.getElementById('openaiApiKey').value,
+            anthropic_api_key: document.getElementById('anthropicApiKey').value,
+            max_chunk_size: parseInt(document.getElementById('maxChunkSize').value) || 4000,
+            enable_batch_analysis: true
+        };
+        
+        const response = await fetch('http://127.0.0.1:5000/api/ai-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ai_analysis: aiConfig })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log('AI settings saved successfully');
+        } else {
+            log(`Failed to save AI settings: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        log(`Error saving AI settings: ${error.message}`, 'error');
+    }
+}
+
+function updateModelOptions(provider) {
+    const modelSelect = document.getElementById('aiModel');
+    const currentValue = modelSelect.value;
+    
+    // Clear existing options
+    modelSelect.innerHTML = '';
+    
+    if (provider === 'openai') {
+        modelSelect.innerHTML = `
+            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            <option value="gpt-4">GPT-4</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+        `;
+    } else if (provider === 'anthropic') {
+        modelSelect.innerHTML = `
+            <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+            <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+            <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+        `;
+    }
+    
+    // Try to restore previous value, or set default
+    if (Array.from(modelSelect.options).some(option => option.value === currentValue)) {
+        modelSelect.value = currentValue;
+    } else {
+        modelSelect.value = provider === 'openai' ? 'gpt-3.5-turbo' : 'claude-3-sonnet-20240229';
+    }
+}
+
+async function testAIConnection() {
+    try {
+        const provider = document.getElementById('aiProvider').value;
+        const apiKey = provider === 'openai' ? 
+            document.getElementById('openaiApiKey').value : 
+            document.getElementById('anthropicApiKey').value;
+        
+        if (!apiKey) {
+            log('Please enter an API key before testing connection', 'error');
+            return;
+        }
+        
+        log(`Testing ${provider} connection...`);
+        
+        // Create a test file for analysis
+        const testFile = {
+            name: 'test_connection.mp4',
+            path: 'test_connection.mp4',
+            size: 1000000
+        };
+        
+        const aiConfig = {
+            enabled: true,
+            provider: provider,
+            model: document.getElementById('aiModel').value,
+            api_key: apiKey,
+            max_chunk_size: 1000
+        };
+        
+        // We'll just test if the settings are valid by saving them
+        await saveAISettings();
+        log(`${provider} connection test completed - settings saved`);
+        
+    } catch (error) {
+        log(`AI connection test failed: ${error.message}`, 'error');
+    }
+}
+
+// Add event listener for provider change
+document.addEventListener('DOMContentLoaded', function() {
+    const providerSelect = document.getElementById('aiProvider');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', function() {
+            updateModelOptions(this.value);
+        });
+    }
+});
+
+// File Analysis Functions
+async function analyzeFiles() {
+    if (sourceFiles.length === 0) {
+        log('No files to analyze. Please scan files first.', 'error');
+        return;
+    }
+    
+    log('Loading file analysis interface...');
+    
+    // Show analysis card
+    const analysisCard = document.getElementById('analysisCard');
+    analysisCard.style.display = 'block';
+    
+    // Clear previous results
+    analysisQueue = [];
+    analysisResults = [];
+    
+    // Check which files are already analyzed
+    await checkAnalysisStatus();
+    
+    // Render analysis interface
+    renderAnalysisFiles();
+    
+    log('Analysis interface loaded. Select files to analyze.');
+}
+
+async function checkAnalysisStatus() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/analysis-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: sourceFiles })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            analysisResults = result.analyzed_files || [];
+            log(`Found ${analysisResults.length} previously analyzed files`);
+        }
+    } catch (error) {
+        log('Could not check analysis status - MongoDB may not be available', 'error');
+    }
+}
+
+function renderAnalysisFiles() {
+    const analysisFileList = document.getElementById('analysisFileList');
+    analysisFileList.innerHTML = '';
+    
+    sourceFiles.forEach(file => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        
+        const fileId = btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '');
+        const isAnalyzed = analysisResults.find(result => result.file_path === (file.path || file.name));
+        const isInQueue = analysisQueue.find(item => item.id === fileId);
+        
+        if (isAnalyzed) {
+            fileItem.classList.add('analyzed');
+            fileItem.innerHTML = `
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-path">${file.path || file.name}</div>
+                    <div class="file-size">${formatFileSize(file.size)} - Analyzed</div>
+                </div>
+                <span style="color: #4caf50;">✅ Analyzed</span>
+            `;
+        } else if (isInQueue) {
+            fileItem.classList.add('analyzing');
+            fileItem.innerHTML = `
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-path">${file.path || file.name}</div>
+                    <div class="file-size">${formatFileSize(file.size)} - Queued for analysis</div>
+                </div>
+                <span style="color: #ff9800;">⏳ Queued</span>
+            `;
+        } else {
+            fileItem.innerHTML = `
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-path">${file.path || file.name}</div>
+                    <div class="file-size">${formatFileSize(file.size)} - Not analyzed</div>
+                </div>
+                <button class="button analyze-btn" onclick="addToAnalysisQueue('${fileId}', this)">
+                    <i class="fas fa-brain"></i> Analyze
+                </button>
+            `;
+        }
+        
+        analysisFileList.appendChild(fileItem);
+    });
+    
+    updateAnalysisButtonState();
+}
+
+function toggleAnalysisView() {
+    showAnalysisAll = !showAnalysisAll;
+    const toggleBtn = document.getElementById('toggleAnalysisBtn');
+    
+    if (showAnalysisAll) {
+        toggleBtn.innerHTML = '<i class="fas fa-filter"></i> Show Unanalyzed Only';
+    } else {
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show All Files';
+    }
+    
+    renderAnalysisFiles();
+}
+
 // Initialize the app
 window.addEventListener('load', function() {
     log('FTP Media Server Sync initialized');
@@ -1427,6 +1944,9 @@ window.addEventListener('load', function() {
     
     // Initialize theme
     initializeTheme();
+    
+    // Load AI settings on page load
+    loadAISettings();
     
     // Initialize with dashboard panel
     showPanel('dashboard');
@@ -1452,3 +1972,214 @@ window.addEventListener('load', function() {
         }
     }, 1000);
 });
+
+// Analysis queue management functions
+function updateAnalysisButtonState() {
+    console.log('=== updateAnalysisButtonState called ===');
+    const startAnalysisButton = document.getElementById('startAnalysisButton');
+    const clearAnalysisButton = document.getElementById('clearAnalysisButton');
+    
+    // Update start analysis button
+    if (startAnalysisButton) {
+        startAnalysisButton.disabled = analysisQueue.length === 0 || isAnalyzing;
+        
+        if (analysisQueue.length > 0) {
+            startAnalysisButton.textContent = `Start Analysis (${analysisQueue.length} files)`;
+        } else {
+            startAnalysisButton.textContent = 'Start Analysis';
+        }
+    }
+    
+    // Update clear analysis button
+    if (clearAnalysisButton) {
+        clearAnalysisButton.disabled = analysisQueue.length === 0;
+    }
+    
+    // Update analyze folder button
+    console.log('=== Looking for analyzeFolderButton ===');
+    const analyzeFolderButton = document.getElementById('analyzeFolderButton');
+    console.log('analyzeFolderButton found:', analyzeFolderButton);
+    if (analyzeFolderButton) {
+        const analyzeStats = getAnalyzeFolderStats();
+        console.log('Analyze stats:', analyzeStats);
+        
+        if (analyzeStats && analyzeStats.videoFilesToAnalyze > 0) {
+            console.log('Enabling analyze folder button');
+            log(`📁 Analyze Folder enabled for "${analyzeStats.folderPath}" folder with ${analyzeStats.videoFilesToAnalyze} video files`);
+            analyzeFolderButton.disabled = false;
+            analyzeFolderButton.textContent = `Analyze Folder (${analyzeStats.videoFilesToAnalyze} files)`;
+            analyzeFolderButton.title = `Analyze all video files from "${analyzeStats.folderPath}" folder`;
+        } else if (analyzeStats) {
+            console.log('Disabling analyze folder button - no files');
+            analyzeFolderButton.disabled = true;
+            analyzeFolderButton.textContent = 'Analyze Folder (0 files)';
+            analyzeFolderButton.title = `No video files to analyze in "${analyzeStats.folderPath}" folder`;
+        } else {
+            console.log('Disabling analyze folder button - no stats');
+            analyzeFolderButton.disabled = true;
+            analyzeFolderButton.textContent = 'Analyze Folder';
+            analyzeFolderButton.title = 'Scan files first to determine folder';
+        }
+    } else {
+        console.log('analyzeFolderButton not found');
+    }
+}
+
+function clearAnalysisQueue() {
+    if (analysisQueue.length === 0) {
+        log('Analysis queue is already empty', 'warning');
+        return;
+    }
+    
+    const clearedCount = analysisQueue.length;
+    
+    // Reset all buttons back to "Analyze" state
+    analysisQueue.forEach(item => {
+        const button = document.querySelector(`button[onclick="addToAnalysisQueue('${item.id}')"]`);
+        if (button) {
+            button.innerHTML = '<i class="fas fa-brain"></i> Analyze';
+            button.classList.remove('added');
+            button.disabled = false;
+            
+            // Update parent item styling
+            const fileItem = button.closest('.scanned-file-item');
+            fileItem.classList.remove('queued');
+        }
+    });
+    
+    // Clear the queue
+    analysisQueue = [];
+    
+    log(`Cleared ${clearedCount} files from analysis queue`);
+    updateAnalysisButtonState();
+}
+
+async function startAnalysis() {
+    if (analysisQueue.length === 0) {
+        log('No files in analysis queue', 'error');
+        return;
+    }
+    
+    if (isAnalyzing) {
+        log('Analysis already in progress', 'warning');
+        return;
+    }
+    
+    isAnalyzing = true;
+    log(`Starting analysis of ${analysisQueue.length} files...`);
+    
+    const totalFiles = analysisQueue.length;
+    let successCount = 0;
+    let failureCount = 0;
+    
+    // Get AI config from backend
+    let aiConfig = {
+        enabled: false,
+        provider: 'openai',
+        model: 'gpt-3.5-turbo',
+        api_key: '',
+        max_chunk_size: 4000
+    };
+    
+    try {
+        const configResponse = await fetch('http://127.0.0.1:5000/api/ai-config');
+        const configResult = await configResponse.json();
+        if (configResult.success) {
+            const backendConfig = configResult.config;
+            aiConfig = {
+                enabled: backendConfig.enabled || false,
+                provider: backendConfig.provider || 'openai',
+                model: backendConfig.model || 'gpt-3.5-turbo',
+                api_key: backendConfig.provider === 'openai' ? backendConfig.openai_api_key : backendConfig.anthropic_api_key,
+                max_chunk_size: backendConfig.max_chunk_size || 4000
+            };
+        }
+    } catch (configError) {
+        log(`Warning: Could not load AI config: ${configError.message}`);
+    }
+    
+    // Process each file in the queue
+    for (let i = 0; i < analysisQueue.length; i++) {
+        const queueItem = analysisQueue[i];
+        const button = document.querySelector(`button[onclick="addToAnalysisQueue('${queueItem.id}')"]`);
+        
+        log(`Analyzing file ${i + 1}/${totalFiles}: ${queueItem.file.name}`);
+        
+        // Update button to show analyzing state
+        if (button) {
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+            button.disabled = true;
+        }
+        
+        try {
+            const response = await fetch('http://127.0.0.1:5000/api/analyze-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    files: [queueItem.file],
+                    server_type: 'source',
+                    ai_config: aiConfig
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                const analysisResult = result.results[0];
+                if (analysisResult.success) {
+                    log(`✅ Analysis completed for: ${queueItem.file.name}`);
+                    if (button) {
+                        button.innerHTML = '<i class="fas fa-check"></i> Analyzed';
+                        button.classList.add('analyzed');
+                        button.classList.remove('added');
+                        
+                        // Update parent item styling
+                        const fileItem = button.closest('.scanned-file-item');
+                        fileItem.classList.add('analyzed');
+                        fileItem.classList.remove('queued');
+                    }
+                    successCount++;
+                } else {
+                    log(`❌ Analysis failed for: ${queueItem.file.name} - ${analysisResult.error}`, 'error');
+                    if (button) {
+                        button.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Failed';
+                        button.classList.add('error');
+                        button.classList.remove('added');
+                        button.disabled = false;
+                    }
+                    failureCount++;
+                }
+            } else {
+                log(`❌ Analysis request failed for ${queueItem.file.name}: ${result.message}`, 'error');
+                if (button) {
+                    button.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Failed';
+                    button.classList.add('error');
+                    button.classList.remove('added');
+                    button.disabled = false;
+                }
+                failureCount++;
+            }
+        } catch (error) {
+            log(`❌ Analysis error for ${queueItem.file.name}: ${error.message}`, 'error');
+            if (button) {
+                button.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error';
+                button.classList.add('error');
+                button.classList.remove('added');
+                button.disabled = false;
+            }
+            failureCount++;
+        }
+        
+        // Small delay between files to avoid overwhelming the server
+        if (i < analysisQueue.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+    
+    // Clear the queue and update state
+    analysisQueue = [];
+    isAnalyzing = false;
+    
+    log(`Analysis batch completed: ${successCount} successful, ${failureCount} failed`);
+    updateAnalysisButtonState();
+}

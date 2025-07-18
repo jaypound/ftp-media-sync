@@ -106,15 +106,56 @@ class FTPManager:
     def download_file(self, remote_path, local_path):
         """Download file from FTP server"""
         if not self.connected:
+            logger.info("FTP not connected, attempting to connect...")
             if not self.connect():
+                logger.error("Failed to establish FTP connection for download")
                 return False
         
         try:
+            # Handle relative paths by combining with base path
+            base_path = self.config.get('path', '/')
+            
+            if remote_path.startswith('/'):
+                # Already an absolute path
+                full_remote_path = remote_path
+            else:
+                # Relative path - combine with base path
+                if base_path.endswith('/'):
+                    full_remote_path = base_path + remote_path
+                else:
+                    full_remote_path = base_path + '/' + remote_path
+            
+            # Clean up any double slashes
+            full_remote_path = full_remote_path.replace('//', '/')
+            
+            logger.info(f"Downloading from FTP path: {full_remote_path}")
+            logger.info(f"Base path: {base_path}, Remote path: {remote_path}")
+            
+            # Create local directory if it doesn't exist
+            local_dir = os.path.dirname(local_path)
+            if local_dir and not os.path.exists(local_dir):
+                os.makedirs(local_dir, exist_ok=True)
+            
             with open(local_path, 'wb') as local_file:
-                self.ftp.retrbinary(f'RETR {remote_path}', local_file.write)
-            return True
+                self.ftp.retrbinary(f'RETR {full_remote_path}', local_file.write)
+            
+            # Verify the file was downloaded
+            if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+                logger.info(f"Successfully downloaded {os.path.getsize(local_path)} bytes")
+                return True
+            else:
+                logger.error(f"Downloaded file is empty or doesn't exist: {local_path}")
+                return False
+                
         except Exception as e:
-            logger.error(f"Download failed: {str(e)}")
+            logger.error(f"Download failed for {remote_path}: {str(e)}")
+            # Try to clean up partial file
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                    logger.info(f"Cleaned up partial download: {local_path}")
+                except:
+                    pass
             return False
     
     def upload_file(self, local_path, remote_path):

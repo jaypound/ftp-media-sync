@@ -4,9 +4,26 @@ import json
 from ftp_manager import FTPManager
 from file_scanner import FileScanner
 from config_manager import ConfigManager
+from file_analyzer import file_analyzer
+from database import db_manager
 import logging
+from bson import ObjectId
+from datetime import datetime
+
+def convert_objectid_to_string(obj):
+    """Convert ObjectId and datetime objects to JSON serializable format"""
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: convert_objectid_to_string(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_objectid_to_string(item) for item in obj]
+    return obj
 
 app = Flask(__name__)
+
 # Configure CORS to allow requests from the frontend
 CORS(app, resources={
     r"/api/*": {
@@ -26,6 +43,9 @@ logger = logging.getLogger(__name__)
 # Global managers
 ftp_managers = {}
 config_manager = ConfigManager()
+
+# Initialize database connection
+db_manager.connect()
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
@@ -252,6 +272,136 @@ def sync_files():
         error_msg = f"Sync error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg, 'details': error_msg})
+
+@app.route('/api/analysis-status', methods=['POST'])
+def get_analysis_status():
+    """Get analysis status for a list of files"""
+    logger.info("=== ANALYSIS STATUS REQUEST ===")
+    try:
+        data = request.json
+        files = data.get('files', [])
+        
+        logger.info(f"Checking analysis status for {len(files)} files")
+        
+        # Connect to database if not already connected
+        if db_manager.collection is None:
+            success = db_manager.connect()
+            if not success:
+                return jsonify({
+                    'success': False, 
+                    'message': 'Failed to connect to database'
+                })
+        
+        # Get analysis status
+        status_result = file_analyzer.get_analysis_status(files)
+        
+        if status_result.get('success'):
+            logger.info(f"Analysis status: {status_result['analyzed_count']}/{status_result['total_count']} files analyzed")
+            # Convert any ObjectId objects to strings before returning
+            safe_result = convert_objectid_to_string(status_result)
+            return jsonify(safe_result)
+        else:
+            logger.error(f"Failed to get analysis status: {status_result.get('error')}")
+            return jsonify(status_result)
+            
+    except Exception as e:
+        error_msg = f"Analysis status error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/analyze-files', methods=['POST'])
+def analyze_files():
+    """Start analysis of selected files"""
+    logger.info("=== ANALYZE FILES REQUEST ===")
+    try:
+        data = request.json
+        files = data.get('files', [])
+        server_type = data.get('server_type', 'source')
+        
+        # Get AI config from config manager
+        ai_config = config_manager.get_ai_analysis_settings()
+        
+        # Override with any config from request
+        if 'ai_config' in data:
+            ai_config.update(data['ai_config'])
+        
+        logger.info(f"Starting analysis of {len(files)} files from {server_type} server")
+        logger.info(f"AI config: provider={ai_config.get('provider')}, enabled={ai_config.get('enabled')}")
+        
+        # Check if server is connected
+        if server_type not in ftp_managers:
+            return jsonify({
+                'success': False, 
+                'message': f'{server_type} server not connected'
+            })
+        
+        # Connect to database if not already connected
+        if db_manager.collection is None:
+            success = db_manager.connect()
+            if not success:
+                return jsonify({
+                    'success': False, 
+                    'message': 'Failed to connect to database'
+                })
+        
+        # Get the FTP manager
+        ftp_manager = ftp_managers[server_type]
+        
+        # Start analysis
+        results = file_analyzer.analyze_batch(files, ftp_manager, ai_config)
+        
+        # Count success/failure
+        success_count = sum(1 for r in results if r.get('success'))
+        failure_count = len(results) - success_count
+        
+        logger.info(f"Analysis batch completed: {success_count} successful, {failure_count} failed")
+        
+        # Convert any ObjectId objects to strings before returning
+        safe_results = convert_objectid_to_string(results)
+        
+        return jsonify({
+            'success': True,
+            'results': safe_results,
+            'summary': {
+                'total': len(results),
+                'successful': success_count,
+                'failed': failure_count
+            }
+        })
+        
+    except Exception as e:
+        error_msg = f"Analysis error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/ai-config', methods=['GET'])
+def get_ai_config():
+    """Get AI analysis configuration"""
+    try:
+        ai_config = config_manager.get_ai_analysis_settings()
+        # Don't send API keys to frontend for security
+        safe_config = ai_config.copy()
+        safe_config['openai_api_key'] = '***' if ai_config.get('openai_api_key') else ''
+        safe_config['anthropic_api_key'] = '***' if ai_config.get('anthropic_api_key') else ''
+        return jsonify({'success': True, 'config': safe_config})
+    except Exception as e:
+        logger.error(f"Error getting AI config: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/ai-config', methods=['POST'])
+def save_ai_config():
+    """Save AI analysis configuration"""
+    try:
+        data = request.json
+        
+        # Update AI analysis settings
+        if 'ai_analysis' in data:
+            config_manager.update_ai_analysis_settings(data['ai_analysis'])
+        
+        return jsonify({'success': True, 'message': 'AI configuration saved'})
+    except Exception as e:
+        logger.error(f"Error saving AI config: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

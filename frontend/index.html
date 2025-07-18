@@ -28,6 +28,10 @@
                     <i class="fas fa-cog"></i>
                     Settings
                 </button>
+                <button class="nav-item" onclick="showPanel('ai-settings')">
+                    <i class="fas fa-brain"></i>
+                    AI Settings
+                </button>
                 <button class="nav-item" onclick="showPanel('admin')">
                     <i class="fas fa-tools"></i>
                     Admin
@@ -97,11 +101,23 @@
                     <button class="button" onclick="compareFiles()" disabled>
                         <i class="fas fa-balance-scale"></i> Compare Files
                     </button>
+                    <button class="button" onclick="analyzeFiles()" disabled id="analyzeFilesBtn">
+                        <i class="fas fa-brain"></i> Analyze Files
+                    </button>
                     <button class="button success" onclick="addAllToSyncQueue()">
                         <i class="fas fa-plus"></i> Add All to Sync
                     </button>
                     <button class="button" id="addFolderButton" onclick="addAllFromFolderToSyncQueue()" disabled>
                         <i class="fas fa-folder-plus"></i> Add Folder
+                    </button>
+                    <button class="button analysis" id="analyzeFolderButton" onclick="analyzeAllFromFolder()" disabled>
+                        <i class="fas fa-brain"></i> Analyze Folder
+                    </button>
+                    <button class="button primary" id="startAnalysisButton" onclick="startAnalysis()" disabled>
+                        <i class="fas fa-play"></i> Start Analysis
+                    </button>
+                    <button class="button warning" onclick="clearAnalysisQueue()" id="clearAnalysisButton" disabled>
+                        <i class="fas fa-trash"></i> Clear Analysis Queue
                     </button>
                     <button class="button warning" onclick="clearSyncQueue()">
                         <i class="fas fa-trash"></i> Clear Queue
@@ -251,6 +267,77 @@
             </div>
         </div>
 
+        <!-- AI Settings Panel -->
+        <div id="ai-settings" class="panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-brain"></i> AI Analysis Settings</h2>
+                <p>Configure AI provider and analysis options</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="settings-card">
+                    <h3><i class="fas fa-toggle-on"></i> AI Analysis</h3>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="aiEnabled">
+                        <label for="aiEnabled">Enable AI analysis</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="transcriptionOnly">
+                        <label for="transcriptionOnly">Transcription only (no AI analysis)</label>
+                    </div>
+                </div>
+                
+                <div class="settings-card">
+                    <h3><i class="fas fa-robot"></i> AI Provider</h3>
+                    <div class="form-group">
+                        <label for="aiProvider">AI Provider</label>
+                        <select id="aiProvider">
+                            <option value="openai">OpenAI (GPT)</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiModel">AI Model</label>
+                        <select id="aiModel">
+                            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                            <option value="gpt-4">GPT-4</option>
+                            <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                            <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="settings-card">
+                    <h3><i class="fas fa-key"></i> API Keys</h3>
+                    <div class="form-group">
+                        <label for="openaiApiKey">OpenAI API Key</label>
+                        <input type="password" id="openaiApiKey" placeholder="sk-...">
+                    </div>
+                    <div class="form-group">
+                        <label for="anthropicApiKey">Anthropic API Key</label>
+                        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxChunkSize">Max Chunk Size</label>
+                        <input type="number" id="maxChunkSize" placeholder="4000" value="4000">
+                        <small>Maximum characters per AI analysis chunk</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="ai-settings-actions">
+                <button class="button primary" onclick="saveAISettings()">
+                    <i class="fas fa-save"></i> Save AI Settings
+                </button>
+                <button class="button secondary" onclick="loadAISettings()">
+                    <i class="fas fa-download"></i> Load AI Settings
+                </button>
+                <button class="button warning" onclick="testAIConnection()">
+                    <i class="fas fa-vial"></i> Test AI Connection
+                </button>
+            </div>
+        </div>
+
         <!-- Admin Panel -->
         <div id="admin" class="panel">
             <div class="panel-header">
@@ -330,6 +417,25 @@
                 </div>
             </div>
             <div id="fileList" class="file-list"></div>
+        </div>
+
+        <!-- File Analysis Results -->
+        <div class="card" id="analysisCard" style="display: none;">
+            <div class="card-header">
+                <h3><i class="fas fa-brain"></i> File Analysis Results</h3>
+                <div class="analysis-summary" id="analysisSummary">
+                    <span id="analysisSummaryText">No analysis results yet</span>
+                </div>
+                <div class="analysis-buttons">
+                    <button class="button secondary small" id="toggleAnalysisBtn" onclick="toggleAnalysisView()">
+                        <i class="fas fa-eye"></i> Show All Files
+                    </button>
+                    <button class="button secondary small" id="startAnalysisBtn" onclick="startAnalysis()" disabled>
+                        <i class="fas fa-play"></i> Start Analysis
+                    </button>
+                </div>
+            </div>
+            <div id="analysisFileList" class="file-list"></div>
         </div>
 
         <div class="card">

@@ -228,6 +228,22 @@ body {
     align-items: center;
 }
 
+.analysis-summary {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin-right: 1rem;
+}
+
+.analysis-summary span {
+    font-weight: 500;
+}
+
+.analysis-buttons {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
 .file-item.target-only {
     background: #e0f2fe;
     border-left: 4px solid #0288d1;
@@ -239,6 +255,61 @@ body {
 
 .file-item.target-only .file-size {
     color: #0277bd;
+}
+
+.file-item.analyzed {
+    background: #e8f5e8;
+    border-left: 4px solid #4caf50;
+}
+
+.file-item.analyzing {
+    background: #fff3e0;
+    border-left: 4px solid #ff9800;
+}
+
+.file-item.analysis-error {
+    background: #ffebee;
+    border-left: 4px solid #f44336;
+}
+
+.analyze-btn {
+    transition: all 0.3s ease;
+    min-width: 140px;
+}
+
+.analyze-btn.analyzed {
+    background: var(--success-color) !important;
+    color: white !important;
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+.analyze-btn.analyzing {
+    background: var(--warning-color) !important;
+    color: white !important;
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+.analyze-btn.error {
+    background: var(--danger-color) !important;
+    color: white !important;
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+.analyze-btn.added {
+    background: #9c27b0 !important;
+    color: white !important;
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+.analyze-btn.analyzed:hover,
+.analyze-btn.analyzing:hover,
+.analyze-btn.added:hover {
+    transform: none;
+    opacity: 0.8;
 }
 
 /* Stats Grid */
@@ -572,6 +643,15 @@ small {
     background: var(--danger-hover);
 }
 
+.button.analysis {
+    background: #9c27b0;
+    color: white;
+}
+
+.button.analysis:hover {
+    background: #7b1fa2;
+}
+
 /* Action Buttons */
 .action-buttons {
     display: flex;
@@ -749,10 +829,33 @@ small {
     padding: 0.75rem;
     margin-bottom: 0.5rem;
     transition: background-color 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .scanned-file-item:hover {
     background: var(--background-color);
+}
+
+.scanned-file-item.analyzed {
+    background: #e8f5e8;
+    border-color: #4caf50;
+}
+
+.scanned-file-item.queued {
+    background: #f3e5f5;
+    border-color: #9c27b0;
+}
+
+.scanned-file-content {
+    flex: 1;
+}
+
+.scanned-file-actions {
+    margin-left: 1rem;
+    display: flex;
+    gap: 0.5rem;
 }
 
 .scanned-file-name {
@@ -789,6 +892,21 @@ small {
     border: 1px solid var(--border-color);
     line-height: 1.4;
     white-space: pre-wrap;
+}
+
+/* AI Settings */
+.ai-settings-actions {
+    margin-top: 2rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.ai-settings-actions .button {
+    flex: 1;
+    min-width: 150px;
+    max-width: 200px;
 }
 
 /* Add to Sync Button States */
