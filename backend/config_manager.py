@@ -46,6 +46,16 @@ class ConfigManager:
                 "auto_save_config": True,
                 "show_file_paths": True,
                 "max_files_display": 1000
+            },
+            "ai_analysis": {
+                "enabled": False,
+                "provider": "openai",
+                "openai_api_key": "",
+                "anthropic_api_key": "",
+                "model": "gpt-3.5-turbo",
+                "max_chunk_size": 4000,
+                "enable_batch_analysis": True,
+                "transcription_only": False
             }
         }
     
@@ -122,6 +132,20 @@ class ConfigManager:
         """Get UI settings"""
         return self.config.get("ui_settings", {})
     
+    def get_ai_analysis_settings(self) -> Dict[str, Any]:
+        """Get AI analysis settings"""
+        return self.config.get("ai_analysis", {})
+    
+    def update_ai_analysis_settings(self, settings: Dict[str, Any]):
+        """Update AI analysis settings"""
+        if "ai_analysis" not in self.config:
+            self.config["ai_analysis"] = {}
+        
+        self.config["ai_analysis"].update(settings)
+        
+        if self.config.get("ui_settings", {}).get("auto_save_config", True):
+            self.save_config()
+    
     def create_sample_config(self, filename="config.sample.json"):
         """Create a sample configuration file with examples"""
         sample_config = {
@@ -157,6 +181,16 @@ class ConfigManager:
                 "auto_save_config": True,
                 "show_file_paths": True,
                 "max_files_display": 1000
+            },
+            "ai_analysis": {
+                "enabled": False,
+                "provider": "openai",
+                "openai_api_key": "your-openai-api-key-here",
+                "anthropic_api_key": "your-anthropic-api-key-here",
+                "model": "gpt-3.5-turbo",
+                "max_chunk_size": 4000,
+                "enable_batch_analysis": True,
+                "transcription_only": False
             }
         }
         
