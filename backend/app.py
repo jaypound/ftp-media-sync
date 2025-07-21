@@ -8,6 +8,7 @@ from file_scanner import FileScanner
 from config_manager import ConfigManager
 from file_analyzer import file_analyzer
 from database import db_manager
+from scheduler import scheduler
 import logging
 from bson import ObjectId
 from datetime import datetime
@@ -547,6 +548,296 @@ def save_ai_config():
     except Exception as e:
         logger.error(f"Error saving AI config: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/analyzed-content', methods=['POST'])
+def get_analyzed_content():
+    """Get analyzed content for scheduling with filters"""
+    logger.info("=== ANALYZED CONTENT REQUEST ===")
+    try:
+        data = request.json
+        content_type = data.get('content_type', '')
+        duration_category = data.get('duration_category', '')
+        search = data.get('search', '').lower()
+        
+        logger.info(f"Filters: content_type={content_type}, duration_category={duration_category}, search={search}")
+        
+        # Connect to database if not already connected
+        if db_manager.collection is None:
+            success = db_manager.connect()
+            if not success:
+                return jsonify({
+                    'success': False, 
+                    'message': 'Failed to connect to database'
+                })
+        
+        # Build query filters
+        query = {"analysis_completed": True}
+        
+        # Filter by content type
+        if content_type:
+            query["content_type"] = content_type
+        
+        # Filter by duration category
+        if duration_category:
+            query["duration_category"] = duration_category
+        
+        # Get all analyzed content
+        logger.info(f"Query: {query}")
+        cursor = db_manager.collection.find(query)
+        all_content = list(cursor)
+        logger.info(f"Found {len(all_content)} content items before filtering")
+        
+        # Apply additional filters
+        filtered_content = []
+        for content in all_content:
+            # Text search filter
+            if search:
+                searchable_text = f"{content.get('file_name', '')} {content.get('content_title', '')} {content.get('summary', '')}".lower()
+                if search not in searchable_text:
+                    continue
+            
+            # Check if content is still available for scheduling (not expired)
+            scheduling = content.get('scheduling', {})
+            available_for_scheduling = scheduling.get('available_for_scheduling', True)
+            
+            if available_for_scheduling:
+                # Check expiry date
+                expiry_date = scheduling.get('content_expiry_date')
+                if expiry_date and isinstance(expiry_date, datetime):
+                    if expiry_date < datetime.utcnow():
+                        # Content has expired
+                        continue
+                
+                filtered_content.append(content)
+        
+        logger.info(f"After filtering: {len(filtered_content)} content items")
+        
+        # Convert ObjectIds and sort by priority score
+        safe_content = convert_objectid_to_string(filtered_content)
+        
+        # Sort by priority score (highest first) and then by engagement score
+        sorted_content = sorted(safe_content, key=lambda x: (
+            x.get('scheduling', {}).get('priority_score', 0),
+            x.get('engagement_score', 0)
+        ), reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'content': sorted_content,
+            'count': len(sorted_content),
+            'filters_applied': {
+                'content_type': content_type,
+                'duration_category': duration_category,
+                'search': search
+            }
+        })
+        
+    except Exception as e:
+        error_msg = f"Analyzed content error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/create-schedule', methods=['POST'])
+def create_schedule():
+    """Create a daily schedule for ATL26"""
+    logger.info("=== CREATE SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        schedule_date = data.get('date')
+        timeslot = data.get('timeslot')  # Optional - if not provided, creates all timeslots
+        use_engagement = data.get('use_engagement_scoring', True)
+        
+        logger.info(f"Creating schedule for date: {schedule_date}, timeslot: {timeslot or 'all timeslots'}, engagement: {use_engagement}")
+        
+        if not schedule_date:
+            return jsonify({
+                'success': False,
+                'message': 'Schedule date is required'
+            })
+        
+        # Create schedule using scheduler (timeslot is optional)
+        result = scheduler.create_daily_schedule(schedule_date, timeslot, use_engagement)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        error_msg = f"Create schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/get-schedule', methods=['POST'])
+def get_schedule():
+    """Get schedule for a specific date and timeslot"""
+    logger.info("=== GET SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        date = data.get('date')
+        timeslot = data.get('timeslot')
+        
+        logger.info(f"Getting schedule for date: {date}, timeslot: {timeslot}")
+        
+        if not date:
+            return jsonify({
+                'success': False,
+                'message': 'Date is required'
+            })
+        
+        # Get schedule
+        schedule = scheduler.get_schedule(date, timeslot)
+        
+        if schedule:
+            return jsonify({
+                'success': True,
+                'schedule': scheduler.convert_schedule_for_json(schedule)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'No schedule found for {date}' + (f' {timeslot}' if timeslot else '')
+            })
+        
+    except Exception as e:
+        error_msg = f"Get schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/delete-schedule', methods=['POST'])
+def delete_schedule():
+    """Delete a schedule by ID"""
+    logger.info("=== DELETE SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        schedule_id = data.get('schedule_id')
+        
+        logger.info(f"Deleting schedule: {schedule_id}")
+        
+        if not schedule_id:
+            return jsonify({
+                'success': False,
+                'message': 'Schedule ID is required'
+            })
+        
+        # Delete schedule
+        result = scheduler.delete_schedule(schedule_id)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        error_msg = f"Delete schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/list-schedules', methods=['GET'])
+def list_schedules():
+    """List all schedules with optional date range"""
+    logger.info("=== LIST SCHEDULES REQUEST ===")
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        logger.info(f"Listing schedules from {start_date} to {end_date}")
+        
+        # Get schedules
+        schedules = scheduler.get_all_schedules(start_date, end_date)
+        
+        return jsonify({
+            'success': True,
+            'schedules': schedules,
+            'count': len(schedules)
+        })
+        
+    except Exception as e:
+        error_msg = f"List schedules error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/preview-schedule', methods=['POST'])
+def preview_schedule():
+    """Preview a schedule without saving it"""
+    logger.info("=== PREVIEW SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        schedule_date = data.get('date')
+        timeslot = data.get('timeslot')
+        use_engagement = data.get('use_engagement_scoring', True)
+        
+        logger.info(f"Previewing schedule for date: {schedule_date}, timeslot: {timeslot}")
+        
+        if not schedule_date or not timeslot:
+            return jsonify({
+                'success': False,
+                'message': 'Date and timeslot are required'
+            })
+        
+        # Get available content
+        from datetime import datetime
+        target_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+        available_content = scheduler.get_available_content_for_timeslot(timeslot, target_date)
+        
+        if not available_content:
+            return jsonify({
+                'success': False,
+                'message': f'No available content found for {timeslot} timeslot'
+            })
+        
+        # Create preview schedule
+        if use_engagement:
+            preview_items = scheduler.create_engagement_based_schedule(available_content, timeslot, target_date)
+        else:
+            preview_items = scheduler.create_basic_schedule(available_content, timeslot, target_date)
+        
+        # Calculate statistics
+        total_duration = sum(item['duration'] for item in preview_items)
+        timeslot_config = scheduler.config['timeslots'].get(timeslot, {})
+        timeslot_duration = timeslot_config.get('duration_hours', 3) * 3600
+        
+        preview_data = {
+            'items': preview_items,
+            'total_items': len(preview_items),
+            'total_duration': total_duration,
+            'total_duration_formatted': f"{total_duration // 60}m {total_duration % 60}s",
+            'timeslot_duration': timeslot_duration,
+            'fill_percentage': (total_duration / timeslot_duration * 100) if timeslot_duration > 0 else 0,
+            'available_content_count': len(available_content),
+            'engagement_scoring_enabled': use_engagement
+        }
+        
+        return jsonify({
+            'success': True,
+            'preview': preview_data
+        })
+        
+    except Exception as e:
+        error_msg = f"Preview schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/create-weekly-schedule', methods=['POST'])
+def create_weekly_schedule():
+    """Create a weekly schedule for ATL26"""
+    logger.info("=== CREATE WEEKLY SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        start_date = data.get('start_date')
+        use_engagement = data.get('use_engagement_scoring', True)
+        
+        logger.info(f"Creating weekly schedule starting: {start_date}, engagement: {use_engagement}")
+        
+        if not start_date:
+            return jsonify({
+                'success': False,
+                'message': 'Start date is required'
+            })
+        
+        # Create weekly schedule using scheduler
+        result = scheduler.create_weekly_schedule(start_date, use_engagement)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        error_msg = f"Create weekly schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

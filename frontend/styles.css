@@ -996,3 +996,787 @@ small {
         flex-direction: column;
     }
 }
+
+/* ========================================
+   SCHEDULING SYSTEM STYLES
+   ======================================== */
+
+.scheduling-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin: 2rem 0;
+}
+
+.scheduling-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 0;
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.scheduling-card.collapsed .card-content {
+    display: none;
+}
+
+.scheduling-card:not(.collapsed) {
+    margin-bottom: 1rem;
+}
+
+.scheduling-card h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 1rem 1.5rem;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background 0.2s ease;
+    user-select: none;
+}
+
+.scheduling-card h3:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.scheduling-card h3::after {
+    content: '▼';
+    font-size: 0.8rem;
+    transition: transform 0.3s ease;
+}
+
+.scheduling-card.collapsed h3::after {
+    transform: rotate(-90deg);
+}
+
+.card-content {
+    padding: 1.5rem;
+}
+
+.config-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+}
+
+.config-buttons .button {
+    padding: 0.75rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.content-filters {
+    margin-bottom: 1rem;
+}
+
+.filter-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.filter-row select,
+.filter-row input[type="text"] {
+    flex: 1;
+    min-width: 120px;
+    padding: 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+    font-size: 0.9rem;
+}
+
+.content-list {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* Analysis Monitor Styles */
+.analysis-monitor {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+
+.monitor-header h4 {
+    margin: 0 0 0.5rem 0;
+    color: #ffc107;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.monitor-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.monitor-stats span {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.analysis-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.content-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 0.75rem;
+}
+
+.content-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.content-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.content-title {
+    font-weight: 600;
+    color: var(--text-color);
+    font-size: 0.95rem;
+}
+
+.content-type,
+.content-duration,
+.engagement-score {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.content-type {
+    font-weight: 500;
+    color: var(--primary-color);
+}
+
+.engagement-score {
+    color: var(--success-color);
+}
+
+.content-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.schedule-creation,
+.schedule-management {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.schedule-buttons {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.schedule-display {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-height: 200px;
+    width: 100%;
+    color: rgba(255, 255, 255, 0.7);
+    overflow-x: auto;
+}
+
+/* Schedule List Styles */
+.schedule-list-header {
+    margin-bottom: 20px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 10px;
+}
+
+.schedule-list {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.schedule-date-group {
+    margin-bottom: 25px;
+    background: var(--card-background);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid var(--border-color);
+}
+
+.schedule-date-group h5 {
+    margin: 0 0 15px 0;
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.schedule-list-item {
+    background: var(--background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+
+.schedule-list-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.1);
+}
+
+.schedule-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.timeslot-badge {
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.schedule-stats {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.schedule-item-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.schedule-item-actions .button.small {
+    padding: 4px 8px;
+    font-size: 11px;
+    min-width: auto;
+}
+
+.schedule-item-details {
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-top: 5px;
+}
+
+/* Schedule Table Display Styles */
+.schedule-table-header {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 20px;
+    padding: 12px 15px;
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    border-radius: 8px 8px 0 0;
+    font-size: 14px;
+    min-width: 300px;
+}
+
+
+.schedule-item-row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    min-width: 300px;
+    gap: 20px;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--card-background);
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    transition: background-color 0.2s ease;
+}
+
+.schedule-item-row:hover {
+    background: var(--background-color);
+}
+
+.schedule-item-row:last-child {
+    border-radius: 0 0 8px 8px;
+}
+
+.col-start-time,
+.col-end-time,
+.col-duration {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.col-title {
+    color: var(--text-primary);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.col-content-type {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.schedule-no-items {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Mobile responsiveness for schedule table */
+@media (max-width: 600px) {
+    .schedule-table-header,
+    .schedule-item-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    
+    .schedule-table-header span,
+    .schedule-item-row span {
+        padding: 4px 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    
+    .schedule-table-header span:last-child,
+    .schedule-item-row span:last-child {
+        border-bottom: none;
+    }
+    
+    .col-start-time::before { content: "Start: "; font-weight: 600; }
+    .col-title::before { content: "Title: "; font-weight: 600; }
+}
+
+/* Available Content Display Styles */
+.available-content {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.content-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    margin-bottom: 10px;
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.content-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.1);
+}
+
+.content-info {
+    flex: 1;
+}
+
+.content-title {
+    display: block;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.content-type,
+.content-duration,
+.engagement-score {
+    display: inline-block;
+    margin-right: 15px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.content-type {
+    background: var(--primary-color);
+    color: white;
+}
+
+.content-duration {
+    background: var(--secondary-color);
+    color: white;
+}
+
+.engagement-score {
+    background: var(--success-color);
+    color: white;
+}
+
+.content-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.error-message {
+    padding: 20px;
+    background: var(--card-background);
+    border: 1px solid var(--warning-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+}
+
+.error-message p {
+    margin: 0 0 10px 0;
+}
+
+.error-message ol {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+/* Modal Styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(5px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: var(--card-bg);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--primary-color);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.config-section h4 {
+    margin: 0 0 1rem 0;
+    color: var(--text-color);
+}
+
+.config-section p {
+    margin: 0 0 1.5rem 0;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+}
+
+.duration-config,
+.timeslot-config,
+.replay-config,
+.expiration-config {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.range-inputs input[type="number"] {
+    width: 80px;
+    padding: 0.4rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+    text-align: center;
+}
+
+.expiration-note {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: 4px;
+}
+
+.expiration-note p {
+    margin: 0;
+    color: rgba(255, 193, 7, 0.9);
+    font-size: 0.85rem;
+}
+
+.placeholder-content {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.placeholder-content p:first-child {
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-color);
+}
+
+.placeholder-content p:last-child {
+    font-style: italic;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 1rem;
+}
+
+/* Responsive Scheduling Styles */
+@media (max-width: 480px) {
+    
+    .config-buttons {
+        grid-template-columns: 1fr;
+    }
+    
+    .filter-row {
+        flex-direction: column;
+    }
+    
+    .filter-row select,
+    .filter-row input[type="text"] {
+        min-width: unset;
+    }
+    
+    .content-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .content-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    
+    .schedule-buttons {
+        flex-direction: column;
+    }
+    
+    .modal-content {
+        width: 95%;
+        margin: 1rem;
+    }
+    
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+        padding: 1rem;
+    }
+    
+    .range-inputs {
+        flex-wrap: wrap;
+    }
+    
+    .range-inputs input[type="number"] {
+        width: 60px;
+    }
+}
+
+/* Schedule Display Styles */
+.schedule-header {
+    background: rgba(74, 144, 226, 0.1);
+    border: 1px solid rgba(74, 144, 226, 0.3);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.schedule-header h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--primary-color);
+    font-size: 1.1rem;
+}
+
+.schedule-header p {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.schedule-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.schedule-item {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 0.75rem;
+    transition: background 0.2s ease;
+}
+
+.schedule-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.schedule-item-order {
+    background: var(--primary-color);
+    color: white;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+}
+
+.schedule-item-info {
+    flex: 1;
+}
+
+.schedule-item-title {
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 0.25rem;
+    font-size: 0.95rem;
+}
+
+.schedule-item-meta {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+}
+
+.schedule-item-meta .content-type {
+    background: var(--primary-color);
+    color: white;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+.schedule-item-meta .duration,
+.schedule-item-meta .scheduled-time {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.schedule-item-meta .engagement-score {
+    color: var(--success-color);
+    font-weight: 500;
+}
+
+.schedule-item-meta .priority-score {
+    color: #ffc107;
+    font-weight: 500;
+}
+
+/* Mobile responsiveness for schedule items */
+@media (max-width: 768px) {
+    .schedule-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .schedule-item-order {
+        align-self: flex-start;
+        margin-right: 0;
+    }
+    
+    .schedule-item-meta {
+        gap: 0.5rem;
+    }
+    
+    .schedule-header h4 {
+        font-size: 1rem;
+    }
+    
+    .schedule-header p {
+        font-size: 0.85rem;
+    }
+}

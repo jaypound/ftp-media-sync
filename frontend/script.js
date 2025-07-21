@@ -8,6 +8,16 @@ let targetOnlyFiles = []; // Files that exist on target but not on source
 let deleteQueue = []; // Files queued for deletion
 let analysisQueue = []; // Files queued for analysis
 let analysisResults = []; // Store analysis results
+
+// Analysis monitoring variables
+let analysisStartTime = null;
+let lastProgressTime = null;
+let currentAnalysisFile = null;
+let analysisTimeoutId = null;
+let stalledFileCount = 0;
+let maxStallTime = 300000; // 5 minutes
+let maxFileProcessingTime = 600000; // 10 minutes per file
+let autoRestartEnabled = true;
 let showAllFiles = false; // Toggle for showing all files vs unsynced only
 let showTargetOnly = false; // Toggle for showing target-only files
 let showAnalysisAll = false; // Toggle for showing all analysis files
@@ -2094,6 +2104,9 @@ window.addEventListener('load', function() {
     // Load AI settings on page load
     loadAISettings();
     
+    // Initialize collapsible cards
+    initializeCollapsibleCards();
+    
     // Initialize with dashboard panel
     showPanel('dashboard');
     
@@ -2232,6 +2245,10 @@ async function startAnalysis() {
     stopAnalysisRequested = false;
     log(`Starting analysis of ${analysisQueue.length} files...`);
     
+    // Start monitoring
+    startAnalysisMonitoring();
+    startMonitorDisplayUpdate();
+    
     updateAnalysisButtonState();
     updateAnalyzeAllButtonState();
     
@@ -2278,6 +2295,9 @@ async function startAnalysis() {
         const button = document.querySelector(`button[onclick="addToAnalysisQueue('${queueItem.id}')"]`);
         
         log(`Analyzing file ${i + 1}/${totalFiles}: ${queueItem.file.name}`);
+        
+        // Update progress tracking
+        updateAnalysisProgress(queueItem.file.name);
         
         // Update button to show analyzing state
         if (button) {
@@ -2387,6 +2407,9 @@ async function startAnalysis() {
     isAnalyzing = false;
     stopAnalysisRequested = false;
     
+    // Stop monitoring
+    stopAnalysisMonitoring();
+    
     if (wasStopped) {
         log(`Analysis stopped: ${successCount} successful, ${failureCount} failed, ${analysisQueue.length} remaining`);
         
@@ -2419,6 +2442,9 @@ function stopAnalysis() {
     
     log('Stopping analysis...', 'warning');
     stopAnalysisRequested = true;
+    
+    // Stop monitoring when manually stopped
+    stopAnalysisMonitoring();
     
     // Update button state immediately to show stopping
     const stopAnalysisButton = document.getElementById('stopAnalysisButton');
@@ -2829,3 +2855,1364 @@ function updateBulkDeleteButtonStates() {
         }
     }
 }
+
+// ========================================
+// SCHEDULING SYSTEM FUNCTIONS
+// ========================================
+
+// Scheduling Constants and Configuration
+const SCHEDULING_CONFIG = {
+    // Duration categories in seconds
+    DURATION_CATEGORIES: {
+        id: { min: 0, max: 16, label: 'ID (< 16s)' },
+        spots: { min: 16, max: 120, label: 'Spots (16s - 2min)' },
+        short_form: { min: 120, max: 1200, label: 'Short Form (2-20min)' },
+        long_form: { min: 1200, max: Infinity, label: 'Long Form (> 20min)' }
+    },
+    
+    // Timeslots with hours (24-hour format)
+    TIMESLOTS: {
+        overnight: { start: 0, end: 6, label: 'Overnight (12-6 AM)' },
+        early_morning: { start: 6, end: 9, label: 'Early Morning (6-9 AM)' },
+        morning: { start: 9, end: 12, label: 'Morning (9 AM-12 PM)' },
+        afternoon: { start: 12, end: 18, label: 'Afternoon (12-6 PM)' },
+        prime_time: { start: 18, end: 21, label: 'Prime Time (6-9 PM)' },
+        evening: { start: 21, end: 24, label: 'Evening (9 PM-12 AM)' }
+    },
+    
+    // Default replay delays (in hours)
+    REPLAY_DELAYS: {
+        id: 6,
+        spots: 12,
+        short_form: 24,
+        long_form: 48
+    },
+    
+    // Default content expiration (in days)
+    CONTENT_EXPIRATION: {
+        id: 30,
+        spots: 60,
+        short_form: 90,
+        long_form: 180
+    }
+};
+
+// Global variables for scheduling
+let availableContent = [];
+let currentSchedule = null;
+let scheduleConfig = SCHEDULING_CONFIG;
+
+// Initialize scheduling dates to today
+function initializeSchedulingDates() {
+    const today = new Date().toISOString().split('T')[0];
+    const scheduleDate = document.getElementById('scheduleDate');
+    const viewScheduleDate = document.getElementById('viewScheduleDate');
+    
+    if (scheduleDate) scheduleDate.value = today;
+    if (viewScheduleDate) viewScheduleDate.value = today;
+}
+
+// Configuration Modal Functions
+function showScheduleConfig(configType) {
+    const modal = document.getElementById('configModal');
+    const title = document.getElementById('configModalTitle');
+    const body = document.getElementById('configModalBody');
+    
+    let titleText = '';
+    let bodyContent = '';
+    
+    switch (configType) {
+        case 'durations':
+            titleText = 'Duration Categories Configuration';
+            bodyContent = generateDurationConfigHTML();
+            break;
+        case 'timeslots':
+            titleText = 'Timeslots Configuration';
+            bodyContent = generateTimeslotConfigHTML();
+            break;
+        case 'replay':
+            titleText = 'Replay Delays Configuration';
+            bodyContent = generateReplayConfigHTML();
+            break;
+        case 'expiration':
+            titleText = 'Content Expiration Configuration';
+            bodyContent = generateExpirationConfigHTML();
+            break;
+    }
+    
+    title.textContent = titleText;
+    body.innerHTML = bodyContent;
+    modal.style.display = 'block';
+    body.setAttribute('data-config-type', configType);
+}
+
+function generateDurationConfigHTML() {
+    return `
+        <div class="config-section">
+            <h4>Configure Duration Categories</h4>
+            <p>Set the time ranges for each content duration category (in seconds):</p>
+            
+            <div class="duration-config">
+                <div class="form-group">
+                    <label>ID (Station Identifiers)</label>
+                    <div class="range-inputs">
+                        <input type="number" id="id_min" value="0" min="0" readonly> to 
+                        <input type="number" id="id_max" value="16" min="1"> seconds
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Spots (Commercials/PSAs)</label>
+                    <div class="range-inputs">
+                        <input type="number" id="spots_min" value="16" min="1"> to 
+                        <input type="number" id="spots_max" value="120" min="1"> seconds
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Short Form Content</label>
+                    <div class="range-inputs">
+                        <input type="number" id="short_form_min" value="120" min="1"> to 
+                        <input type="number" id="short_form_max" value="1200" min="1"> seconds
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Long Form Content</label>
+                    <div class="range-inputs">
+                        <input type="number" id="long_form_min" value="1200" min="1"> seconds and above
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function generateTimeslotConfigHTML() {
+    return `
+        <div class="config-section">
+            <h4>Configure Broadcasting Timeslots</h4>
+            <p>Set the hour ranges for each timeslot (24-hour format):</p>
+            
+            <div class="timeslot-config">
+                <div class="form-group">
+                    <label>Overnight</label>
+                    <div class="range-inputs">
+                        <input type="number" id="overnight_start" value="0" min="0" max="23"> to 
+                        <input type="number" id="overnight_end" value="6" min="1" max="24"> hours
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Early Morning</label>
+                    <div class="range-inputs">
+                        <input type="number" id="early_morning_start" value="6" min="0" max="23"> to 
+                        <input type="number" id="early_morning_end" value="9" min="1" max="24"> hours
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Morning</label>
+                    <div class="range-inputs">
+                        <input type="number" id="morning_start" value="9" min="0" max="23"> to 
+                        <input type="number" id="morning_end" value="12" min="1" max="24"> hours
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Afternoon</label>
+                    <div class="range-inputs">
+                        <input type="number" id="afternoon_start" value="12" min="0" max="23"> to 
+                        <input type="number" id="afternoon_end" value="18" min="1" max="24"> hours
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Prime Time</label>
+                    <div class="range-inputs">
+                        <input type="number" id="prime_time_start" value="18" min="0" max="23"> to 
+                        <input type="number" id="prime_time_end" value="21" min="1" max="24"> hours
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Evening</label>
+                    <div class="range-inputs">
+                        <input type="number" id="evening_start" value="21" min="0" max="23"> to 
+                        <input type="number" id="evening_end" value="24" min="1" max="24"> hours
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function generateReplayConfigHTML() {
+    return `
+        <div class="config-section">
+            <h4>Configure Replay Delays</h4>
+            <p>Set minimum hours between replays for each content category:</p>
+            
+            <div class="replay-config">
+                <div class="form-group">
+                    <label>ID Replays</label>
+                    <input type="number" id="id_replay_delay" value="6" min="0"> hours
+                </div>
+                
+                <div class="form-group">
+                    <label>Spots Replays</label>
+                    <input type="number" id="spots_replay_delay" value="12" min="0"> hours
+                </div>
+                
+                <div class="form-group">
+                    <label>Short Form Replays</label>
+                    <input type="number" id="short_form_replay_delay" value="24" min="0"> hours
+                </div>
+                
+                <div class="form-group">
+                    <label>Long Form Replays</label>
+                    <input type="number" id="long_form_replay_delay" value="48" min="0"> hours
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function generateExpirationConfigHTML() {
+    return `
+        <div class="config-section">
+            <h4>Configure Content Expiration</h4>
+            <p>Set default expiration periods for each content category (in days):</p>
+            
+            <div class="expiration-config">
+                <div class="form-group">
+                    <label>ID Content Expiration</label>
+                    <input type="number" id="id_expiration" value="30" min="1"> days
+                </div>
+                
+                <div class="form-group">
+                    <label>Spots Content Expiration</label>
+                    <input type="number" id="spots_expiration" value="60" min="1"> days
+                </div>
+                
+                <div class="form-group">
+                    <label>Short Form Content Expiration</label>
+                    <input type="number" id="short_form_expiration" value="90" min="1"> days
+                </div>
+                
+                <div class="form-group">
+                    <label>Long Form Content Expiration</label>
+                    <input type="number" id="long_form_expiration" value="180" min="1"> days
+                </div>
+            </div>
+            
+            <div class="expiration-note">
+                <p><strong>Note:</strong> Individual content items can override these defaults based on AI-calculated shelf life from analysis.</p>
+            </div>
+        </div>
+    `;
+}
+
+function closeConfigModal() {
+    document.getElementById('configModal').style.display = 'none';
+}
+
+function saveScheduleConfig() {
+    const body = document.getElementById('configModalBody');
+    const configType = body.getAttribute('data-config-type');
+    
+    switch (configType) {
+        case 'durations':
+            saveDurationConfig();
+            break;
+        case 'timeslots':
+            saveTimeslotConfig();
+            break;
+        case 'replay':
+            saveReplayConfig();
+            break;
+        case 'expiration':
+            saveExpirationConfig();
+            break;
+    }
+    
+    closeConfigModal();
+    log(`✅ ${configType} configuration saved successfully`);
+}
+
+function saveDurationConfig() {
+    scheduleConfig.DURATION_CATEGORIES = {
+        id: { 
+            min: 0, 
+            max: parseInt(document.getElementById('id_max').value),
+            label: `ID (< ${document.getElementById('id_max').value}s)`
+        },
+        spots: { 
+            min: parseInt(document.getElementById('spots_min').value), 
+            max: parseInt(document.getElementById('spots_max').value),
+            label: `Spots (${document.getElementById('spots_min').value}s - ${document.getElementById('spots_max').value}s)`
+        },
+        short_form: { 
+            min: parseInt(document.getElementById('short_form_min').value), 
+            max: parseInt(document.getElementById('short_form_max').value),
+            label: `Short Form (${Math.floor(document.getElementById('short_form_min').value/60)}min - ${Math.floor(document.getElementById('short_form_max').value/60)}min)`
+        },
+        long_form: { 
+            min: parseInt(document.getElementById('long_form_min').value), 
+            max: Infinity,
+            label: `Long Form (> ${Math.floor(document.getElementById('long_form_min').value/60)}min)`
+        }
+    };
+}
+
+function saveTimeslotConfig() {
+    scheduleConfig.TIMESLOTS = {
+        overnight: { 
+            start: parseInt(document.getElementById('overnight_start').value), 
+            end: parseInt(document.getElementById('overnight_end').value),
+            label: `Overnight (${document.getElementById('overnight_start').value}-${document.getElementById('overnight_end').value})`
+        },
+        early_morning: { 
+            start: parseInt(document.getElementById('early_morning_start').value), 
+            end: parseInt(document.getElementById('early_morning_end').value),
+            label: `Early Morning (${document.getElementById('early_morning_start').value}-${document.getElementById('early_morning_end').value})`
+        },
+        morning: { 
+            start: parseInt(document.getElementById('morning_start').value), 
+            end: parseInt(document.getElementById('morning_end').value),
+            label: `Morning (${document.getElementById('morning_start').value}-${document.getElementById('morning_end').value})`
+        },
+        afternoon: { 
+            start: parseInt(document.getElementById('afternoon_start').value), 
+            end: parseInt(document.getElementById('afternoon_end').value),
+            label: `Afternoon (${document.getElementById('afternoon_start').value}-${document.getElementById('afternoon_end').value})`
+        },
+        prime_time: { 
+            start: parseInt(document.getElementById('prime_time_start').value), 
+            end: parseInt(document.getElementById('prime_time_end').value),
+            label: `Prime Time (${document.getElementById('prime_time_start').value}-${document.getElementById('prime_time_end').value})`
+        },
+        evening: { 
+            start: parseInt(document.getElementById('evening_start').value), 
+            end: parseInt(document.getElementById('evening_end').value),
+            label: `Evening (${document.getElementById('evening_start').value}-${document.getElementById('evening_end').value})`
+        }
+    };
+}
+
+function saveReplayConfig() {
+    scheduleConfig.REPLAY_DELAYS = {
+        id: parseInt(document.getElementById('id_replay_delay').value),
+        spots: parseInt(document.getElementById('spots_replay_delay').value),
+        short_form: parseInt(document.getElementById('short_form_replay_delay').value),
+        long_form: parseInt(document.getElementById('long_form_replay_delay').value)
+    };
+}
+
+function saveExpirationConfig() {
+    scheduleConfig.CONTENT_EXPIRATION = {
+        id: parseInt(document.getElementById('id_expiration').value),
+        spots: parseInt(document.getElementById('spots_expiration').value),
+        short_form: parseInt(document.getElementById('short_form_expiration').value),
+        long_form: parseInt(document.getElementById('long_form_expiration').value)
+    };
+}
+
+// Content Loading and Filtering Functions
+async function loadAvailableContent() {
+    log('📺 Loading available content for scheduling...');
+    
+    try {
+        // Get filter values
+        const contentTypeFilter = document.getElementById('contentTypeFilter')?.value || '';
+        const durationCategoryFilter = document.getElementById('durationCategoryFilter')?.value || '';
+        const searchFilter = document.getElementById('contentSearchFilter')?.value?.toLowerCase() || '';
+        
+        log(`🔍 Applying filters - Type: ${contentTypeFilter || 'All'}, Duration: ${durationCategoryFilter || 'All'}, Search: ${searchFilter || 'None'}`);
+        
+        const response = await fetch('http://127.0.0.1:5000/api/analyzed-content', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content_type: contentTypeFilter,
+                duration_category: durationCategoryFilter,
+                search: searchFilter
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText || 'Failed to load content'}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            availableContent = result.content || [];
+            displayAvailableContent();
+            log(`✅ Loaded ${availableContent.length} available content items`);
+            
+            // Log some details about the content for debugging
+            if (availableContent.length > 0) {
+                log(`📊 Content types found: ${[...new Set(availableContent.map(c => c.content_type))].join(', ')}`);
+            }
+        } else {
+            log(`❌ Failed to load content: ${result.message}`, 'error');
+            // Clear any existing content and show message
+            const contentList = document.getElementById('availableContentList');
+            if (contentList) {
+                contentList.innerHTML = '<p>No analyzed content found. Please analyze some files first.</p>';
+            }
+        }
+        
+    } catch (error) {
+        log(`❌ Error loading content: ${error.message}`, 'error');
+        log(`💡 Check if any files have been analyzed. Go to Dashboard → Analyze Files first.`);
+        
+        // Clear any existing content and show helpful message
+        const contentList = document.getElementById('availableContentList');
+        if (contentList) {
+            contentList.innerHTML = `
+                <div class="error-message">
+                    <p><strong>Error loading content:</strong> ${error.message}</p>
+                    <p>💡 <strong>Tip:</strong> Make sure you have analyzed some files first:</p>
+                    <ol>
+                        <li>Go to the Dashboard tab</li>
+                        <li>Scan files from your FTP servers</li>
+                        <li>Select files and click "Analyze Files"</li>
+                        <li>Come back to Scheduling and try "Load Content" again</li>
+                    </ol>
+                </div>
+            `;
+        }
+    }
+}
+
+function showPlaceholderContent() {
+    const contentList = document.getElementById('availableContentList');
+    contentList.innerHTML = `
+        <div class="placeholder-content">
+            <p><strong>Demo Content Available:</strong></p>
+            <div class="content-item">
+                <div class="content-info">
+                    <span class="content-title">250715_PSA_Public Safety Announcement</span>
+                    <span class="content-type">PSA</span>
+                    <span class="content-duration">30s (spots)</span>
+                    <span class="engagement-score">Engagement: 8.5/10</span>
+                </div>
+                <button class="button small primary" onclick="addToSchedule('demo1')">
+                    <i class="fas fa-calendar-plus"></i> Add to Schedule
+                </button>
+            </div>
+            <div class="content-item">
+                <div class="content-info">
+                    <span class="content-title">250716_PRG_Community Meeting</span>
+                    <span class="content-type">PRG</span>
+                    <span class="content-duration">15m (short_form)</span>
+                    <span class="engagement-score">Engagement: 7.2/10</span>
+                </div>
+                <button class="button small primary" onclick="addToSchedule('demo2')">
+                    <i class="fas fa-calendar-plus"></i> Add to Schedule
+                </button>
+            </div>
+            <p><em>Note: This is demo content. Implement /api/analyzed-content endpoint to load real analyzed content from MongoDB.</em></p>
+        </div>
+    `;
+    log('📺 Showing demo content (backend endpoint not yet implemented)');
+}
+
+function displayAvailableContent() {
+    const contentList = document.getElementById('availableContentList');
+    
+    if (availableContent.length === 0) {
+        contentList.innerHTML = '<p>No content matches the current filters</p>';
+        return;
+    }
+    
+    let html = '<div class="available-content">';
+    
+    availableContent.forEach(content => {
+        const duration = formatDuration(content.file_duration);
+        const durationCategory = getDurationCategory(content.file_duration);
+        const engagementScore = content.engagement_score || 'N/A';
+        
+        // Use _id as the content identifier (ObjectId converted to string)
+        const contentId = content._id || content.guid || 'unknown';
+        
+        html += `
+            <div class="content-item" data-content-id="${contentId}">
+                <div class="content-info">
+                    <span class="content-title">${content.content_title || content.file_name}</span>
+                    <span class="content-type">${getContentTypeLabel(content.content_type)}</span>
+                    <span class="content-duration">${duration} (${durationCategory})</span>
+                    <span class="engagement-score">Engagement: ${engagementScore}/10</span>
+                </div>
+                <div class="content-actions">
+                    <button class="button small primary" onclick="addToSchedule('${contentId}')">
+                        <i class="fas fa-calendar-plus"></i> Add to Schedule
+                    </button>
+                    <button class="button small secondary" onclick="viewContentDetails('${contentId}')">
+                        <i class="fas fa-info"></i> Details
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    contentList.innerHTML = html;
+}
+
+// Schedule Creation Functions
+async function createDailySchedule() {
+    const scheduleDate = document.getElementById('scheduleDate').value;
+    const timeslot = document.getElementById('scheduleTimeslot').value;
+    const useEngagement = document.getElementById('enableEngagementScoring').checked;
+    
+    if (!scheduleDate) {
+        log('❌ Please select a schedule date', 'error');
+        return;
+    }
+    
+    if (timeslot) {
+        log(`📅 Creating daily schedule for ${scheduleDate} in ${timeslot} timeslot`);
+    } else {
+        log(`📅 Creating full daily schedule for ${scheduleDate} (all timeslots)`);
+    }
+    log(`🧠 AI engagement scoring: ${useEngagement ? 'enabled' : 'disabled'}`);
+    
+    try {
+        const requestBody = {
+            date: scheduleDate,
+            use_engagement_scoring: useEngagement
+        };
+        
+        // Only include timeslot if one is selected
+        if (timeslot) {
+            requestBody.timeslot = timeslot;
+        }
+        
+        const response = await fetch('http://127.0.0.1:5000/api/create-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`);
+            
+            // Handle single schedule result
+            if (result.schedule_id) {
+                log(`📋 Schedule ID: ${result.schedule_id}`);
+                if (result.schedule) {
+                    log(`📊 Created ${result.schedule.total_items} items (${Math.floor(result.schedule.total_duration / 60)}m ${result.schedule.total_duration % 60}s)`);
+                }
+            }
+            
+            // Handle multiple schedules result (full daily schedule)
+            if (result.created_schedules) {
+                log(`📊 Summary: ${result.total_created} schedules created`);
+                result.created_schedules.forEach(schedule => {
+                    log(`  ✓ ${schedule.timeslot}: ${schedule.total_items} items (${Math.floor(schedule.total_duration / 60)}m ${schedule.total_duration % 60}s)`);
+                });
+                
+                if (result.failed_timeslots && result.failed_timeslots.length > 0) {
+                    log(`⚠️ ${result.total_failed} timeslots failed:`, 'warning');
+                    result.failed_timeslots.forEach(failure => {
+                        log(`  ❌ ${failure.timeslot}: ${failure.error}`, 'warning');
+                    });
+                }
+            }
+            
+            // Refresh schedule display if viewing the same date
+            const viewDate = document.getElementById('viewScheduleDate').value;
+            if (viewDate === scheduleDate) {
+                await viewDailySchedule();
+            }
+        } else {
+            log(`❌ Failed to create schedule: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`❌ Error creating schedule: ${error.message}`, 'error');
+    }
+}
+
+async function createWeeklySchedule() {
+    const weeklyStartDate = document.getElementById('weeklyStartDate').value;
+    const useEngagement = document.getElementById('enableEngagementScoring').checked;
+    
+    if (!weeklyStartDate) {
+        log('❌ Please select a weekly start date', 'error');
+        return;
+    }
+    
+    log(`📅 Creating weekly schedule starting ${weeklyStartDate} (7 days, all timeslots)`);
+    log(`🧠 AI engagement scoring: ${useEngagement ? 'enabled' : 'disabled'}`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/create-weekly-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                start_date: weeklyStartDate,
+                use_engagement_scoring: useEngagement
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`);
+            log(`📊 Weekly Summary: ${result.total_created} schedules created across 7 days`);
+            
+            // Group schedules by date for better display
+            const schedulesByDate = {};
+            result.created_schedules.forEach(schedule => {
+                if (!schedulesByDate[schedule.date]) {
+                    schedulesByDate[schedule.date] = [];
+                }
+                schedulesByDate[schedule.date].push(schedule);
+            });
+            
+            // Log schedules by date
+            Object.keys(schedulesByDate).sort().forEach(date => {
+                const daySchedules = schedulesByDate[date];
+                const dayName = daySchedules[0].day_of_week;
+                log(`  📅 ${dayName} (${date}): ${daySchedules.length} timeslots`);
+                daySchedules.forEach(schedule => {
+                    log(`    ✓ ${schedule.timeslot}: ${schedule.total_items} items (${Math.floor(schedule.total_duration / 60)}m ${schedule.total_duration % 60}s)`);
+                });
+            });
+            
+            if (result.failed_schedules && result.failed_schedules.length > 0) {
+                log(`⚠️ ${result.total_failed} schedules failed:`, 'warning');
+                result.failed_schedules.forEach(failure => {
+                    const timeslotInfo = failure.timeslot ? ` (${failure.timeslot})` : '';
+                    log(`  ❌ ${failure.day_of_week} ${failure.date}${timeslotInfo}: ${failure.error}`, 'warning');
+                });
+            }
+        } else {
+            log(`❌ Failed to create weekly schedule: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`❌ Error creating weekly schedule: ${error.message}`, 'error');
+    }
+}
+
+async function previewSchedule() {
+    const scheduleDate = document.getElementById('scheduleDate').value;
+    const timeslot = document.getElementById('scheduleTimeslot').value;
+    const useEngagement = document.getElementById('enableEngagementScoring').checked;
+    
+    if (!scheduleDate) {
+        log('❌ Please select a schedule date', 'error');
+        return;
+    }
+    
+    log(`👁️ Previewing schedule for ${scheduleDate} in ${timeslot} timeslot`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/preview-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: scheduleDate,
+                timeslot: timeslot,
+                use_engagement_scoring: useEngagement
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const preview = result.preview;
+            log(`✅ Schedule Preview Generated:`);
+            log(`📊 ${preview.total_items} items, ${preview.total_duration_formatted}`);
+            log(`📈 ${preview.fill_percentage.toFixed(1)}% of ${timeslot} timeslot filled`);
+            log(`🎯 Available content pool: ${preview.available_content_count} items`);
+            log(`🧠 Engagement scoring: ${preview.engagement_scoring_enabled ? 'ON' : 'OFF'}`);
+            
+            // Show preview items
+            if (preview.items && preview.items.length > 0) {
+                log(`📋 Preview Schedule:`);
+                preview.items.forEach((item, index) => {
+                    const duration = formatDuration(item.duration);
+                    const score = item.engagement_score ? ` (${item.engagement_score}/10)` : '';
+                    log(`   ${index + 1}. ${item.content_title} [${item.content_type}] - ${duration}${score}`);
+                });
+            }
+        } else {
+            log(`❌ Failed to preview schedule: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`❌ Error previewing schedule: ${error.message}`, 'error');
+    }
+}
+
+async function viewDailySchedule() {
+    const viewDate = document.getElementById('viewScheduleDate').value;
+    
+    if (!viewDate) {
+        log('❌ Please select a date to view', 'error');
+        return;
+    }
+    
+    log(`📅 Loading schedule for ${viewDate}...`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: viewDate
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.schedule) {
+            const schedule = result.schedule;
+            log(`✅ Schedule found for ${viewDate}`);
+            
+            // Display schedule in the schedule display area
+            displayScheduleDetails(schedule);
+            
+        } else {
+            log(`📭 No schedule found for ${viewDate}`);
+            clearScheduleDisplay();
+        }
+        
+    } catch (error) {
+        log(`❌ Error viewing schedule: ${error.message}`, 'error');
+        clearScheduleDisplay();
+    }
+}
+
+async function deleteSchedule() {
+    const viewDate = document.getElementById('viewScheduleDate').value;
+    
+    if (!viewDate) {
+        log('❌ Please select a date to delete', 'error');
+        return;
+    }
+    
+    // First get the schedule to find its ID
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: viewDate
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success || !result.schedule) {
+            log(`❌ No schedule found for ${viewDate}`, 'error');
+            return;
+        }
+        
+        const schedule = result.schedule;
+        const scheduleId = schedule.schedule_id;
+        
+        if (confirm(`Are you sure you want to delete the schedule for ${viewDate}?\n\nThis will delete ${schedule.total_items} scheduled items.`)) {
+            log(`🗑️ Deleting schedule for ${viewDate}...`);
+            
+            const deleteResponse = await fetch('http://127.0.0.1:5000/api/delete-schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    schedule_id: scheduleId
+                })
+            });
+            
+            const deleteResult = await deleteResponse.json();
+            
+            if (deleteResult.success) {
+                log(`✅ ${deleteResult.message}`);
+                clearScheduleDisplay();
+                
+                // Auto-refresh schedule list if it was displayed
+                const scheduleDisplay = document.getElementById('scheduleDisplay');
+                if (scheduleDisplay && scheduleDisplay.innerHTML.includes('schedule-list-item')) {
+                    log('🔄 Refreshing schedule list...');
+                    await listAllSchedules();
+                }
+            } else {
+                log(`❌ Failed to delete schedule: ${deleteResult.message}`, 'error');
+            }
+        }
+        
+    } catch (error) {
+        log(`❌ Error deleting schedule: ${error.message}`, 'error');
+    }
+}
+
+async function listAllSchedules() {
+    log('📋 Loading all schedules...');
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/list-schedules');
+        const result = await response.json();
+        
+        if (result.success) {
+            displayScheduleList(result.schedules);
+            log(`✅ Loaded ${result.count} schedules`);
+        } else {
+            log(`❌ Failed to load schedules: ${result.message}`, 'error');
+            clearScheduleDisplay();
+        }
+        
+    } catch (error) {
+        log(`❌ Error loading schedules: ${error.message}`, 'error');
+        clearScheduleDisplay();
+    }
+}
+
+function displayScheduleList(schedules) {
+    const scheduleDisplay = document.getElementById('scheduleDisplay');
+    
+    if (!scheduleDisplay) return;
+    
+    if (!schedules || schedules.length === 0) {
+        scheduleDisplay.innerHTML = '<p>📅 No schedules found. Create a schedule to get started.</p>';
+        return;
+    }
+    
+    // Group schedules by date for better organization
+    const schedulesByDate = {};
+    schedules.forEach(schedule => {
+        const dateKey = schedule.date.split('T')[0]; // Extract date part
+        if (!schedulesByDate[dateKey]) {
+            schedulesByDate[dateKey] = [];
+        }
+        schedulesByDate[dateKey].push(schedule);
+    });
+    
+    let html = `
+        <div class="schedule-list-header">
+            <h4>📋 All Schedules (${schedules.length} total)</h4>
+        </div>
+        <div class="schedule-list">
+    `;
+    
+    // Sort dates and display schedules
+    const sortedDates = Object.keys(schedulesByDate).sort();
+    
+    for (const date of sortedDates) {
+        const daySchedules = schedulesByDate[date];
+        // Parse date more carefully to avoid Invalid Date
+        const dateObj = new Date(date + 'T00:00:00'); // Ensure proper ISO format
+        const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+        
+        html += `
+            <div class="schedule-date-group">
+                <h5>📅 ${dayName}, ${date} (${daySchedules.length} schedules)</h5>
+        `;
+        
+        // Sort schedules by timeslot order
+        const timeslotOrder = ['overnight', 'early_morning', 'morning', 'afternoon', 'prime_time', 'evening'];
+        daySchedules.sort((a, b) => {
+            return timeslotOrder.indexOf(a.timeslot) - timeslotOrder.indexOf(b.timeslot);
+        });
+        
+        for (const schedule of daySchedules) {
+            const createdAt = new Date(schedule.created_at).toLocaleString();
+            const totalDuration = formatDuration(schedule.total_duration);
+            const timeslotLabel = scheduleConfig.TIMESLOTS[schedule.timeslot]?.label || schedule.timeslot;
+            
+            html += `
+                <div class="schedule-list-item" data-schedule-id="${schedule.schedule_id}">
+                    <div class="schedule-item-header">
+                        <span class="timeslot-badge">${timeslotLabel}</span>
+                        <span class="schedule-stats">${schedule.total_items} items • ${totalDuration}</span>
+                        <div class="schedule-item-actions">
+                            <button class="button small primary" onclick="viewScheduleDetails('${schedule.schedule_id}', '${date}', '${schedule.timeslot}')">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button class="button small warning" onclick="deleteScheduleById('${schedule.schedule_id}', '${date}', '${schedule.timeslot}')">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                    <div class="schedule-item-details">
+                        <small>ID: ${schedule.schedule_id} • Created: ${createdAt} • AI Scoring: ${schedule.engagement_scoring_enabled ? 'ON' : 'OFF'}</small>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    
+    scheduleDisplay.innerHTML = html;
+}
+
+async function viewScheduleDetails(scheduleId, date, timeslot) {
+    log(`👁️ Loading schedule details for ${date} ${timeslot}...`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: date,
+                timeslot: timeslot
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.schedule) {
+            displayScheduleDetails(result.schedule);
+            log(`✅ Loaded schedule details for ${date} ${timeslot}`);
+        } else {
+            log(`❌ Failed to load schedule details: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`❌ Error loading schedule details: ${error.message}`, 'error');
+    }
+}
+
+async function deleteScheduleById(scheduleId, date, timeslot) {
+    if (!confirm(`Are you sure you want to delete the ${timeslot} schedule for ${date}?`)) {
+        return;
+    }
+    
+    log(`🗑️ Deleting schedule ${scheduleId}...`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                schedule_id: scheduleId
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`);
+            // Refresh the schedule list
+            await listAllSchedules();
+        } else {
+            log(`❌ Failed to delete schedule: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`❌ Error deleting schedule: ${error.message}`, 'error');
+    }
+}
+
+function exportSchedule() {
+    const viewDate = document.getElementById('viewScheduleDate').value;
+    
+    if (!viewDate) {
+        log('❌ Please select a date to export', 'error');
+        return;
+    }
+    
+    log(`📤 Exporting schedule for ${viewDate}`);
+    log('⚠️ Schedule export functionality coming soon');
+    // TODO: Implement schedule export (CSV, PDF, etc.)
+}
+
+// Helper functions for schedule display
+function displayScheduleDetails(schedule) {
+    const scheduleDisplay = document.getElementById('scheduleDisplay');
+    
+    if (!scheduleDisplay) return;
+    
+    const createdAt = new Date(schedule.created_at).toLocaleString();
+    const totalDuration = formatTimeHHMMSSmmm(schedule.total_duration);
+    
+    let html = `
+        <div class="schedule-header">
+            <h4>📅 Daily Schedule for ${schedule.date.split('T')[0]}</h4>
+            <p><strong>Created:</strong> ${createdAt} | <strong>Items:</strong> ${schedule.total_items} | <strong>Total Duration:</strong> ${totalDuration}</p>
+            <p><strong>Engagement Scoring:</strong> ${schedule.engagement_scoring_enabled ? 'ON' : 'OFF'}</p>
+        </div>
+        <div class="schedule-items">
+            <div class="schedule-table-header">
+                <span class="col-start-time">Start Time</span>
+                <span class="col-title">Title</span>
+            </div>
+    `;
+    
+    if (schedule.items && schedule.items.length > 0) {
+        let currentTime = 0; // Track cumulative time in seconds
+        
+        schedule.items.forEach((item, index) => {
+            const startTime = formatTimeHHMMSSmmm(currentTime);
+            const endTime = formatTimeHHMMSSmmm(currentTime + item.duration);
+            const itemDuration = formatTimeHHMMSSmmm(item.duration);
+            
+            // Extract content type description from configuration
+            const contentTypeLabel = getContentTypeLabel(item.content_type);
+            
+            // Extract file title from file name (remove date and type prefix)
+            const fileTitle = extractFileTitle(item.file_name, item.content_title);
+            
+            
+            
+            html += `
+                <div class="schedule-item-row">
+                    <span class="col-start-time">${startTime}</span>
+                    <span class="col-title">${fileTitle}</span>
+                </div>
+            `;
+            
+            currentTime += item.duration;
+        });
+    } else {
+        html += '<div class="schedule-no-items">No scheduled items found.</div>';
+    }
+    
+    html += '</div></div>';
+    
+    scheduleDisplay.innerHTML = html;
+}
+
+// Format time in HH:MM:SS.000 format
+function formatTimeHHMMSSmmm(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const milliseconds = Math.floor((seconds % 1) * 1000);
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+}
+
+// Get content type label from configuration
+function getContentTypeLabel(contentType) {
+    const contentTypeMap = {
+        'AN': 'Atlanta Now',
+        'BMP': 'Bump',
+        'IMOW': 'In My Own Words',
+        'IM': 'Inclusion Months',
+        'IA': 'Inside Atlanta',
+        'LM': 'Legislative Minute',
+        'MTG': 'Meeting',
+        'MAF': 'Moving Atlanta Forward',
+        'PKG': 'Package',
+        'PMO': 'Promo',
+        'SZL': 'Sizzle',
+        'SPP': 'Special Project',
+        'OTH': 'Other'
+    };
+    
+    return contentTypeMap[contentType] || contentType || 'Unknown';
+}
+
+// Extract file title from filename and content_title
+function extractFileTitle(fileName, contentTitle) {
+    // If we have a content_title, use that
+    if (contentTitle && contentTitle.trim() && contentTitle.trim() !== '') {
+        return contentTitle.trim();
+    }
+    
+    // Otherwise, extract from filename by removing date and type prefix
+    // Expected format: YYMMDD_TYPE_Title.ext
+    if (fileName && fileName.trim() !== '') {
+        const nameWithoutExt = fileName.replace(/\.[^/.]+$/, ''); // Remove extension
+        const parts = nameWithoutExt.split('_');
+        
+        if (parts.length >= 3) {
+            // Join everything after the first two parts (date and type)
+            const extractedTitle = parts.slice(2).join('_');
+            return extractedTitle || nameWithoutExt;
+        }
+        
+        // Fallback to full filename without extension
+        return nameWithoutExt;
+    }
+    
+    return 'Unknown Title';
+}
+
+function clearScheduleDisplay() {
+    const scheduleDisplay = document.getElementById('scheduleDisplay');
+    if (scheduleDisplay) {
+        scheduleDisplay.innerHTML = '<p>Select a date and click "View Schedule" to display the daily schedule</p>';
+    }
+}
+
+// Collapsible card functionality
+function initializeCollapsibleCards() {
+    const cards = document.querySelectorAll('.scheduling-card h3');
+    cards.forEach(header => {
+        header.addEventListener('click', function() {
+            const card = this.parentElement;
+            toggleCard(card);
+        });
+    });
+}
+
+function toggleCard(card) {
+    card.classList.toggle('collapsed');
+}
+
+function expandCard(card) {
+    card.classList.remove('collapsed');
+}
+
+function collapseCard(card) {
+    card.classList.add('collapsed');
+}
+
+// Analysis monitoring and restart functions
+function startAnalysisMonitoring() {
+    analysisStartTime = Date.now();
+    lastProgressTime = Date.now();
+    
+    // Set up timeout monitoring
+    if (analysisTimeoutId) {
+        clearInterval(analysisTimeoutId);
+    }
+    
+    analysisTimeoutId = setInterval(checkAnalysisProgress, 30000); // Check every 30 seconds
+    log('🕐 Analysis monitoring started');
+}
+
+function stopAnalysisMonitoring() {
+    if (analysisTimeoutId) {
+        clearInterval(analysisTimeoutId);
+        analysisTimeoutId = null;
+    }
+    
+    analysisStartTime = null;
+    lastProgressTime = null;
+    currentAnalysisFile = null;
+    stalledFileCount = 0;
+    log('🕐 Analysis monitoring stopped');
+}
+
+function updateAnalysisProgress(fileName) {
+    lastProgressTime = Date.now();
+    currentAnalysisFile = fileName;
+    stalledFileCount = 0; // Reset stall counter on progress
+}
+
+function checkAnalysisProgress() {
+    if (!isAnalyzing) {
+        stopAnalysisMonitoring();
+        return;
+    }
+    
+    const now = Date.now();
+    const timeSinceProgress = now - lastProgressTime;
+    const totalAnalysisTime = now - analysisStartTime;
+    
+    // Check if analysis has been stalled for too long
+    if (timeSinceProgress > maxStallTime) {
+        stalledFileCount++;
+        log(`⚠️ Analysis appears stalled (${Math.round(timeSinceProgress/1000)}s without progress)`, 'warning');
+        
+        if (autoRestartEnabled && stalledFileCount >= 2) {
+            log('🔄 Attempting to restart stalled analysis...', 'warning');
+            restartAnalysis();
+            return;
+        }
+    }
+    
+    // Check if a single file has been processing too long
+    if (currentAnalysisFile && timeSinceProgress > maxFileProcessingTime) {
+        log(`⚠️ File "${currentAnalysisFile}" has been processing for ${Math.round(timeSinceProgress/60000)} minutes`, 'warning');
+        
+        if (autoRestartEnabled) {
+            log('🔄 Skipping stuck file and continuing...', 'warning');
+            skipCurrentFile();
+        }
+    }
+    
+    // Log periodic status updates
+    if (totalAnalysisTime > 0 && totalAnalysisTime % 60000 < 30000) { // Every minute
+        const remainingFiles = analysisQueue.length;
+        log(`📊 Analysis status: ${remainingFiles} files remaining, runtime: ${Math.round(totalAnalysisTime/60000)} minutes`);
+    }
+}
+
+function restartAnalysis() {
+    log('🔄 Restarting analysis process...', 'warning');
+    
+    // Stop current analysis
+    stopAnalysisRequested = true;
+    stopAnalysisMonitoring();
+    
+    // Wait a moment then restart
+    setTimeout(() => {
+        if (analysisQueue.length > 0) {
+            log('🔄 Resuming analysis with remaining files...');
+            startAnalysis();
+        } else {
+            log('✅ No files remaining to analyze');
+            isAnalyzing = false;
+            updateAnalysisButtonState();
+        }
+    }, 2000);
+}
+
+function skipCurrentFile() {
+    if (!currentAnalysisFile) return;
+    
+    log(`⏭️ Skipping stuck file: ${currentAnalysisFile}`, 'warning');
+    
+    // Find and remove the current file from queue
+    const fileIndex = analysisQueue.findIndex(item => item.file.name === currentAnalysisFile);
+    if (fileIndex !== -1) {
+        const skippedFile = analysisQueue.splice(fileIndex, 1)[0];
+        
+        // Update UI for skipped file
+        const button = document.querySelector(`button[onclick="addToAnalysisQueue('${skippedFile.id}')"]`);
+        if (button) {
+            button.innerHTML = '<i class="fas fa-forward"></i> Skipped';
+            button.classList.add('warning');
+            button.disabled = false;
+        }
+        
+        log(`⏭️ File "${currentAnalysisFile}" removed from queue and marked as skipped`);
+    }
+    
+    // Reset progress tracking
+    updateAnalysisProgress(null);
+}
+
+function toggleAutoRestart() {
+    autoRestartEnabled = !autoRestartEnabled;
+    const button = document.getElementById('autoRestartToggle');
+    if (button) {
+        button.innerHTML = autoRestartEnabled ? 
+            '<i class="fas fa-toggle-on"></i> Auto-Restart: ON' : 
+            '<i class="fas fa-toggle-off"></i> Auto-Restart: OFF';
+        button.className = autoRestartEnabled ? 'button success small' : 'button secondary small';
+    }
+    log(`🔄 Auto-restart ${autoRestartEnabled ? 'enabled' : 'disabled'}`);
+}
+
+function getAnalysisStats() {
+    if (!isAnalyzing) return null;
+    
+    const now = Date.now();
+    const runtime = analysisStartTime ? Math.round((now - analysisStartTime) / 1000) : 0;
+    const timeSinceProgress = lastProgressTime ? Math.round((now - lastProgressTime) / 1000) : 0;
+    
+    return {
+        isRunning: isAnalyzing,
+        runtime: runtime,
+        timeSinceProgress: timeSinceProgress,
+        currentFile: currentAnalysisFile,
+        queueLength: analysisQueue.length,
+        stalledCount: stalledFileCount,
+        autoRestartEnabled: autoRestartEnabled
+    };
+}
+
+function updateMonitorDisplay() {
+    const monitorDiv = document.getElementById('analysisMonitorStatus');
+    const skipButton = document.getElementById('skipFileButton');
+    const restartButton = document.getElementById('restartButton');
+    
+    if (!isAnalyzing) {
+        if (monitorDiv) monitorDiv.style.display = 'none';
+        if (skipButton) skipButton.disabled = true;
+        if (restartButton) restartButton.disabled = true;
+        return;
+    }
+    
+    if (monitorDiv) monitorDiv.style.display = 'block';
+    if (skipButton) skipButton.disabled = false;
+    if (restartButton) restartButton.disabled = false;
+    
+    const stats = getAnalysisStats();
+    if (!stats) return;
+    
+    // Update display elements
+    const runtimeEl = document.getElementById('analysisRuntime');
+    const progressEl = document.getElementById('analysisProgress');
+    const fileEl = document.getElementById('currentFile');
+    const queueEl = document.getElementById('queueRemaining');
+    
+    if (runtimeEl) {
+        const minutes = Math.floor(stats.runtime / 60);
+        const seconds = stats.runtime % 60;
+        runtimeEl.textContent = `Runtime: ${minutes}m ${seconds}s`;
+    }
+    
+    if (progressEl) {
+        const progressColor = stats.timeSinceProgress > 120 ? '#ff9800' : 
+                             stats.timeSinceProgress > 300 ? '#f44336' : '#4caf50';
+        progressEl.textContent = `Progress: ${stats.timeSinceProgress}s ago`;
+        progressEl.style.color = progressColor;
+    }
+    
+    if (fileEl) {
+        const fileName = stats.currentFile ? 
+            (stats.currentFile.length > 30 ? stats.currentFile.substring(0, 30) + '...' : stats.currentFile) : 
+            'None';
+        fileEl.textContent = `File: ${fileName}`;
+    }
+    
+    if (queueEl) {
+        queueEl.textContent = `Queue: ${stats.queueLength}`;
+    }
+}
+
+function startMonitorDisplayUpdate() {
+    // Update display every 5 seconds during analysis
+    const updateInterval = setInterval(() => {
+        if (!isAnalyzing) {
+            clearInterval(updateInterval);
+            updateMonitorDisplay(); // Final update to hide
+            return;
+        }
+        updateMonitorDisplay();
+    }, 5000);
+    
+    // Initial update
+    updateMonitorDisplay();
+}
+
+// Utility Functions for Scheduling
+function getDurationCategory(durationInSeconds) {
+    for (const [category, config] of Object.entries(scheduleConfig.DURATION_CATEGORIES)) {
+        if (durationInSeconds >= config.min && durationInSeconds < config.max) {
+            return category;
+        }
+    }
+    return 'unknown';
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) {
+        return `${seconds}s`;
+    } else if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    } else {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes}m`;
+    }
+}
+
+function addToSchedule(contentId) {
+    log(`📅 Adding content ${contentId} to schedule (not yet implemented)`);
+}
+
+function viewContentDetails(contentId) {
+    log(`ℹ️ Viewing details for content ${contentId} (not yet implemented)`);
+}
+
+// Initialize scheduling when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    initializeSchedulingDates();
+});
