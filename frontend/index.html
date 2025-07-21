@@ -125,6 +125,12 @@
                     <button class="button warning" onclick="clearSyncQueue()">
                         <i class="fas fa-trash"></i> Clear Queue
                     </button>
+                    <button class="button danger" onclick="addAllUnmatchedToDeleteQueue()" id="deleteAllUnmatchedButton" disabled>
+                        <i class="fas fa-trash-alt"></i> Delete All Unmatched
+                    </button>
+                    <button class="button danger" onclick="addFolderUnmatchedToDeleteQueue()" id="deleteFolderButton" disabled>
+                        <i class="fas fa-folder-minus"></i> Delete Folder
+                    </button>
                 </div>
                 
                 <div class="sync-actions">
@@ -133,6 +139,12 @@
                     </button>
                     <button class="button danger" onclick="stopSync()" id="stopButton" disabled>
                         <i class="fas fa-stop"></i> Stop Sync
+                    </button>
+                    <button class="button danger large" onclick="deleteFiles()" id="deleteButton" disabled>
+                        <i class="fas fa-trash"></i> Delete Files
+                    </button>
+                    <button class="button warning" onclick="clearDeleteQueue()" id="clearDeleteButton" disabled>
+                        <i class="fas fa-trash-restore"></i> Clear Delete Queue
                     </button>
                     <button class="button secondary" onclick="clearScannedFiles()">
                         <i class="fas fa-broom"></i> Clear Results
@@ -261,6 +273,10 @@
                     <div class="checkbox-group">
                         <input type="checkbox" id="dryRun" checked>
                         <label for="dryRun">Dry run (preview changes without actual sync)</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="dryRunDelete" checked>
+                        <label for="dryRunDelete">Dry run for deletions (preview delete operations)</label>
                     </div>
                     <div class="checkbox-group">
                         <input type="checkbox" id="keepTempFiles">

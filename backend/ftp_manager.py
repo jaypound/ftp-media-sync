@@ -336,3 +336,41 @@ class FTPManager:
     def update_file_to(self, file_info, target_ftp, keep_temp=False):
         """Update file on another FTP server"""
         return self.copy_file_to(file_info, target_ftp, keep_temp)  # Same as copy for now
+    
+    def delete_file(self, remote_path):
+        """Delete file from FTP server"""
+        if not self.connected:
+            logger.info("FTP not connected, attempting to connect...")
+            if not self.connect():
+                logger.error("Failed to establish FTP connection for deletion")
+                return False
+        
+        try:
+            # Handle relative paths by combining with base path
+            base_path = self.config.get('path', '/')
+            
+            if remote_path.startswith('/'):
+                # Already an absolute path
+                full_remote_path = remote_path
+            else:
+                # Relative path - combine with base path
+                if base_path.endswith('/'):
+                    full_remote_path = base_path + remote_path
+                else:
+                    full_remote_path = base_path + '/' + remote_path
+            
+            # Clean up any double slashes
+            full_remote_path = full_remote_path.replace('//', '/')
+            
+            logger.info(f"Deleting file from FTP path: {full_remote_path}")
+            logger.info(f"Base path: {base_path}, Remote path: {remote_path}")
+            
+            # Delete the file
+            self.ftp.delete(full_remote_path)
+            
+            logger.info(f"Successfully deleted file: {full_remote_path}")
+            return True
+                
+        except Exception as e:
+            logger.error(f"Delete failed for {remote_path}: {str(e)}")
+            return False
