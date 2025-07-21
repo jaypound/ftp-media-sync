@@ -411,6 +411,36 @@ def delete_files():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/clear-all-analyses', methods=['POST'])
+def clear_all_analyses():
+    """Clear all analysis data from the database"""
+    logger.info("=== CLEAR ALL ANALYSES REQUEST ===")
+    try:
+        # Connect to database if not already connected
+        if db_manager.collection is None:
+            success = db_manager.connect()
+            if not success:
+                return jsonify({
+                    'success': False, 
+                    'message': 'Failed to connect to database'
+                })
+        
+        # Clear all analysis data
+        result = db_manager.clear_all_analyses()
+        
+        logger.info(f"Clear all analyses result: {result}")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        error_msg = f"Clear all analyses error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False, 
+            'message': error_msg,
+            'deleted_count': 0
+        })
+
 @app.route('/api/analyze-files', methods=['POST'])
 def analyze_files():
     """Start analysis of selected files"""

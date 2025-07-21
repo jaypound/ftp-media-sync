@@ -400,6 +400,7 @@ function displayScannedFiles() {
     
     // Update analysis button states
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
 }
 
 function clearScannedFiles() {
@@ -472,6 +473,7 @@ function addToSyncQueue(fileId, buttonElement) {
     // Update sync button state
     updateSyncButtonState();
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
 }
 
 function removeFromSyncQueue(fileId) {
@@ -812,6 +814,7 @@ function analyzeAllFromFolder() {
     }
     
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
 }
 
 function addAllToSyncQueue() {
@@ -1714,6 +1717,114 @@ function addToAnalysisQueue(fileId) {
     const fileItem = button.closest('.scanned-file-item');
     fileItem.classList.add('queued');
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
+}
+
+function addAllUnanalyzedToAnalysisQueue() {
+    log('🚀 Analyze All Unanalyzed button clicked!');
+    
+    if (sourceFiles.length === 0) {
+        log('No files scanned - scan files first', 'error');
+        return;
+    }
+    
+    // Find all video files that are not already analyzed
+    const videoFiles = sourceFiles.filter(file => isVideoFileEligible(file.name));
+    if (videoFiles.length === 0) {
+        log('No video files found to analyze', 'error');
+        return;
+    }
+    
+    // Filter to only unanalyzed files
+    const unanalyzedFiles = videoFiles.filter(file => !file.is_analyzed);
+    
+    if (unanalyzedFiles.length === 0) {
+        log('No unanalyzed video files found (all files may already be analyzed)', 'error');
+        return;
+    }
+    
+    log(`📁 Adding all ${unanalyzedFiles.length} unanalyzed video files to analysis queue`);
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Add each unanalyzed file to the analysis queue
+    unanalyzedFiles.forEach(file => {
+        const fileId = btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '');
+        
+        // Check if file is already in analysis queue
+        const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === fileId);
+        if (!alreadyInQueue) {
+            analysisQueue.push({
+                id: fileId,
+                file: file,
+                filePath: file.path || file.name
+            });
+            addedCount++;
+            
+            // Update corresponding button
+            const button = document.querySelector(`button[onclick="addToAnalysisQueue('${fileId}')"]`);
+            if (button) {
+                button.innerHTML = '<i class="fas fa-check"></i> Added to Analysis';
+                button.classList.add('added');
+                button.disabled = true;
+                
+                // Update parent item styling
+                const fileItem = button.closest('.scanned-file-item');
+                if (fileItem) {
+                    fileItem.classList.add('queued');
+                }
+            }
+        } else {
+            skippedCount++;
+        }
+    });
+    
+    if (addedCount > 0) {
+        log(`📋 Added ${addedCount} unanalyzed files to analysis queue (${analysisQueue.length} total files)`);
+        if (skippedCount > 0) {
+            log(`⏭️ Skipped ${skippedCount} files (already in queue)`);
+        }
+        updateAnalysisButtonState();
+        updateAnalyzeAllButtonState();
+    } else {
+        log('All unanalyzed files are already in analysis queue', 'warning');
+    }
+}
+
+function updateAnalyzeAllButtonState() {
+    const analyzeAllButton = document.getElementById('analyzeAllUnanalyzedButton');
+    if (analyzeAllButton) {
+        if (sourceFiles.length === 0) {
+            analyzeAllButton.disabled = true;
+            analyzeAllButton.textContent = 'Analyze All Unanalyzed';
+            analyzeAllButton.title = 'Scan files first';
+            return;
+        }
+        
+        const videoFiles = sourceFiles.filter(file => isVideoFileEligible(file.name));
+        const unanalyzedFiles = videoFiles.filter(file => !file.is_analyzed);
+        const queuedUnanalyzed = unanalyzedFiles.filter(file => {
+            const fileId = btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '');
+            return analysisQueue.find(queueItem => queueItem.id === fileId);
+        }).length;
+        
+        const remainingUnanalyzed = unanalyzedFiles.length - queuedUnanalyzed;
+        
+        if (remainingUnanalyzed > 0) {
+            analyzeAllButton.disabled = false;
+            analyzeAllButton.textContent = `Analyze All Unanalyzed (${remainingUnanalyzed} files)`;
+            analyzeAllButton.title = `Queue ${remainingUnanalyzed} unanalyzed video files for analysis`;
+        } else if (unanalyzedFiles.length > 0) {
+            analyzeAllButton.disabled = true;
+            analyzeAllButton.textContent = 'Analyze All Unanalyzed (all queued)';
+            analyzeAllButton.title = 'All unanalyzed files are already queued';
+        } else {
+            analyzeAllButton.disabled = true;
+            analyzeAllButton.textContent = 'Analyze All Unanalyzed (0 files)';
+            analyzeAllButton.title = 'No unanalyzed video files found';
+        }
+    }
 }
 
 // AI Settings Functions
@@ -1955,6 +2066,7 @@ function renderAnalysisFiles() {
     });
     
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
 }
 
 function toggleAnalysisView() {
@@ -2102,6 +2214,7 @@ function clearAnalysisQueue() {
     
     log(`Cleared ${clearedCount} files from analysis queue`);
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
 }
 
 async function startAnalysis() {
@@ -2120,6 +2233,7 @@ async function startAnalysis() {
     log(`Starting analysis of ${analysisQueue.length} files...`);
     
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
     
     const totalFiles = analysisQueue.length;
     let successCount = 0;
@@ -2294,6 +2408,7 @@ async function startAnalysis() {
     }
     
     updateAnalysisButtonState();
+    updateAnalyzeAllButtonState();
 }
 
 function stopAnalysis() {
@@ -2310,6 +2425,84 @@ function stopAnalysis() {
     if (stopAnalysisButton) {
         stopAnalysisButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
         stopAnalysisButton.disabled = true;
+    }
+}
+
+// Database Management Functions
+async function clearAllAnalyses() {
+    // First confirmation dialog
+    const confirmFirst = confirm(
+        "⚠️ WARNING: This will permanently delete ALL analysis data from the database!\n\n" +
+        "This includes:\n" +
+        "• All transcripts\n" +
+        "• All AI analysis results\n" +
+        "• All file metadata\n" +
+        "• All engagement scores\n\n" +
+        "This action CANNOT be undone!\n\n" +
+        "Are you sure you want to continue?"
+    );
+    
+    if (!confirmFirst) {
+        log('Database clear operation cancelled by user');
+        return;
+    }
+    
+    // Second confirmation dialog for extra safety
+    const confirmSecond = confirm(
+        "🚨 FINAL CONFIRMATION 🚨\n\n" +
+        "You are about to DELETE ALL ANALYSIS DATA from the database.\n\n" +
+        "Type 'DELETE ALL' in your mind and click OK to confirm, or Cancel to abort."
+    );
+    
+    if (!confirmSecond) {
+        log('Database clear operation cancelled by user (second confirmation)');
+        return;
+    }
+    
+    try {
+        log('🗑️ Starting database clear operation...', 'warning');
+        
+        const response = await fetch('http://127.0.0.1:5000/api/clear-all-analyses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ Successfully cleared database: ${result.message}`, 'success');
+            
+            // Update UI to reflect cleared state
+            if (result.deleted_count > 0) {
+                // Clear analysis results from frontend
+                analysisResults = [];
+                
+                // Reset file analysis status indicators
+                sourceFiles.forEach(file => {
+                    if (file.is_analyzed) {
+                        file.is_analyzed = false;
+                        delete file.analysis_info;
+                    }
+                });
+                
+                // Re-render displays to show updated state
+                if (document.getElementById('scannedFilesCard').style.display !== 'none') {
+                    displayScannedFiles();
+                }
+                
+                // Update button states
+                updateAnalysisButtonState();
+                updateAnalyzeAllButtonState();
+                
+                log(`📊 Updated UI to reflect ${result.deleted_count} cleared analysis records`);
+            }
+            
+        } else {
+            log(`❌ Failed to clear database: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`❌ Error clearing database: ${error.message}`, 'error');
     }
 }
 

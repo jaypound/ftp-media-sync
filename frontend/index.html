@@ -113,6 +113,9 @@
                     <button class="button analysis" id="analyzeFolderButton" onclick="analyzeAllFromFolder()" disabled>
                         <i class="fas fa-brain"></i> Analyze Folder
                     </button>
+                    <button class="button analysis" id="analyzeAllUnanalyzedButton" onclick="addAllUnanalyzedToAnalysisQueue()" disabled>
+                        <i class="fas fa-brain"></i> Analyze All Unanalyzed
+                    </button>
                     <button class="button primary" id="startAnalysisButton" onclick="startAnalysis()" disabled>
                         <i class="fas fa-play"></i> Start Analysis
                     </button>
@@ -390,6 +393,16 @@
                         <p><strong>Version:</strong> <span id="versionInfo">1.0.0</span></p>
                         <p><strong>Uptime:</strong> <span id="uptimeInfo">--</span></p>
                     </div>
+                </div>
+                
+                <div class="admin-card">
+                    <h3><i class="fas fa-database"></i> Database Management</h3>
+                    <div class="admin-buttons">
+                        <button class="button danger" onclick="clearAllAnalyses()">
+                            <i class="fas fa-trash-alt"></i> Clear All Analysis Data
+                        </button>
+                    </div>
+                    <p><small><strong>Warning:</strong> This will permanently delete all analysis results from the database. This action cannot be undone.</small></p>
                 </div>
             </div>
         </div>
