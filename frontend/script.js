@@ -343,20 +343,27 @@ function displayScannedFiles() {
         const isVideoFile = isVideoFileEligible(file.name);
         console.log('Is video file:', isVideoFile);
         
+        // Check if file has been analyzed
+        const isAnalyzed = file.is_analyzed || false;
+        console.log(`File ${file.name} analyzed status:`, isAnalyzed);
+        
         fileItem.innerHTML = `
             <div class="scanned-file-content">
                 <div class="scanned-file-name">${file.name}</div>
                 <div class="scanned-file-details">
                     <span>Size: ${formatFileSize(file.size)}</span>
                     <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
+                    ${isAnalyzed ? '<span style="color: #4caf50;">✅ Analyzed</span>' : ''}
                 </div>
                 <div class="scanned-file-path">${file.path || file.name}</div>
             </div>
             ${isVideoFile ? `
                 <div class="scanned-file-actions">
-                    <button class="analyze-btn" onclick="addToAnalysisQueue('${btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '')}')" 
-                            data-file-path="${file.path || file.name}">
-                        <i class="fas fa-brain"></i> Analyze
+                    <button class="analyze-btn ${isAnalyzed ? 'analyzed' : ''}" 
+                            onclick="addToAnalysisQueue('${btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '')}')" 
+                            data-file-path="${file.path || file.name}"
+                            data-is-analyzed="${isAnalyzed}">
+                        <i class="fas fa-${isAnalyzed ? 'redo' : 'brain'}"></i> ${isAnalyzed ? 'Reanalyze' : 'Analyze'}
                     </button>
                 </div>
             ` : ''}
@@ -604,9 +611,13 @@ function getAnalyzeFolderStats() {
         // Check if file is already in analysis queue
         const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === file.id);
         
-        console.log(`File: ${file.name}, Folder: ${itemFolderPath}, Same folder: ${isSameFolder}, Already in queue: ${!!alreadyInQueue}`);
+        // Check if file has already been analyzed
+        const isAnalyzed = file.is_analyzed || false;
         
-        if (isSameFolder && !alreadyInQueue) {
+        console.log(`File: ${file.name}, Folder: ${itemFolderPath}, Same folder: ${isSameFolder}, Already in queue: ${!!alreadyInQueue}, Is analyzed: ${isAnalyzed}`);
+        
+        // Only count files that are in same folder, not in queue, and not already analyzed
+        if (isSameFolder && !alreadyInQueue && !isAnalyzed) {
             videoFilesToAnalyze++;
         }
     });
@@ -712,7 +723,7 @@ function analyzeAllFromFolder() {
     
     let filesToAnalyze = [];
     
-    // Find all video files in the same folder that are not already in analysis queue
+    // Find all video files in the same folder that are not already analyzed or in analysis queue
     videoFiles.forEach(file => {
         const itemFolderPath = file.path ? 
             file.path.substring(0, file.path.lastIndexOf('/')) : 
@@ -724,17 +735,21 @@ function analyzeAllFromFolder() {
         // Check if file is already in analysis queue
         const alreadyInQueue = analysisQueue.find(queueItem => queueItem.id === file.id);
         
-        if (isSameFolder && !alreadyInQueue) {
+        // Check if file has already been analyzed
+        const isAnalyzed = file.is_analyzed || false;
+        
+        // Only add files that are in the same folder, not in queue, and not already analyzed
+        if (isSameFolder && !alreadyInQueue && !isAnalyzed) {
             filesToAnalyze.push(file);
         }
     });
     
     if (filesToAnalyze.length === 0) {
-        log('No video files found in the specified folder', 'error');
+        log('No unanalyzed video files found in the specified folder (all files may already be analyzed or queued)', 'error');
         return;
     }
     
-    log(`Found ${filesToAnalyze.length} video files to add to analysis queue in folder "${targetFolderPath || 'root'}"`);
+    log(`Found ${filesToAnalyze.length} unanalyzed video files to add to analysis queue in folder "${targetFolderPath || 'root'}"`);
     
     let addedCount = 0;
     let skippedCount = 0;
@@ -1647,7 +1662,8 @@ function addToAnalysisQueue(fileId) {
     }
     
     const filePath = button.getAttribute('data-file-path');
-    console.log('File path:', filePath);
+    const isAnalyzed = button.getAttribute('data-is-analyzed') === 'true';
+    console.log('File path:', filePath, 'Is analyzed:', isAnalyzed);
     
     // Find the file in sourceFiles
     const file = sourceFiles.find(f => (f.path || f.name) === filePath);
@@ -1670,16 +1686,21 @@ function addToAnalysisQueue(fileId) {
         filePath: filePath
     });
     
-    // Update button state
-    button.innerHTML = '<i class="fas fa-check"></i> Added to Analysis';
+    // Update button state based on whether this is a reanalysis or new analysis
+    if (isAnalyzed) {
+        button.innerHTML = '<i class="fas fa-check"></i> Queued for Reanalysis';
+        log(`🔄 Added ${file.name} to analysis queue for reanalysis (${analysisQueue.length} files queued)`);
+    } else {
+        button.innerHTML = '<i class="fas fa-check"></i> Added to Analysis';
+        log(`📋 Added ${file.name} to analysis queue (${analysisQueue.length} files queued)`);
+    }
+    
     button.classList.add('added');
     button.disabled = true;
     
     // Update parent item styling
     const fileItem = button.closest('.scanned-file-item');
     fileItem.classList.add('queued');
-    
-    log(`📋 Added ${file.name} to analysis queue (${analysisQueue.length} files queued)`);
     updateAnalysisButtonState();
 }
 
@@ -2017,15 +2038,15 @@ function updateAnalysisButtonState() {
         
         if (analyzeStats && analyzeStats.videoFilesToAnalyze > 0) {
             console.log('Enabling analyze folder button');
-            log(`📁 Analyze Folder enabled for "${analyzeStats.folderPath}" folder with ${analyzeStats.videoFilesToAnalyze} video files`);
+            log(`📁 Analyze Folder enabled for "${analyzeStats.folderPath}" folder with ${analyzeStats.videoFilesToAnalyze} unanalyzed video files`);
             analyzeFolderButton.disabled = false;
-            analyzeFolderButton.textContent = `Analyze Folder (${analyzeStats.videoFilesToAnalyze} files)`;
-            analyzeFolderButton.title = `Analyze all video files from "${analyzeStats.folderPath}" folder`;
+            analyzeFolderButton.textContent = `Analyze Folder (${analyzeStats.videoFilesToAnalyze} unanalyzed)`;
+            analyzeFolderButton.title = `Analyze all unanalyzed video files from "${analyzeStats.folderPath}" folder`;
         } else if (analyzeStats) {
             console.log('Disabling analyze folder button - no files');
             analyzeFolderButton.disabled = true;
-            analyzeFolderButton.textContent = 'Analyze Folder (0 files)';
-            analyzeFolderButton.title = `No video files to analyze in "${analyzeStats.folderPath}" folder`;
+            analyzeFolderButton.textContent = 'Analyze Folder (0 unanalyzed)';
+            analyzeFolderButton.title = `No unanalyzed video files in "${analyzeStats.folderPath}" folder`;
         } else {
             console.log('Disabling analyze folder button - no stats');
             analyzeFolderButton.disabled = true;
@@ -2045,11 +2066,16 @@ function clearAnalysisQueue() {
     
     const clearedCount = analysisQueue.length;
     
-    // Reset all buttons back to "Analyze" state
+    // Reset all buttons back to their original state
     analysisQueue.forEach(item => {
         const button = document.querySelector(`button[onclick="addToAnalysisQueue('${item.id}')"]`);
         if (button) {
-            button.innerHTML = '<i class="fas fa-brain"></i> Analyze';
+            const isAnalyzed = button.getAttribute('data-is-analyzed') === 'true';
+            if (isAnalyzed) {
+                button.innerHTML = '<i class="fas fa-redo"></i> Reanalyze';
+            } else {
+                button.innerHTML = '<i class="fas fa-brain"></i> Analyze';
+            }
             button.classList.remove('added');
             button.disabled = false;
             
@@ -2134,13 +2160,17 @@ async function startAnalysis() {
         }
         
         try {
+            // Check if this file is being reanalyzed
+            const isReanalysis = queueItem.file.is_analyzed || false;
+            
             const response = await fetch('http://127.0.0.1:5000/api/analyze-files', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     files: [queueItem.file],
                     server_type: 'source',
-                    ai_config: aiConfig
+                    ai_config: aiConfig,
+                    force_reanalysis: isReanalysis
                 })
             });
             

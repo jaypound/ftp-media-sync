@@ -161,10 +161,28 @@ def scan_files():
         files = scanner.scan_directory(path, filters)
         logger.info(f"Found {len(files)} files")
         
+        # Check analysis status for all files
+        logger.info("Checking analysis status for scanned files...")
+        analyzed_files = db_manager.check_analysis_status(files)
+        
+        # Create a lookup map for analyzed files
+        analyzed_map = {af['file_path']: af for af in analyzed_files}
+        
+        # Add analysis status to each file
+        for file_info in files:
+            file_path = file_info.get('path', file_info.get('name', ''))
+            file_info['is_analyzed'] = file_path in analyzed_map
+            if file_info['is_analyzed']:
+                file_info['analysis_info'] = analyzed_map[file_path]
+        
+        analyzed_count = len(analyzed_files)
+        logger.info(f"Analysis status check completed: {analyzed_count}/{len(files)} files analyzed")
+        
         return jsonify({
             'success': True, 
             'files': files,
-            'count': len(files)
+            'count': len(files),
+            'analyzed_count': analyzed_count
         })
         
     except Exception as e:
@@ -322,6 +340,7 @@ def analyze_files():
         data = request.json
         files = data.get('files', [])
         server_type = data.get('server_type', 'source')
+        force_reanalysis = data.get('force_reanalysis', False)
         
         # Get AI config from config manager
         ai_config = config_manager.get_ai_analysis_settings()
@@ -332,6 +351,7 @@ def analyze_files():
         
         logger.info(f"Starting analysis of {len(files)} files from {server_type} server")
         logger.info(f"AI config: provider={ai_config.get('provider')}, enabled={ai_config.get('enabled')}")
+        logger.info(f"Force reanalysis: {force_reanalysis}")
         
         # Check if server is connected
         if server_type not in ftp_managers:
@@ -353,7 +373,7 @@ def analyze_files():
         ftp_manager = ftp_managers[server_type]
         
         # Start analysis
-        results = file_analyzer.analyze_batch(files, ftp_manager, ai_config)
+        results = file_analyzer.analyze_batch(files, ftp_manager, ai_config, force_reanalysis)
         
         # Count success/failure
         success_count = sum(1 for r in results if r.get('success'))

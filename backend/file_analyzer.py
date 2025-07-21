@@ -63,7 +63,7 @@ class FileAnalyzer:
                 'content_title': ''
             }
     
-    def analyze_file(self, file_info: Dict[str, Any], ftp_manager, ai_config: Dict[str, Any] = None) -> Dict[str, Any]:
+    def analyze_file(self, file_info: Dict[str, Any], ftp_manager, ai_config: Dict[str, Any] = None, force_reanalysis: bool = False) -> Dict[str, Any]:
         """Analyze a single file completely"""
         try:
             file_name = file_info.get('name', '')
@@ -81,9 +81,9 @@ class FileAnalyzer:
                     "file_name": file_name
                 }
             
-            # Check if already analyzed
+            # Check if already analyzed (unless forced reanalysis)
             existing_analysis = db_manager.get_analysis_by_path(file_path)
-            if existing_analysis:
+            if existing_analysis and not force_reanalysis:
                 logger.info(f"File {file_name} already analyzed, skipping")
                 return {
                     "success": True,
@@ -91,6 +91,8 @@ class FileAnalyzer:
                     "file_name": file_name,
                     "analysis": existing_analysis
                 }
+            elif existing_analysis and force_reanalysis:
+                logger.info(f"File {file_name} already analyzed, but forcing reanalysis")
             
             # Mark analysis as in progress
             self.analysis_in_progress[file_path] = True
@@ -231,7 +233,7 @@ class FileAnalyzer:
             logger.error(f"Error downloading file: {str(e)}")
             return None
     
-    def analyze_batch(self, file_list: List[Dict[str, Any]], ftp_manager, ai_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    def analyze_batch(self, file_list: List[Dict[str, Any]], ftp_manager, ai_config: Dict[str, Any] = None, force_reanalysis: bool = False) -> List[Dict[str, Any]]:
         """Analyze multiple files in batch"""
         results = []
         
@@ -240,7 +242,7 @@ class FileAnalyzer:
         for i, file_info in enumerate(file_list):
             logger.info(f"Processing file {i+1}/{len(file_list)}: {file_info.get('name', 'unknown')}")
             
-            result = self.analyze_file(file_info, ftp_manager, ai_config)
+            result = self.analyze_file(file_info, ftp_manager, ai_config, force_reanalysis)
             results.append(result)
             
             # Log progress
