@@ -332,6 +332,85 @@ def get_analysis_status():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/delete-files', methods=['POST'])
+def delete_files():
+    """Delete selected files from target server"""
+    logger.info("=== DELETE FILES REQUEST ===")
+    try:
+        data = request.json
+        files = data.get('files', [])
+        server_type = data.get('server_type', 'target')
+        dry_run = data.get('dry_run', True)
+        
+        logger.info(f"Deleting {len(files)} files from {server_type} server (dry_run: {dry_run})")
+        
+        # Check if server is connected
+        if server_type not in ftp_managers:
+            return jsonify({
+                'success': False, 
+                'message': f'{server_type} server not connected'
+            })
+        
+        # Get the FTP manager
+        ftp_manager = ftp_managers[server_type]
+        
+        results = []
+        success_count = 0
+        failure_count = 0
+        
+        for file_info in files:
+            file_path = file_info.get('path', file_info.get('name', ''))
+            file_name = file_info.get('name', '')
+            
+            logger.info(f"Processing delete for: {file_name} (path: {file_path})")
+            
+            if dry_run:
+                # Simulate deletion
+                results.append({
+                    'success': True,
+                    'message': f'Would delete: {file_name}',
+                    'file_name': file_name,
+                    'file_path': file_path,
+                    'dry_run': True
+                })
+                success_count += 1
+            else:
+                # Actually delete the file
+                success = ftp_manager.delete_file(file_path)
+                
+                if success:
+                    results.append({
+                        'success': True,
+                        'message': f'Successfully deleted: {file_name}',
+                        'file_name': file_name,
+                        'file_path': file_path
+                    })
+                    success_count += 1
+                else:
+                    results.append({
+                        'success': False,
+                        'message': f'Failed to delete: {file_name}',
+                        'file_name': file_name,
+                        'file_path': file_path
+                    })
+                    failure_count += 1
+        
+        logger.info(f"Delete operation completed: {success_count} successful, {failure_count} failed")
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'success_count': success_count,
+            'failure_count': failure_count,
+            'total_count': len(files),
+            'dry_run': dry_run
+        })
+        
+    except Exception as e:
+        error_msg = f"Delete error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
 @app.route('/api/analyze-files', methods=['POST'])
 def analyze_files():
     """Start analysis of selected files"""

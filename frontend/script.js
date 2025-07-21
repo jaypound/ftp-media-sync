@@ -5,6 +5,7 @@ let syncQueue = [];
 let availableFiles = []; // New: tracks files that CAN be synced
 let allComparisonResults = []; // Store all comparison results
 let targetOnlyFiles = []; // Files that exist on target but not on source
+let deleteQueue = []; // Files queued for deletion
 let analysisQueue = []; // Files queued for analysis
 let analysisResults = []; // Store analysis results
 let showAllFiles = false; // Toggle for showing all files vs unsynced only
@@ -124,6 +125,7 @@ async function compareFiles() {
     availableFiles = [];
     allComparisonResults = [];
     targetOnlyFiles = [];
+    deleteQueue = [];
     
     // Create a map of target files for quick lookup using relative path
     const targetFileMap = new Map();
@@ -219,6 +221,7 @@ async function compareFiles() {
     // Disable sync button initially since no files are selected
     document.getElementById('syncButton').disabled = true;
     updateSyncButtonState();
+    updateBulkDeleteButtonStates();
 }
 
 function renderComparisonResults() {
@@ -237,7 +240,11 @@ function renderComparisonResults() {
                     <div class="file-path">${result.relativePath !== result.targetFile.name ? result.relativePath : ''}</div>
                     <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                 </div>
-                <span style="color: #0288d1;">📁 Target Only</span>
+                <div class="file-actions">
+                    <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
             `;
             
             fileListDiv.appendChild(fileItem);
@@ -299,7 +306,11 @@ function renderComparisonResults() {
                         <div class="file-path">${result.relativePath !== result.targetFile.name ? result.relativePath : ''}</div>
                         <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                     </div>
-                    <span style="color: #0288d1;">📁 Target Only</span>
+                    <div class="file-actions">
+                        <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
                 `;
                 
                 fileListDiv.appendChild(fileItem);
@@ -414,6 +425,7 @@ function clearScannedFiles() {
     availableFiles = [];
     allComparisonResults = [];
     targetOnlyFiles = [];
+    deleteQueue = [];
     
     // Reset UI
     document.querySelector('button[onclick="compareFiles()"]').disabled = true;
@@ -2298,5 +2310,329 @@ function stopAnalysis() {
     if (stopAnalysisButton) {
         stopAnalysisButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
         stopAnalysisButton.disabled = true;
+    }
+}
+
+// Delete Queue Management Functions
+function addToDeleteQueue(fileId) {
+    console.log('addToDeleteQueue called with fileId:', fileId);
+    
+    // Find the file in targetOnlyFiles
+    const targetOnlyFile = targetOnlyFiles.find(item => item.fileId === fileId);
+    if (!targetOnlyFile) {
+        log(`File with ID ${fileId} not found in target-only files`, 'error');
+        return;
+    }
+    
+    // Check if already in delete queue
+    const alreadyInQueue = deleteQueue.find(item => item.fileId === fileId);
+    if (alreadyInQueue) {
+        log(`${targetOnlyFile.targetFile.name} is already in delete queue`, 'warning');
+        return;
+    }
+    
+    // Add to delete queue
+    deleteQueue.push(targetOnlyFile);
+    
+    // Update button state
+    const button = document.querySelector(`button[onclick="addToDeleteQueue('${fileId}')"]`);
+    if (button) {
+        button.innerHTML = '<i class="fas fa-check"></i> Added for Deletion';
+        button.classList.add('added');
+        button.disabled = true;
+    }
+    
+    log(`📋 Added ${targetOnlyFile.targetFile.name} to delete queue (${deleteQueue.length} files queued for deletion)`);
+    updateDeleteButtonState();
+    updateBulkDeleteButtonStates();
+}
+
+function updateDeleteButtonState() {
+    const deleteButton = document.getElementById('deleteButton');
+    const clearDeleteButton = document.getElementById('clearDeleteButton');
+    
+    if (deleteButton) {
+        if (deleteQueue.length > 0) {
+            deleteButton.disabled = false;
+            deleteButton.innerHTML = `<i class="fas fa-trash"></i> Delete Files (${deleteQueue.length})`;
+        } else {
+            deleteButton.disabled = true;
+            deleteButton.innerHTML = '<i class="fas fa-trash"></i> Delete Files';
+        }
+    }
+    
+    if (clearDeleteButton) {
+        clearDeleteButton.disabled = deleteQueue.length === 0;
+    }
+}
+
+function clearDeleteQueue() {
+    if (deleteQueue.length === 0) {
+        log('Delete queue is already empty', 'warning');
+        return;
+    }
+    
+    const clearedCount = deleteQueue.length;
+    
+    // Reset all buttons back to their original state
+    deleteQueue.forEach(item => {
+        const button = document.querySelector(`button[onclick="addToDeleteQueue('${item.fileId}')"]`);
+        if (button) {
+            button.innerHTML = '<i class="fas fa-trash"></i> Delete';
+            button.classList.remove('added');
+            button.disabled = false;
+        }
+    });
+    
+    // Clear the queue
+    deleteQueue = [];
+    
+    log(`Cleared ${clearedCount} files from delete queue`);
+    updateDeleteButtonState();
+    updateBulkDeleteButtonStates();
+}
+
+async function deleteFiles() {
+    if (deleteQueue.length === 0) {
+        log('No files selected for deletion', 'error');
+        return;
+    }
+    
+    const dryRun = document.getElementById('dryRunDelete') ? document.getElementById('dryRunDelete').checked : true;
+    
+    log(`Starting deletion of ${deleteQueue.length} files${dryRun ? ' (DRY RUN)' : ''}...`);
+    
+    try {
+        // Prepare files for deletion
+        const filesToDelete = deleteQueue.map(item => ({
+            name: item.targetFile.name,
+            path: item.relativePath,
+            size: item.targetFile.size
+        }));
+        
+        const response = await fetch('http://127.0.0.1:5000/api/delete-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                files: filesToDelete,
+                server_type: 'target',
+                dry_run: dryRun
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`Delete operation completed: ${result.success_count} successful, ${result.failure_count} failed${dryRun ? ' (DRY RUN)' : ''}`);
+            
+            // Log individual results
+            result.results.forEach(fileResult => {
+                if (fileResult.success) {
+                    log(`✅ ${fileResult.message}`);
+                } else {
+                    log(`❌ ${fileResult.message}`, 'error');
+                }
+            });
+            
+            if (!dryRun && result.success_count > 0) {
+                // Remove successfully deleted files from the delete queue and UI
+                const successfulDeletes = result.results.filter(r => r.success).map(r => r.file_name);
+                
+                // Update delete queue
+                deleteQueue = deleteQueue.filter(item => !successfulDeletes.includes(item.targetFile.name));
+                
+                // Remove from target-only files
+                targetOnlyFiles = targetOnlyFiles.filter(item => !successfulDeletes.includes(item.targetFile.name));
+                
+                // Re-render comparison results to update UI
+                renderComparisonResults();
+                updateComparisonSummary();
+                updateDeleteButtonState();
+                updateBulkDeleteButtonStates();
+                
+                log(`Removed ${successfulDeletes.length} deleted files from UI`);
+            }
+            
+        } else {
+            log(`Delete operation failed: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        log(`Delete request failed: ${error.message}`, 'error');
+    }
+}
+
+// Bulk Delete Functions
+function addAllUnmatchedToDeleteQueue() {
+    if (targetOnlyFiles.length === 0) {
+        log('No unmatched files found to delete', 'error');
+        return;
+    }
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Add all target-only files to the delete queue
+    targetOnlyFiles.forEach(targetOnlyFile => {
+        const alreadyInQueue = deleteQueue.find(item => item.fileId === targetOnlyFile.fileId);
+        if (!alreadyInQueue) {
+            deleteQueue.push(targetOnlyFile);
+            addedCount++;
+            
+            // Update corresponding button
+            const button = document.querySelector(`button[onclick="addToDeleteQueue('${targetOnlyFile.fileId}')"]`);
+            if (button) {
+                button.innerHTML = '<i class="fas fa-check"></i> Added for Deletion';
+                button.classList.add('added');
+                button.disabled = true;
+            }
+        } else {
+            skippedCount++;
+        }
+    });
+    
+    if (addedCount > 0) {
+        log(`📋 Added ${addedCount} unmatched files to delete queue (${deleteQueue.length} total files)`);
+        if (skippedCount > 0) {
+            log(`⏭️ Skipped ${skippedCount} files (already in queue)`);
+        }
+        updateDeleteButtonState();
+        updateBulkDeleteButtonStates();
+    } else {
+        log('All unmatched files are already in delete queue', 'warning');
+    }
+}
+
+function addFolderUnmatchedToDeleteQueue() {
+    if (deleteQueue.length === 0) {
+        log('No files in delete queue - add a file first to determine the folder', 'error');
+        return;
+    }
+    
+    // Get the folder path from the last added file
+    const lastFile = deleteQueue[deleteQueue.length - 1];
+    const targetFolderPath = lastFile.relativePath ? 
+        lastFile.relativePath.substring(0, lastFile.relativePath.lastIndexOf('/')) : 
+        '';
+    
+    const isRootFile = !targetFolderPath;
+    
+    log(`Adding all unmatched files from folder: ${targetFolderPath || 'root directory'}`);
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Find all unmatched files in the same folder
+    targetOnlyFiles.forEach(targetOnlyFile => {
+        const itemFolderPath = targetOnlyFile.relativePath ? 
+            targetOnlyFile.relativePath.substring(0, targetOnlyFile.relativePath.lastIndexOf('/')) : 
+            '';
+        
+        // Check if file is in the same folder
+        const isSameFolder = isRootFile ? !itemFolderPath : itemFolderPath === targetFolderPath;
+        
+        // Check if file is already in delete queue
+        const alreadyInQueue = deleteQueue.find(item => item.fileId === targetOnlyFile.fileId);
+        
+        if (isSameFolder && !alreadyInQueue) {
+            deleteQueue.push(targetOnlyFile);
+            addedCount++;
+            
+            // Update corresponding button
+            const button = document.querySelector(`button[onclick="addToDeleteQueue('${targetOnlyFile.fileId}')"]`);
+            if (button) {
+                button.innerHTML = '<i class="fas fa-check"></i> Added for Deletion';
+                button.classList.add('added');
+                button.disabled = true;
+            }
+        } else if (isSameFolder) {
+            skippedCount++;
+        }
+    });
+    
+    if (addedCount > 0) {
+        log(`📋 Added ${addedCount} files from folder "${targetFolderPath || 'root'}" to delete queue`);
+        if (skippedCount > 0) {
+            log(`⏭️ Skipped ${skippedCount} files (already in queue)`);
+        }
+        updateDeleteButtonState();
+        updateBulkDeleteButtonStates();
+    } else {
+        log('No additional files found in the specified folder', 'warning');
+    }
+}
+
+// Helper functions for bulk delete buttons state
+function getDeleteFolderStats() {
+    if (targetOnlyFiles.length === 0) {
+        return null;
+    }
+    
+    if (deleteQueue.length === 0) {
+        return null;
+    }
+    
+    // Get the folder path from the last file added to delete queue
+    const lastQueuedFile = deleteQueue[deleteQueue.length - 1];
+    const targetFolderPath = lastQueuedFile.relativePath ? 
+        lastQueuedFile.relativePath.substring(0, lastQueuedFile.relativePath.lastIndexOf('/')) : 
+        '';
+    
+    // Count unmatched files in the same folder that are not already in delete queue
+    let unmatchedFilesToDelete = 0;
+    targetOnlyFiles.forEach(file => {
+        const itemFolderPath = file.relativePath ? 
+            file.relativePath.substring(0, file.relativePath.lastIndexOf('/')) : 
+            '';
+        
+        const isSameFolder = !targetFolderPath ? !itemFolderPath : itemFolderPath === targetFolderPath;
+        const alreadyInQueue = deleteQueue.find(queueItem => queueItem.fileId === file.fileId);
+        
+        if (isSameFolder && !alreadyInQueue) {
+            unmatchedFilesToDelete++;
+        }
+    });
+    
+    return {
+        folderPath: targetFolderPath || 'root',
+        unmatchedFilesToDelete: unmatchedFilesToDelete
+    };
+}
+
+function updateBulkDeleteButtonStates() {
+    // Update "Delete All Unmatched" button
+    const deleteAllButton = document.getElementById('deleteAllUnmatchedButton');
+    if (deleteAllButton) {
+        const totalUnmatched = targetOnlyFiles.length;
+        const queuedUnmatched = deleteQueue.length;
+        const remainingUnmatched = totalUnmatched - queuedUnmatched;
+        
+        if (remainingUnmatched > 0) {
+            deleteAllButton.disabled = false;
+            deleteAllButton.textContent = `Delete All Unmatched (${remainingUnmatched} files)`;
+        } else {
+            deleteAllButton.disabled = true;
+            deleteAllButton.textContent = totalUnmatched > 0 ? 'Delete All Unmatched (all queued)' : 'Delete All Unmatched (0 files)';
+        }
+    }
+    
+    // Update "Delete Folder" button
+    const deleteFolderButton = document.getElementById('deleteFolderButton');
+    if (deleteFolderButton) {
+        const folderStats = getDeleteFolderStats();
+        
+        if (folderStats && folderStats.unmatchedFilesToDelete > 0) {
+            deleteFolderButton.disabled = false;
+            deleteFolderButton.textContent = `Delete Folder (${folderStats.unmatchedFilesToDelete} files)`;
+            deleteFolderButton.title = `Delete all unmatched files from "${folderStats.folderPath}" folder`;
+        } else if (folderStats) {
+            deleteFolderButton.disabled = true;
+            deleteFolderButton.textContent = 'Delete Folder (0 files)';
+            deleteFolderButton.title = `No unmatched files to delete in "${folderStats.folderPath}" folder`;
+        } else {
+            deleteFolderButton.disabled = true;
+            deleteFolderButton.textContent = 'Delete Folder';
+            deleteFolderButton.title = 'Add a file to delete queue first to determine folder';
+        }
     }
 }
