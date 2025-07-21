@@ -156,7 +156,7 @@ class FileAnalyzer:
                     "content_type": filename_metadata.get('content_type', ''),
                     "content_title": filename_metadata.get('content_title', ''),
                     "transcript": audio_result['transcript'],
-                    "language": audio_result.get('language', 'unknown'),
+                    "language": audio_result.get('language', 'en'),
                     "summary": ai_result.get('summary', '') if ai_result else '',
                     "topics": ai_result.get('topics', []) if ai_result else [],
                     "locations": ai_result.get('locations', []) if ai_result else [],

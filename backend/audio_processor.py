@@ -8,6 +8,61 @@ import json
 
 logger = logging.getLogger(__name__)
 
+def validate_language(detected_language):
+    """
+    Validate detected language and ensure it's only English or Spanish.
+    Default to English for any invalid or unsupported languages.
+    """
+    # Supported languages mapping
+    valid_languages = {
+        'en': 'en',
+        'english': 'en', 
+        'es': 'es',
+        'spanish': 'es',
+        'spa': 'es'
+    }
+    
+    # Common invalid/unsupported language codes that should default to English
+    invalid_languages = {
+        'nn',  # Norwegian Nynorsk (often misdetected)
+        'no',  # Norwegian 
+        'nb',  # Norwegian Bokmål
+        'und', # Undetermined
+        'unknown',
+        'auto',
+        'detect'
+    }
+    
+    if not detected_language:
+        logger.warning("No language detected, defaulting to English")
+        return 'en'
+    
+    # Convert to lowercase for comparison
+    lang_lower = detected_language.lower().strip()
+    
+    # Check for known invalid languages that should default to English
+    if lang_lower in invalid_languages:
+        logger.warning(f"Invalid/unsupported language '{detected_language}' detected, defaulting to English")
+        return 'en'
+    
+    # Check if it's a valid supported language
+    if lang_lower in valid_languages:
+        validated_lang = valid_languages[lang_lower]
+        logger.info(f"Language '{detected_language}' validated as '{validated_lang}'")
+        return validated_lang
+    
+    # Check for partial matches or common variations
+    if lang_lower.startswith('en'):
+        logger.info(f"Language '{detected_language}' starts with 'en', treating as English")
+        return 'en'
+    elif lang_lower.startswith('es') or lang_lower.startswith('spa'):
+        logger.info(f"Language '{detected_language}' starts with 'es'/'spa', treating as Spanish")
+        return 'es'
+    
+    # Default to English for any unrecognized language
+    logger.warning(f"Unrecognized language '{detected_language}', defaulting to English")
+    return 'en'
+
 class AudioProcessor:
     def __init__(self, model_size="base", device="cpu"):
         self.model_size = model_size
@@ -166,7 +221,10 @@ class AudioProcessor:
             # Create full transcript
             full_transcript = " ".join([seg["text"] for seg in transcript_segments])
             
-            logger.info(f"Transcription completed. Language: {info.language}, Duration: {info.duration:.2f}s")
+            # Validate and clean the detected language
+            validated_language = validate_language(info.language)
+            
+            logger.info(f"Transcription completed. Detected language: {info.language}, Validated language: {validated_language}, Duration: {info.duration:.2f}s")
             logger.info(f"Transcript length: {len(full_transcript)} characters")
             
             if len(full_transcript) == 0:
@@ -175,7 +233,7 @@ class AudioProcessor:
             return {
                 "transcript": full_transcript,
                 "segments": transcript_segments,
-                "language": info.language,
+                "language": validated_language,
                 "duration": info.duration
             }
             
@@ -219,7 +277,17 @@ class AudioProcessor:
                     "audio_path": audio_path if keep_audio else None
                 }
             else:
-                return None
+                # Return basic metadata with default language if transcription fails
+                logger.warning("Transcription failed, returning basic metadata with default language")
+                return {
+                    "duration": duration,
+                    "transcript": "",
+                    "segments": [],
+                    "language": "en",  # Default to English
+                    "encoded_date": metadata_result.get('encoded_date'),
+                    "metadata": metadata_result.get('all_metadata', {}),
+                    "audio_path": None
+                }
                 
         except Exception as e:
             logger.error(f"Error processing video file: {str(e)}")
