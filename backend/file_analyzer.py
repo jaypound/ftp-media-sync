@@ -20,6 +20,49 @@ class FileAnalyzer:
         video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.m4v', '.flv']
         return any(file_path.lower().endswith(ext) for ext in video_extensions)
     
+    def parse_filename_metadata(self, filename: str) -> Dict[str, str]:
+        """Parse metadata from filename following format: YYMMDD_ABC_Description.ext
+        
+        Args:
+            filename: The filename to parse (e.g., '250705_PSA_Public Service Announcement.mp4')
+            
+        Returns:
+            dict: Contains 'content_type' and 'content_title' or empty strings if parsing fails
+        """
+        try:
+            # Remove file extension
+            name_without_ext = os.path.splitext(filename)[0]
+            
+            # Split by underscore
+            parts = name_without_ext.split('_', 2)  # Split into max 3 parts
+            
+            if len(parts) >= 3:
+                # parts[0] = date (YYMMDD)
+                # parts[1] = content_type (3 characters)
+                # parts[2] = content_title (rest of filename)
+                content_type = parts[1].strip()
+                content_title = parts[2].strip()
+                
+                logger.debug(f"Parsed filename '{filename}': content_type='{content_type}', content_title='{content_title}'")
+                
+                return {
+                    'content_type': content_type,
+                    'content_title': content_title
+                }
+            else:
+                logger.warning(f"Filename '{filename}' does not follow expected format (YYMMDD_ABC_Title.ext)")
+                return {
+                    'content_type': '',
+                    'content_title': ''
+                }
+                
+        except Exception as e:
+            logger.warning(f"Error parsing filename '{filename}': {str(e)}")
+            return {
+                'content_type': '',
+                'content_title': ''
+            }
+    
     def analyze_file(self, file_info: Dict[str, Any], ftp_manager, ai_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """Analyze a single file completely"""
         try:
@@ -94,12 +137,18 @@ class FileAnalyzer:
                         max_chunk_size=max_chunk_size
                     )
                 
-                # Step 4: Compile final analysis
+                # Step 4: Parse filename metadata
+                filename_metadata = self.parse_filename_metadata(file_name)
+                
+                # Step 5: Compile final analysis
                 analysis_data = {
                     "file_name": file_name,
                     "file_path": file_path,
                     "file_size": file_size,
                     "file_duration": audio_result['duration'],
+                    "encoded_date": audio_result.get('encoded_date'),
+                    "content_type": filename_metadata.get('content_type', ''),
+                    "content_title": filename_metadata.get('content_title', ''),
                     "transcript": audio_result['transcript'],
                     "language": audio_result.get('language', 'unknown'),
                     "summary": ai_result.get('summary', '') if ai_result else '',
@@ -115,7 +164,7 @@ class FileAnalyzer:
                     "ai_analysis_enabled": ai_config.get('enabled', False) if ai_config else False
                 }
                 
-                # Step 5: Save to database
+                # Step 6: Save to database
                 success = db_manager.upsert_analysis(analysis_data)
                 if success:
                     logger.info(f"Successfully analyzed and saved: {file_name}")

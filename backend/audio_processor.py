@@ -89,6 +89,43 @@ class AudioProcessor:
             logger.error(f"Error getting duration: {str(e)}")
             return 0.0
     
+    def get_media_metadata(self, file_path):
+        """Get media metadata including encoded date"""
+        try:
+            probe = ffmpeg.probe(file_path)
+            metadata = probe.get('format', {}).get('tags', {})
+            
+            # Look for creation date/encoded date in various fields
+            encoded_date = None
+            date_fields = ['creation_time', 'date', 'encoded_date', 'DATE', 'CREATION_TIME']
+            
+            for field in date_fields:
+                if field in metadata:
+                    encoded_date = metadata[field]
+                    break
+            
+            # Try to parse the date if found
+            if encoded_date:
+                try:
+                    # Handle ISO format dates (e.g., '2025-07-05T10:30:00.000000Z')
+                    if 'T' in encoded_date:
+                        parsed_date = datetime.fromisoformat(encoded_date.replace('Z', '+00:00'))
+                        encoded_date = parsed_date.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception as e:
+                    logger.warning(f"Could not parse encoded date '{encoded_date}': {str(e)}")
+                    # Keep the original value if parsing fails
+            
+            return {
+                'encoded_date': encoded_date,
+                'all_metadata': metadata
+            }
+        except Exception as e:
+            logger.error(f"Error getting media metadata: {str(e)}")
+            return {
+                'encoded_date': None,
+                'all_metadata': {}
+            }
+    
     def transcribe_audio(self, audio_path):
         """Transcribe audio to text using Whisper"""
         try:
@@ -147,12 +184,13 @@ class AudioProcessor:
             return None
     
     def process_video_file(self, video_path, keep_audio=False):
-        """Complete processing: extract audio, transcribe, and get duration"""
+        """Complete processing: extract audio, transcribe, get duration and metadata"""
         try:
             logger.info(f"Processing video file: {video_path}")
             
-            # Get video duration
+            # Get video duration and metadata
             duration = self.get_duration(video_path)
+            metadata_result = self.get_media_metadata(video_path)
             
             # Extract audio
             audio_path = self.extract_audio(video_path)
@@ -176,6 +214,8 @@ class AudioProcessor:
                     "transcript": transcription_result["transcript"],
                     "segments": transcription_result["segments"],
                     "language": transcription_result["language"],
+                    "encoded_date": metadata_result.get('encoded_date'),
+                    "metadata": metadata_result.get('all_metadata', {}),
                     "audio_path": audio_path if keep_audio else None
                 }
             else:
