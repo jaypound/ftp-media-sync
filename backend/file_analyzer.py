@@ -142,12 +142,16 @@ class FileAnalyzer:
                 # Step 4: Parse filename metadata
                 filename_metadata = self.parse_filename_metadata(file_name)
                 
-                # Step 5: Compile final analysis
+                # Step 5: Calculate duration category and add scheduling metadata
+                duration_category = self.get_duration_category(audio_result['duration'])
+                
+                # Step 6: Compile final analysis
                 analysis_data = {
                     "file_name": file_name,
                     "file_path": file_path,
                     "file_size": file_size,
                     "file_duration": audio_result['duration'],
+                    "duration_category": duration_category,
                     "encoded_date": audio_result.get('encoded_date'),
                     "content_type": filename_metadata.get('content_type', ''),
                     "content_title": filename_metadata.get('content_title', ''),
@@ -163,7 +167,36 @@ class FileAnalyzer:
                     "shelf_life_score": ai_result.get('shelf_life_score', 'medium') if ai_result else 'medium',
                     "shelf_life_reasons": ai_result.get('shelf_life_reasons', '') if ai_result else '',
                     "analysis_completed": True,
-                    "ai_analysis_enabled": ai_config.get('enabled', False) if ai_config else False
+                    "ai_analysis_enabled": ai_config.get('enabled', False) if ai_config else False,
+                    
+                    # Scheduling metadata fields
+                    "scheduling": {
+                        "available_for_scheduling": True,
+                        "content_expiry_date": self.calculate_expiry_date(duration_category, ai_result.get('shelf_life_score', 'medium') if ai_result else 'medium'),
+                        "last_scheduled_date": None,
+                        "total_airings": 0,
+                        "created_for_scheduling": datetime.utcnow(),
+                        
+                        # Timeslot scheduling tracking
+                        "last_scheduled_in_overnight": None,
+                        "last_scheduled_in_early_morning": None,
+                        "last_scheduled_in_morning": None,
+                        "last_scheduled_in_afternoon": None,
+                        "last_scheduled_in_prime_time": None,
+                        "last_scheduled_in_evening": None,
+                        
+                        # Replay count tracking per timeslot
+                        "replay_count_for_overnight": 0,
+                        "replay_count_for_early_morning": 0,
+                        "replay_count_for_morning": 0,
+                        "replay_count_for_afternoon": 0,
+                        "replay_count_for_prime_time": 0,
+                        "replay_count_for_evening": 0,
+                        
+                        # Engagement and priority scoring
+                        "priority_score": self.calculate_priority_score(ai_result.get('engagement_score', 0) if ai_result else 0, duration_category),
+                        "optimal_timeslots": self.get_optimal_timeslots(filename_metadata.get('content_type', ''), duration_category)
+                    }
                 }
                 
                 # Step 6: Save to database
@@ -289,6 +322,103 @@ class FileAnalyzer:
                 "success": False,
                 "error": str(e)
             }
+    
+    def get_duration_category(self, duration_seconds: float) -> str:
+        """Determine duration category based on seconds"""
+        if duration_seconds < 16:
+            return 'id'
+        elif duration_seconds < 120:
+            return 'spots'
+        elif duration_seconds < 1200:
+            return 'short_form'
+        else:
+            return 'long_form'
+    
+    def calculate_expiry_date(self, duration_category: str, shelf_life_score: str) -> datetime:
+        """Calculate content expiry date based on category and AI shelf life score"""
+        from datetime import timedelta
+        
+        # Base expiration periods (in days)
+        base_expiry = {
+            'id': 30,
+            'spots': 60,
+            'short_form': 90,
+            'long_form': 180
+        }
+        
+        # Shelf life multipliers
+        shelf_life_multipliers = {
+            'short': 0.5,    # Content becomes stale quickly
+            'medium': 1.0,   # Normal expiration
+            'long': 2.0      # Evergreen content
+        }
+        
+        base_days = base_expiry.get(duration_category, 90)
+        multiplier = shelf_life_multipliers.get(shelf_life_score, 1.0)
+        
+        expiry_days = int(base_days * multiplier)
+        return datetime.utcnow() + timedelta(days=expiry_days)
+    
+    def calculate_priority_score(self, engagement_score: float, duration_category: str) -> float:
+        """Calculate priority score for scheduling (0-100)"""
+        # Base score from engagement (0-10 -> 0-70)
+        base_score = min(engagement_score * 7, 70)
+        
+        # Category bonuses
+        category_bonus = {
+            'id': 20,        # IDs are important for branding
+            'spots': 15,     # PSAs and commercials are valuable
+            'short_form': 10, # Good content fill
+            'long_form': 5   # Harder to schedule
+        }
+        
+        bonus = category_bonus.get(duration_category, 0)
+        return min(base_score + bonus, 100)
+    
+    def get_optimal_timeslots(self, content_type: str, duration_category: str) -> List[str]:
+        """Determine optimal timeslots for content based on type and duration"""
+        
+        # Content type preferences
+        type_preferences = {
+            'AN': ['morning', 'afternoon', 'prime_time', 'evening'],  # Atlanta Now - news/current events
+            'BMP': ['overnight', 'early_morning', 'morning', 'afternoon', 'prime_time', 'evening'],  # Bumps can go anywhere
+            'IMOW': ['prime_time', 'evening', 'afternoon'],  # In My Own Words - personal stories
+            'IM': ['morning', 'afternoon', 'early_morning'],  # Inclusion Months - educational
+            'IA': ['morning', 'afternoon', 'prime_time', 'evening'],  # Inside Atlanta - local news
+            'LM': ['morning', 'early_morning', 'evening'],  # Legislative Minute - government content
+            'MTG': ['morning', 'afternoon'],  # Meetings - government content
+            'MAF': ['morning', 'afternoon', 'prime_time'],  # Moving Atlanta Forward - city initiatives
+            'PKG': ['prime_time', 'evening', 'afternoon'],  # Packages - general content
+            'PMO': ['prime_time', 'evening', 'afternoon'],  # Promos - promotional content
+            'SZL': ['prime_time', 'evening', 'afternoon'],  # Sizzle - promotional content
+            'SPP': ['prime_time', 'evening', 'afternoon'],  # Special Projects
+            'OTH': ['afternoon', 'evening']  # Other - default placement
+        }
+        
+        # Duration preferences
+        duration_preferences = {
+            'id': ['overnight', 'early_morning', 'morning', 'afternoon', 'prime_time', 'evening'],
+            'spots': ['morning', 'afternoon', 'prime_time', 'evening'],
+            'short_form': ['morning', 'afternoon', 'evening'],
+            'long_form': ['prime_time', 'evening', 'overnight']
+        }
+        
+        # Get preferences for content type and duration
+        type_slots = type_preferences.get(content_type, ['afternoon', 'evening'])
+        duration_slots = duration_preferences.get(duration_category, ['afternoon', 'evening'])
+        
+        # Find intersection, maintaining order of type preferences
+        optimal_slots = []
+        for slot in type_slots:
+            if slot in duration_slots and slot not in optimal_slots:
+                optimal_slots.append(slot)
+        
+        # Add remaining duration slots if we don't have enough
+        for slot in duration_slots:
+            if slot not in optimal_slots:
+                optimal_slots.append(slot)
+        
+        return optimal_slots[:3]  # Return top 3 optimal slots
 
 # Global file analyzer instance
 file_analyzer = FileAnalyzer()
