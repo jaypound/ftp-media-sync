@@ -151,6 +151,38 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error deleting analysis: {str(e)}")
             return False
+    
+    def clear_all_analyses(self):
+        """Delete all analysis results from the database"""
+        if self.collection is None:
+            logger.error("Database collection not initialized")
+            return {"success": False, "message": "Database not connected", "deleted_count": 0}
+        
+        try:
+            # Get count before deletion
+            count_before = self.collection.count_documents({})
+            logger.info(f"Found {count_before} analysis records to delete")
+            
+            # Delete all documents
+            result = self.collection.delete_many({})
+            deleted_count = result.deleted_count
+            
+            logger.info(f"Successfully cleared {deleted_count} analysis records from database")
+            
+            return {
+                "success": True, 
+                "message": f"Cleared {deleted_count} analysis records",
+                "deleted_count": deleted_count
+            }
+            
+        except Exception as e:
+            error_msg = f"Error clearing all analyses: {str(e)}"
+            logger.error(error_msg)
+            return {
+                "success": False, 
+                "message": error_msg,
+                "deleted_count": 0
+            }
 
 # Global database manager instance
 db_manager = DatabaseManager()
