@@ -13,6 +13,7 @@ let showAnalysisAll = false; // Toggle for showing all analysis files
 let isScanning = false;
 let isSyncing = false;
 let isAnalyzing = false;
+let stopAnalysisRequested = false;
 let syncStats = { processed: 0, total: 0, errors: 0 };
 let analysisStats = { processed: 0, total: 0, errors: 0 };
 
@@ -1977,22 +1978,33 @@ window.addEventListener('load', function() {
 function updateAnalysisButtonState() {
     console.log('=== updateAnalysisButtonState called ===');
     const startAnalysisButton = document.getElementById('startAnalysisButton');
+    const stopAnalysisButton = document.getElementById('stopAnalysisButton');
     const clearAnalysisButton = document.getElementById('clearAnalysisButton');
     
     // Update start analysis button
     if (startAnalysisButton) {
         startAnalysisButton.disabled = analysisQueue.length === 0 || isAnalyzing;
         
-        if (analysisQueue.length > 0) {
-            startAnalysisButton.textContent = `Start Analysis (${analysisQueue.length} files)`;
+        if (isAnalyzing) {
+            startAnalysisButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+        } else if (analysisQueue.length > 0) {
+            startAnalysisButton.innerHTML = `<i class="fas fa-play"></i> Start Analysis (${analysisQueue.length} files)`;
         } else {
-            startAnalysisButton.textContent = 'Start Analysis';
+            startAnalysisButton.innerHTML = '<i class="fas fa-play"></i> Start Analysis';
+        }
+    }
+    
+    // Update stop analysis button
+    if (stopAnalysisButton) {
+        stopAnalysisButton.disabled = !isAnalyzing;
+        if (!isAnalyzing) {
+            stopAnalysisButton.innerHTML = '<i class="fas fa-stop"></i> Stop Analysis';
         }
     }
     
     // Update clear analysis button
     if (clearAnalysisButton) {
-        clearAnalysisButton.disabled = analysisQueue.length === 0;
+        clearAnalysisButton.disabled = analysisQueue.length === 0 || isAnalyzing;
     }
     
     // Update analyze folder button
@@ -2066,7 +2078,10 @@ async function startAnalysis() {
     }
     
     isAnalyzing = true;
+    stopAnalysisRequested = false;
     log(`Starting analysis of ${analysisQueue.length} files...`);
+    
+    updateAnalysisButtonState();
     
     const totalFiles = analysisQueue.length;
     let successCount = 0;
@@ -2098,9 +2113,16 @@ async function startAnalysis() {
         log(`Warning: Could not load AI config: ${configError.message}`);
     }
     
-    // Process each file in the queue
-    for (let i = 0; i < analysisQueue.length; i++) {
-        const queueItem = analysisQueue[i];
+    // Process each file in the queue (make a copy since we'll be modifying the original)
+    const queueCopy = [...analysisQueue];
+    for (let i = 0; i < queueCopy.length; i++) {
+        // Check if stop was requested
+        if (stopAnalysisRequested) {
+            log('Analysis stopped by user', 'warning');
+            break;
+        }
+        
+        const queueItem = queueCopy[i];
         const button = document.querySelector(`button[onclick="addToAnalysisQueue('${queueItem.id}')"]`);
         
         log(`Analyzing file ${i + 1}/${totalFiles}: ${queueItem.file.name}`);
@@ -2138,6 +2160,13 @@ async function startAnalysis() {
                         fileItem.classList.add('analyzed');
                         fileItem.classList.remove('queued');
                     }
+                    
+                    // Remove successful item from queue
+                    const queueIndex = analysisQueue.findIndex(item => item.id === queueItem.id);
+                    if (queueIndex !== -1) {
+                        analysisQueue.splice(queueIndex, 1);
+                    }
+                    
                     successCount++;
                 } else {
                     log(`❌ Analysis failed for: ${queueItem.file.name} - ${analysisResult.error}`, 'error');
@@ -2147,6 +2176,13 @@ async function startAnalysis() {
                         button.classList.remove('added');
                         button.disabled = false;
                     }
+                    
+                    // Remove failed item from queue
+                    const queueIndex = analysisQueue.findIndex(item => item.id === queueItem.id);
+                    if (queueIndex !== -1) {
+                        analysisQueue.splice(queueIndex, 1);
+                    }
+                    
                     failureCount++;
                 }
             } else {
@@ -2157,6 +2193,13 @@ async function startAnalysis() {
                     button.classList.remove('added');
                     button.disabled = false;
                 }
+                
+                // Remove failed item from queue
+                const queueIndex = analysisQueue.findIndex(item => item.id === queueItem.id);
+                if (queueIndex !== -1) {
+                    analysisQueue.splice(queueIndex, 1);
+                }
+                
                 failureCount++;
             }
         } catch (error) {
@@ -2167,19 +2210,63 @@ async function startAnalysis() {
                 button.classList.remove('added');
                 button.disabled = false;
             }
+            
+            // Remove error item from queue
+            const queueIndex = analysisQueue.findIndex(item => item.id === queueItem.id);
+            if (queueIndex !== -1) {
+                analysisQueue.splice(queueIndex, 1);
+            }
+            
             failureCount++;
         }
         
         // Small delay between files to avoid overwhelming the server
-        if (i < analysisQueue.length - 1) {
+        if (i < queueCopy.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
     
-    // Clear the queue and update state
-    analysisQueue = [];
+    // Update state
+    const wasStopped = stopAnalysisRequested;
     isAnalyzing = false;
+    stopAnalysisRequested = false;
     
-    log(`Analysis batch completed: ${successCount} successful, ${failureCount} failed`);
+    if (wasStopped) {
+        log(`Analysis stopped: ${successCount} successful, ${failureCount} failed, ${analysisQueue.length} remaining`);
+        
+        // Reset remaining queued items to normal analyze button state
+        analysisQueue.forEach(item => {
+            const button = document.querySelector(`button[onclick="addToAnalysisQueue('${item.id}')"]`);
+            if (button) {
+                button.innerHTML = '<i class="fas fa-brain"></i> Analyze';
+                button.classList.remove('added');
+                button.disabled = false;
+                
+                // Update parent item styling
+                const fileItem = button.closest('.scanned-file-item');
+                fileItem.classList.remove('queued');
+            }
+        });
+    } else {
+        log(`Analysis batch completed: ${successCount} successful, ${failureCount} failed`);
+    }
+    
     updateAnalysisButtonState();
+}
+
+function stopAnalysis() {
+    if (!isAnalyzing) {
+        log('No analysis in progress to stop', 'warning');
+        return;
+    }
+    
+    log('Stopping analysis...', 'warning');
+    stopAnalysisRequested = true;
+    
+    // Update button state immediately to show stopping
+    const stopAnalysisButton = document.getElementById('stopAnalysisButton');
+    if (stopAnalysisButton) {
+        stopAnalysisButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
+        stopAnalysisButton.disabled = true;
+    }
 }

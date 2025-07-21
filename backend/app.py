@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
+import os
+from dotenv import load_dotenv
 from ftp_manager import FTPManager
 from file_scanner import FileScanner
 from config_manager import ConfigManager
@@ -9,6 +11,9 @@ from database import db_manager
 import logging
 from bson import ObjectId
 from datetime import datetime
+
+# Load environment variables from .env file
+load_dotenv()
 
 def convert_objectid_to_string(obj):
     """Convert ObjectId and datetime objects to JSON serializable format"""
@@ -379,6 +384,17 @@ def get_ai_config():
     """Get AI analysis configuration"""
     try:
         ai_config = config_manager.get_ai_analysis_settings()
+        
+        # Load API keys from environment variables if available
+        openai_key = os.getenv('OPENAI_API_KEY')
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        
+        # Merge environment keys with config (env takes precedence)
+        if openai_key:
+            ai_config['openai_api_key'] = openai_key
+        if anthropic_key:
+            ai_config['anthropic_api_key'] = anthropic_key
+        
         # Don't send API keys to frontend for security
         safe_config = ai_config.copy()
         safe_config['openai_api_key'] = '***' if ai_config.get('openai_api_key') else ''

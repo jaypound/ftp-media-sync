@@ -23,7 +23,22 @@ pip install -r backend/requirements.txt
 # - Flask-CORS==4.0.0
 # - requests==2.31.0
 # - python-dateutil==2.8.2
+# - python-dotenv==1.0.0
 ```
+
+### Environment Variables
+API keys are stored in environment variables for security:
+
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Edit .env with your actual API keys
+# OPENAI_API_KEY=your_openai_api_key_here
+# ANTHROPIC_API_KEY=your_anthropic_api_key_here
+```
+
+**Important**: Never commit the `.env` file to version control. It's already included in `.gitignore`.
 
 ### Testing
 There are no automated tests in this codebase. Testing is done manually through the web interface.

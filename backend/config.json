@@ -1,0 +1,51 @@
+{
+    "servers": {
+        "source": {
+            "name": "Source Server",
+            "host": "castus1",
+            "port": 21,
+            "user": "root",
+            "password": "Atl#C1a26",
+            "path": "/mnt/main/ATL26 On-Air Content"
+        },
+        "target": {
+            "name": "Target Server",
+            "host": "castus2",
+            "port": 21,
+            "user": "root",
+            "password": "Atl#C1a26",
+            "path": "/mnt/main/ATL26 On-Air Content"
+        }
+    },
+    "sync_settings": {
+        "file_extensions": [
+            "mp4",
+            "mkv",
+            "avi",
+            "mov",
+            "wmv",
+            "m4v",
+            "flv"
+        ],
+        "min_file_size_mb": 10,
+        "max_file_size_gb": 100,
+        "include_subdirs": true,
+        "overwrite_existing": false,
+        "dry_run_default": true,
+        "connection_timeout": 30,
+        "transfer_timeout": 600
+    },
+    "ui_settings": {
+        "auto_save_config": true,
+        "show_file_paths": true,
+        "max_files_display": 1000
+    },
+    "ai_analysis": {
+        "enabled": true,
+        "provider": "openai",
+        "model": "gpt-3.5-turbo",
+        "max_chunk_size": 4000,
+        "enable_batch_analysis": true,
+        "transcription_only": false
+    }
+}
