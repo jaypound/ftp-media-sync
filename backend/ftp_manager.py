@@ -12,6 +12,94 @@ class FTPManager:
         self.ftp = None
         self.connected = False
     
+    def _quote_path_if_needed(self, path):
+        """Quote FTP path if it contains spaces or special characters"""
+        # Check for characters that typically need quoting in FTP
+        special_chars = [' ', '(', ')', '&', "'", '"']
+        needs_quoting = any(char in path for char in special_chars)
+        
+        if needs_quoting and not (path.startswith('"') and path.endswith('"')):
+            return f'"{path}"'
+        return path
+    
+    def _generate_alternative_paths(self, full_remote_path):
+        """Generate alternative paths for server with symbolic links and quoted folders"""
+        alternatives = []
+        
+        # Directories that have quotes around them on this server
+        quoted_dirs = {
+            'ATL26 On-Air Content': "'ATL26 On-Air Content'",
+            'ATLANTA NOW': "'ATLANTA NOW'", 
+            'DEFAULT ROTATION': "'DEFAULT ROTATION'",
+            'INCLUSION MONTHS': "'INCLUSION MONTHS'",
+            'INSIDE ATLANTA': "'INSIDE ATLANTA'",
+            'LEGISLATIVE MINUTE': "'LEGISLATIVE MINUTE'",
+            'MOVING ATLANTA FORWARD': "'MOVING ATLANTA FORWARD'",
+            'SPECIAL PROJECTS': "'SPECIAL PROJECTS'"
+        }
+        
+        # Original path
+        alternatives.append(("Original", full_remote_path))
+        
+        # Handle symbolic link: /mnt/main -> /mnt/md127
+        if full_remote_path.startswith('/mnt/main/'):
+            md127_path = full_remote_path.replace('/mnt/main/', '/mnt/md127/', 1)
+            alternatives.append(("Symlink resolved", md127_path))
+            
+            # Apply quoted folder transformations to symlink resolved path
+            quoted_md127_path = md127_path
+            for unquoted, quoted in quoted_dirs.items():
+                if unquoted in quoted_md127_path:
+                    quoted_md127_path = quoted_md127_path.replace(unquoted, quoted)
+            
+            if quoted_md127_path != md127_path:
+                alternatives.append(("Symlink + quoted folders", quoted_md127_path))
+        
+        # Apply quoted folder transformations to original path
+        quoted_original = full_remote_path
+        for unquoted, quoted in quoted_dirs.items():
+            if unquoted in quoted_original:
+                quoted_original = quoted_original.replace(unquoted, quoted)
+        
+        if quoted_original != full_remote_path:
+            alternatives.append(("Original + quoted folders", quoted_original))
+        
+        return alternatives
+
+    def _download_with_cwd(self, full_remote_path, local_file):
+        """Alternative download method using directory change"""
+        try:
+            # Save current directory
+            original_dir = self.ftp.pwd()
+            logger.info(f"Current directory: {original_dir}")
+            
+            # Split path into directory and filename
+            remote_dir = os.path.dirname(full_remote_path)
+            filename = os.path.basename(full_remote_path)
+            
+            logger.info(f"Changing to directory: {remote_dir}")
+            logger.info(f"Downloading file: {filename}")
+            
+            # Change to the file's directory
+            self.ftp.cwd(remote_dir)
+            
+            # Download just the filename
+            self.ftp.retrbinary(f'RETR {filename}', local_file.write)
+            
+            # Restore original directory
+            self.ftp.cwd(original_dir)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"CWD download method failed: {str(e)}")
+            # Try to restore original directory
+            try:
+                self.ftp.cwd(original_dir)
+            except:
+                pass
+            return False
+    
     def connect(self):
         """Establish FTP connection"""
         try:
@@ -99,7 +187,8 @@ class FTPManager:
                 return 0
         
         try:
-            return self.ftp.size(filepath)
+            quoted_path = self._quote_path_if_needed(filepath)
+            return self.ftp.size(quoted_path)
         except:
             return 0
     
@@ -131,13 +220,106 @@ class FTPManager:
             logger.info(f"Downloading from FTP path: {full_remote_path}")
             logger.info(f"Base path: {base_path}, Remote path: {remote_path}")
             
+            # Verify file exists first
+            try:
+                file_size = self.ftp.size(self._quote_path_if_needed(full_remote_path))
+                logger.info(f"File exists on server with size: {file_size} bytes")
+            except Exception as e:
+                logger.error(f"File does not exist or size check failed: {str(e)}")
+                # Try listing the directory to see what's there
+                try:
+                    remote_dir = os.path.dirname(full_remote_path)
+                    logger.info(f"Listing contents of directory: {remote_dir}")
+                    file_list = []
+                    self.ftp.retrlines(f'LIST {self._quote_path_if_needed(remote_dir)}', file_list.append)
+                    
+                    # Look for similar filenames
+                    target_filename = os.path.basename(full_remote_path)
+                    logger.info(f"Looking for file: {target_filename}")
+                    logger.info(f"Directory listing ({len(file_list)} entries):")
+                    
+                    # Show all files in directory to help debug
+                    for line in file_list:
+                        logger.info(f"  {line}")
+                        if target_filename.lower() in line.lower():
+                            logger.info(f">>> POSSIBLE MATCH: {line}")
+                    
+                    # Also try exact filename searches with different cases
+                    exact_matches = []
+                    for line in file_list:
+                        # Extract filename from LIST output (usually at the end)
+                        parts = line.split()
+                        if parts and parts[-1]:
+                            filename = parts[-1]
+                            if filename == target_filename:
+                                exact_matches.append(f"Exact match: {line}")
+                            elif filename.lower() == target_filename.lower():
+                                exact_matches.append(f"Case-insensitive match: {line}")
+                    
+                    if exact_matches:
+                        for match in exact_matches:
+                            logger.info(f">>> {match}")
+                    else:
+                        logger.warning(f"No exact matches found for: {target_filename}")
+                        
+                except Exception as list_e:
+                    logger.error(f"Could not list directory: {str(list_e)}")
+            
             # Create local directory if it doesn't exist
             local_dir = os.path.dirname(local_path)
             if local_dir and not os.path.exists(local_dir):
                 os.makedirs(local_dir, exist_ok=True)
             
-            with open(local_path, 'wb') as local_file:
-                self.ftp.retrbinary(f'RETR {full_remote_path}', local_file.write)
+            # Try multiple approaches for problematic files
+            # Server has symbolic links (/mnt/main -> /mnt/md127) and quoted folder names
+            
+            # Generate alternative paths for this server's peculiarities  
+            alt_paths = self._generate_alternative_paths(full_remote_path)
+            download_attempts = []
+            
+            # Add attempts for each alternative path
+            for path_desc, alt_path in alt_paths:
+                download_attempts.extend([
+                    # Unquoted approach
+                    (f"{path_desc} (unquoted)", lambda p=alt_path: self.ftp.retrbinary(f'RETR {p}', local_file.write)),
+                    # CWD approach  
+                    (f"{path_desc} (CWD)", lambda p=alt_path: self._download_with_cwd(p, local_file))
+                ])
+            
+            # Original approach as final fallback
+            download_attempts.append((
+                "Original quoted", 
+                lambda: self.ftp.retrbinary(f'RETR "{full_remote_path}"', local_file.write)
+            ))
+            
+            download_success = False
+            last_error = None
+            
+            for i, (method_desc, attempt_func) in enumerate(download_attempts):
+                try:
+                    logger.info(f"Download method {i+1}: {method_desc}")
+                    
+                    with open(local_path, 'wb') as local_file:
+                        if "CWD" in method_desc:  # CWD approach
+                            download_success = attempt_func()
+                        else:
+                            attempt_func()
+                            download_success = True
+                    
+                    if download_success:
+                        logger.info(f"Download method {i+1} succeeded: {method_desc}")
+                        break
+                        
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"Download method {i+1} failed ({method_desc}): {last_error}")
+                    # Clean up partial file for next attempt
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                    continue
+            
+            if not download_success:
+                raise Exception(f"All download methods failed. Last error: {last_error}")
             
             # Verify the file was downloaded
             if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
@@ -227,7 +409,7 @@ class FTPManager:
             # Verify the upload by checking if file exists
             try:
                 logger.debug(f"Verifying upload by checking file size...")
-                remote_size = self.ftp.size(upload_filename)
+                remote_size = self.ftp.size(self._quote_path_if_needed(upload_filename))
                 local_size = os.path.getsize(local_path)
                 logger.debug(f"Remote file size: {remote_size}, Local file size: {local_size}")
                 
@@ -244,7 +426,7 @@ class FTPManager:
                 try:
                     logger.debug(f"Trying alternative verification with LIST...")
                     file_list = []
-                    self.ftp.retrlines(f'LIST {upload_filename}', file_list.append)
+                    self.ftp.retrlines(f'LIST {self._quote_path_if_needed(upload_filename)}', file_list.append)
                     if file_list:
                         logger.debug(f"File exists in LIST: {file_list[0]}")
                         return True
@@ -365,8 +547,9 @@ class FTPManager:
             logger.info(f"Deleting file from FTP path: {full_remote_path}")
             logger.info(f"Base path: {base_path}, Remote path: {remote_path}")
             
-            # Delete the file
-            self.ftp.delete(full_remote_path)
+            # Delete the file (quote path if needed)
+            quoted_path = self._quote_path_if_needed(full_remote_path)
+            self.ftp.delete(quoted_path)
             
             logger.info(f"Successfully deleted file: {full_remote_path}")
             return True
