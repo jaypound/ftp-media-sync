@@ -246,21 +246,54 @@ class FileAnalyzer:
             file_name = file_info.get('name', '')
             file_path = file_info.get('path', file_name)
             
-            # Create temporary file path
-            temp_file_path = os.path.join(self.temp_dir, f"analysis_{uuid.uuid4().hex}_{file_name}")
+            # Create temporary file path with safe filename
+            # Keep original extension but create shorter base name to avoid path length issues
+            file_ext = os.path.splitext(file_name)[1]
+            safe_base_name = f"analysis_{uuid.uuid4().hex[:8]}"  # Shorter UUID
+            temp_file_path = os.path.join(self.temp_dir, f"{safe_base_name}{file_ext}")
+            
+            # If filename is still too long, truncate further
+            if len(temp_file_path) > 240:  # Leave room for system limits
+                safe_base_name = f"analysis_{uuid.uuid4().hex[:6]}"
+                temp_file_path = os.path.join(self.temp_dir, f"{safe_base_name}{file_ext}")
             
             logger.info(f"Downloading {file_name} from path: {file_path}")
             logger.info(f"Temporary file location: {temp_file_path}")
+            logger.info(f"Temp file path length: {len(temp_file_path)} characters")
             
-            # Download file using FTP manager
-            success = ftp_manager.download_file(file_path, temp_file_path)
+            # Ensure temp directory exists
+            os.makedirs(self.temp_dir, exist_ok=True)
             
-            if success and os.path.exists(temp_file_path):
-                logger.info(f"Successfully downloaded {file_name}")
-                return temp_file_path
-            else:
-                logger.error(f"Failed to download {file_name}")
-                return None
+            # Log additional debugging info for troublesome files
+            logger.info(f"File path characters: {[ord(c) for c in file_path if ord(c) > 127]}")
+            logger.info(f"File name length: {len(file_name)} characters")
+            
+            # Download file using FTP manager with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                logger.info(f"Download attempt {attempt + 1}/{max_retries} for {file_name}")
+                success = ftp_manager.download_file(file_path, temp_file_path)
+                
+                if success and os.path.exists(temp_file_path):
+                    file_size = os.path.getsize(temp_file_path)
+                    if file_size > 0:
+                        logger.info(f"Successfully downloaded {file_name} ({file_size} bytes)")
+                        return temp_file_path
+                    else:
+                        logger.warning(f"Downloaded file is empty: {file_name}")
+                        # Remove empty file and try again
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                
+                if attempt < max_retries - 1:
+                    logger.warning(f"Download attempt {attempt + 1} failed, retrying...")
+                    import time
+                    time.sleep(2)  # Wait 2 seconds before retry
+                else:
+                    logger.error(f"Failed to download {file_name} after {max_retries} attempts")
+                    logger.error(f"FTP success: {success}, File exists: {os.path.exists(temp_file_path)}")
+            
+            return None
                 
         except Exception as e:
             logger.error(f"Error downloading file: {str(e)}")

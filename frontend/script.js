@@ -18,9 +18,18 @@ let stalledFileCount = 0;
 let maxStallTime = 300000; // 5 minutes
 let maxFileProcessingTime = 600000; // 10 minutes per file
 let autoRestartEnabled = true;
+
+// Periodic rescanning variables
+let rescanEnabled = true;
+let rescanInterval = 120; // seconds (configurable)
+let rescanTimeoutId = null;
+let lastRescanTime = null;
+let rescanAttempts = 0;
+let maxRescanAttempts = 3;
 let showAllFiles = false; // Toggle for showing all files vs unsynced only
 let showTargetOnly = false; // Toggle for showing target-only files
 let showAnalysisAll = false; // Toggle for showing all analysis files
+let showUnanalyzedOnly = false; // Toggle for showing only unanalyzed files in scanned files
 let isScanning = false;
 let isSyncing = false;
 let isAnalyzing = false;
@@ -344,9 +353,18 @@ function displayScannedFiles() {
     summaryDiv.style.display = 'block';
     updateScannedFilesSummary();
     
+    // Calculate filtered counts
+    const filteredSourceFiles = showUnanalyzedOnly ? 
+        sourceFiles.filter(file => !(file.is_analyzed || false)) : 
+        sourceFiles;
+    
     // Update file counts
-    sourceFileCount.textContent = `${sourceFiles.length} files found`;
-    sourceFileCount.className = sourceFiles.length > 0 ? 'file-count has-files' : 'file-count';
+    const sourceCountText = showUnanalyzedOnly ? 
+        `${filteredSourceFiles.length} unanalyzed files (${sourceFiles.length} total)` :
+        `${sourceFiles.length} files found`;
+    
+    sourceFileCount.textContent = sourceCountText;
+    sourceFileCount.className = filteredSourceFiles.length > 0 ? 'file-count has-files' : 'file-count';
     
     targetFileCount.textContent = `${targetFiles.length} files found`;
     targetFileCount.className = targetFiles.length > 0 ? 'file-count has-files' : 'file-count';
@@ -367,6 +385,11 @@ function displayScannedFiles() {
         // Check if file has been analyzed
         const isAnalyzed = file.is_analyzed || false;
         console.log(`File ${file.name} analyzed status:`, isAnalyzed);
+        
+        // Filter based on showUnanalyzedOnly toggle
+        if (showUnanalyzedOnly && isAnalyzed) {
+            return; // Skip analyzed files when showing unanalyzed only
+        }
         
         fileItem.innerHTML = `
             <div class="scanned-file-content">
@@ -1555,16 +1578,35 @@ function toggleScannedFiles() {
     const detailsDiv = document.getElementById('scannedFilesDetails');
     const summaryDiv = document.getElementById('scannedFilesSummary');
     const toggleBtn = document.getElementById('toggleScannedFilesBtn');
+    const filterBtn = document.getElementById('toggleUnanalyzedOnlyBtn');
     
     if (detailsDiv.style.display === 'none') {
         detailsDiv.style.display = 'grid';
         summaryDiv.style.display = 'none';
         toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Details';
+        filterBtn.style.display = 'inline-block'; // Show filter button when details are shown
     } else {
         detailsDiv.style.display = 'none';
         summaryDiv.style.display = 'block';
         toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show Details';
+        filterBtn.style.display = 'none'; // Hide filter button when details are hidden
     }
+}
+
+function toggleUnanalyzedOnly() {
+    showUnanalyzedOnly = !showUnanalyzedOnly;
+    const toggleBtn = document.getElementById('toggleUnanalyzedOnlyBtn');
+    
+    if (showUnanalyzedOnly) {
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show All Files';
+        toggleBtn.className = 'button warning small';
+    } else {
+        toggleBtn.innerHTML = '<i class="fas fa-filter"></i> Show Unanalyzed Only';
+        toggleBtn.className = 'button secondary small';
+    }
+    
+    // Re-render the scanned files with the new filter
+    displayScannedFiles();
 }
 
 function toggleStatus() {
@@ -2039,6 +2081,11 @@ function renderAnalysisFiles() {
         const isAnalyzed = analysisResults.find(result => result.file_path === (file.path || file.name));
         const isInQueue = analysisQueue.find(item => item.id === fileId);
         
+        // Filter based on showAnalysisAll toggle
+        if (!showAnalysisAll && isAnalyzed) {
+            return; // Skip analyzed files when showing unanalyzed only
+        }
+        
         if (isAnalyzed) {
             fileItem.classList.add('analyzed');
             fileItem.innerHTML = `
@@ -2249,6 +2296,11 @@ async function startAnalysis() {
     startAnalysisMonitoring();
     startMonitorDisplayUpdate();
     
+    // Start periodic rescanning
+    if (rescanEnabled) {
+        startPeriodicRescanning();
+    }
+    
     updateAnalysisButtonState();
     updateAnalyzeAllButtonState();
     
@@ -2407,8 +2459,9 @@ async function startAnalysis() {
     isAnalyzing = false;
     stopAnalysisRequested = false;
     
-    // Stop monitoring
+    // Stop monitoring and rescanning
     stopAnalysisMonitoring();
+    stopPeriodicRescanning();
     
     if (wasStopped) {
         log(`Analysis stopped: ${successCount} successful, ${failureCount} failed, ${analysisQueue.length} remaining`);
@@ -2443,8 +2496,9 @@ function stopAnalysis() {
     log('Stopping analysis...', 'warning');
     stopAnalysisRequested = true;
     
-    // Stop monitoring when manually stopped
+    // Stop monitoring and rescanning when manually stopped
     stopAnalysisMonitoring();
+    stopPeriodicRescanning();
     
     // Update button state immediately to show stopping
     const stopAnalysisButton = document.getElementById('stopAnalysisButton');
@@ -4165,6 +4219,20 @@ function updateMonitorDisplay() {
     if (queueEl) {
         queueEl.textContent = `Queue: ${stats.queueLength}`;
     }
+    
+    // Update rescan status
+    const rescanEl = document.getElementById('rescanStatus');
+    if (rescanEl) {
+        if (rescanEnabled && isAnalyzing) {
+            const now = Date.now();
+            const nextRescanTime = rescanTimeoutId ? (now + rescanInterval * 1000 - (now % (rescanInterval * 1000))) : now;
+            const secondsUntilRescan = Math.max(0, Math.ceil((nextRescanTime - now) / 1000));
+            rescanEl.textContent = `Next Rescan: ${secondsUntilRescan}s`;
+            rescanEl.style.display = '';
+        } else {
+            rescanEl.style.display = 'none';
+        }
+    }
 }
 
 function startMonitorDisplayUpdate() {
@@ -4180,6 +4248,207 @@ function startMonitorDisplayUpdate() {
     
     // Initial update
     updateMonitorDisplay();
+}
+
+// Periodic rescanning functions
+function startPeriodicRescanning() {
+    if (!rescanEnabled) return;
+    
+    lastRescanTime = Date.now();
+    rescanAttempts = 0;
+    
+    if (rescanTimeoutId) {
+        clearInterval(rescanTimeoutId);
+    }
+    
+    rescanTimeoutId = setInterval(performPeriodicRescan, rescanInterval * 1000);
+    log(`📡 Periodic rescanning started (every ${rescanInterval}s)`);
+}
+
+function stopPeriodicRescanning() {
+    if (rescanTimeoutId) {
+        clearInterval(rescanTimeoutId);
+        rescanTimeoutId = null;
+    }
+    
+    lastRescanTime = null;
+    rescanAttempts = 0;
+    log('📡 Periodic rescanning stopped');
+}
+
+async function performPeriodicRescan() {
+    if (!isAnalyzing || !rescanEnabled) {
+        stopPeriodicRescanning();
+        return;
+    }
+    
+    const now = Date.now();
+    const timeSinceLastRescan = now - lastRescanTime;
+    
+    try {
+        log(`📡 Performing periodic rescan (attempt ${rescanAttempts + 1}/${maxRescanAttempts})`);
+        
+        // Check if we have source files to verify against
+        if (!sourceFiles || sourceFiles.length === 0) {
+            log('⚠️ No source files available for rescanning, attempting to refresh file list');
+            
+            // Try to refresh the file list
+            await refreshSourceFiles();
+            
+            if (!sourceFiles || sourceFiles.length === 0) {
+                log('❌ Could not refresh source files, skipping rescan');
+                return;
+            }
+        }
+        
+        // Refresh analysis status for currently queued files
+        const queuedFilePaths = analysisQueue.map(item => item.file.path || item.file.name);
+        
+        if (queuedFilePaths.length > 0) {
+            const analysisStatusResult = await fetch('http://127.0.0.1:5000/api/analysis-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ files: sourceFiles })
+            });
+            
+            if (analysisStatusResult.ok) {
+                const statusData = await analysisStatusResult.json();
+                
+                if (statusData.success) {
+                    const analyzedFiles = statusData.analyzed_files || [];
+                    let completedCount = 0;
+                    
+                    // Check if any queued files are now complete
+                    analysisQueue.forEach((queueItem, index) => {
+                        const filePath = queueItem.file.path || queueItem.file.name;
+                        const isAnalyzed = analyzedFiles.find(af => af.file_path === filePath);
+                        
+                        if (isAnalyzed) {
+                            // File was completed outside of our monitoring
+                            log(`✅ Detected completed analysis: ${queueItem.file.name}`);
+                            
+                            // Update UI
+                            const button = document.querySelector(`button[onclick="addToAnalysisQueue('${queueItem.id}')"]`);
+                            if (button) {
+                                button.innerHTML = '<i class="fas fa-check"></i> Analyzed';
+                                button.classList.add('analyzed');
+                                button.classList.remove('added');
+                                
+                                const fileItem = button.closest('.scanned-file-item');
+                                if (fileItem) {
+                                    fileItem.classList.add('analyzed');
+                                    fileItem.classList.remove('queued');
+                                }
+                            }
+                            
+                            completedCount++;
+                        }
+                    });
+                    
+                    // Remove completed files from queue
+                    if (completedCount > 0) {
+                        analysisQueue = analysisQueue.filter(queueItem => {
+                            const filePath = queueItem.file.path || queueItem.file.name;
+                            return !analyzedFiles.find(af => af.file_path === filePath);
+                        });
+                        
+                        log(`📡 Rescan detected ${completedCount} completed files, ${analysisQueue.length} remaining in queue`);
+                        updateAnalysisButtonState();
+                    }
+                    
+                    // If queue is empty, analysis is complete
+                    if (analysisQueue.length === 0) {
+                        log('✅ All files completed, stopping analysis');
+                        isAnalyzing = false;
+                        stopAnalysisMonitoring();
+                        stopPeriodicRescanning();
+                        updateAnalysisButtonState();
+                        return;
+                    }
+                }
+            }
+        }
+        
+        rescanAttempts++;
+        lastRescanTime = now;
+        
+        // Reset progress tracking if rescan found activity
+        updateAnalysisProgress(currentAnalysisFile);
+        
+    } catch (error) {
+        log(`❌ Periodic rescan failed: ${error.message}`, 'error');
+        rescanAttempts++;
+        
+        if (rescanAttempts >= maxRescanAttempts) {
+            log(`⚠️ Maximum rescan attempts (${maxRescanAttempts}) reached, stopping periodic rescanning`, 'warning');
+            stopPeriodicRescanning();
+        }
+    }
+}
+
+async function refreshSourceFiles() {
+    try {
+        log('📡 Attempting to refresh source file list...');
+        
+        // This would typically re-scan the source directory
+        // For now, we'll just check if we can get the current files
+        if (sourceFiles && sourceFiles.length > 0) {
+            log('📡 Source files already available');
+            return true;
+        }
+        
+        // Try to trigger a rescan if the scan button is available
+        const scanButton = document.querySelector('[onclick*="scanFiles"]');
+        if (scanButton && !scanButton.disabled) {
+            log('📡 Triggering file rescan...');
+            // Note: This would need to be implemented based on your scan function
+            // For now, just return false to indicate we couldn't refresh
+        }
+        
+        return false;
+    } catch (error) {
+        log(`❌ Error refreshing source files: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+function togglePeriodicRescanning() {
+    rescanEnabled = !rescanEnabled;
+    const button = document.getElementById('rescanToggle');
+    if (button) {
+        button.innerHTML = rescanEnabled ? 
+            '<i class="fas fa-toggle-on"></i> Auto-Rescan: ON' : 
+            '<i class="fas fa-toggle-off"></i> Auto-Rescan: OFF';
+        button.className = rescanEnabled ? 'button success small' : 'button secondary small';
+    }
+    
+    if (rescanEnabled && isAnalyzing) {
+        startPeriodicRescanning();
+    } else {
+        stopPeriodicRescanning();
+    }
+    
+    log(`📡 Periodic rescanning ${rescanEnabled ? 'enabled' : 'disabled'}`);
+}
+
+function updateRescanInterval() {
+    const input = document.getElementById('rescanIntervalInput');
+    if (input) {
+        const newInterval = parseInt(input.value);
+        if (newInterval >= 30 && newInterval <= 600) { // 30 seconds to 10 minutes
+            rescanInterval = newInterval;
+            log(`📡 Rescan interval updated to ${rescanInterval} seconds`);
+            
+            // Restart rescanning with new interval if currently running
+            if (rescanEnabled && isAnalyzing) {
+                stopPeriodicRescanning();
+                startPeriodicRescanning();
+            }
+        } else {
+            log('⚠️ Rescan interval must be between 30 and 600 seconds', 'warning');
+            input.value = rescanInterval; // Reset to current value
+        }
+    }
 }
 
 // Utility Functions for Scheduling
