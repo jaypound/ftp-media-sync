@@ -69,6 +69,13 @@ class FTPManager:
     def _download_with_cwd(self, full_remote_path, local_file):
         """Alternative download method using directory change"""
         try:
+            # Test connection first
+            try:
+                self.ftp.voidcmd("NOOP")
+            except:
+                logger.warning("Connection lost during CWD download attempt")
+                return False
+                
             # Save current directory
             original_dir = self.ftp.pwd()
             logger.info(f"Current directory: {original_dir}")
@@ -130,8 +137,28 @@ class FTPManager:
             return True
         return False
     
+    def is_connection_alive(self):
+        """Check if FTP connection is still alive"""
+        if not self.ftp or not self.connected:
+            return False
+        
+        try:
+            self.ftp.voidcmd("NOOP")
+            return True
+        except:
+            self.connected = False
+            return False
+    
     def list_files(self, path="/"):
         """List files in directory"""
+        # Test connection and reconnect if needed
+        try:
+            if self.connected:
+                self.ftp.voidcmd("NOOP")
+        except:
+            logger.info("FTP connection lost, reconnecting...")
+            self.connected = False
+        
         if not self.connected:
             if not self.connect():
                 return []
@@ -182,6 +209,14 @@ class FTPManager:
     
     def get_file_size(self, filepath):
         """Get file size"""
+        # Test connection and reconnect if needed
+        try:
+            if self.connected:
+                self.ftp.voidcmd("NOOP")
+        except:
+            logger.info("FTP connection lost, reconnecting...")
+            self.connected = False
+        
         if not self.connected:
             if not self.connect():
                 return 0
@@ -194,10 +229,16 @@ class FTPManager:
     
     def download_file(self, remote_path, local_path):
         """Download file from FTP server"""
-        if not self.connected:
-            logger.info("FTP not connected, attempting to connect...")
+        # Always test the connection before download to handle broken connections
+        try:
+            # Test if connection is still alive
+            self.ftp.voidcmd("NOOP")
+        except:
+            # Connection is broken, reconnect
+            logger.info("FTP connection lost, reconnecting...")
+            self.connected = False
             if not self.connect():
-                logger.error("Failed to establish FTP connection for download")
+                logger.error("Failed to re-establish FTP connection for download")
                 return False
         
         try:
