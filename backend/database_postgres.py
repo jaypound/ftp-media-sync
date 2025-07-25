@@ -692,6 +692,108 @@ class PostgreSQLDatabaseManager:
                 priority_score = EXCLUDED.priority_score,
                 optimal_timeslots = EXCLUDED.optimal_timeslots
         """, sched_meta)
+    
+    def get_analyzed_content_for_scheduling(self, content_type: str = '', duration_category: str = '', search: str = '') -> List[Dict[str, Any]]:
+        """Get analyzed content for scheduling with filters"""
+        if not self.connected:
+            return []
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Build query
+            query = """
+                SELECT 
+                    a.*,
+                    i.file_name,
+                    i.file_path,
+                    i.file_size,
+                    i.file_duration,
+                    sm.available_for_scheduling,
+                    sm.content_expiry_date,
+                    sm.last_scheduled_date,
+                    sm.total_airings,
+                    sm.priority_score,
+                    sm.optimal_timeslots
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE a.analysis_completed = TRUE
+            """
+            
+            params = []
+            
+            # Add filters
+            if content_type:
+                query += " AND a.content_type = %s"
+                params.append(content_type)
+            
+            if duration_category:
+                query += " AND a.duration_category = %s"
+                params.append(duration_category)
+            
+            # Add search filter if provided
+            if search:
+                query += """ AND (
+                    LOWER(i.file_name) LIKE %s OR 
+                    LOWER(a.content_title) LIKE %s OR 
+                    LOWER(a.summary) LIKE %s
+                )"""
+                search_pattern = f'%{search}%'
+                params.extend([search_pattern, search_pattern, search_pattern])
+            
+            # Filter out expired content
+            query += """
+                AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP)
+                AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
+            """
+            
+            # Order by priority score and engagement score
+            query += """
+                ORDER BY 
+                    COALESCE(sm.priority_score, 0) DESC,
+                    a.engagement_score DESC NULLS LAST
+            """
+            
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            cursor.close()
+            
+            # Convert to MongoDB-compatible format
+            content_list = []
+            for row in results:
+                content = {
+                    '_id': row['mongo_id'] or str(row['id']),
+                    'guid': str(row['guid']),
+                    'file_name': row['file_name'],
+                    'file_path': row['file_path'],
+                    'file_size': row['file_size'],
+                    'file_duration': float(row['file_duration']) if row['file_duration'] else float(row['duration_seconds']) if row['duration_seconds'] else 0,
+                    'duration_category': row['duration_category'],
+                    'content_type': row['content_type'],
+                    'content_title': row['content_title'],
+                    'summary': row['summary'],
+                    'engagement_score': row['engagement_score'],
+                    'analysis_completed': row['analysis_completed'],
+                    'scheduling': {
+                        'available_for_scheduling': row.get('available_for_scheduling', True),
+                        'content_expiry_date': row['content_expiry_date'],
+                        'last_scheduled_date': row['last_scheduled_date'],
+                        'total_airings': row.get('total_airings', 0),
+                        'priority_score': float(row['priority_score']) if row['priority_score'] else 0,
+                        'optimal_timeslots': row.get('optimal_timeslots', [])
+                    }
+                }
+                content_list.append(content)
+            
+            return content_list
+            
+        except Exception as e:
+            logger.error(f"Error getting analyzed content: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
 
 
 # Global database manager instance - will be replaced in database.py

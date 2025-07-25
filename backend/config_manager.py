@@ -211,3 +211,20 @@ class ConfigManager:
     def get_all_config(self) -> Dict[str, Any]:
         """Get the complete configuration"""
         return self.config.copy()
+    
+    def get_scheduling_settings(self) -> Dict[str, Any]:
+        """Get scheduling settings"""
+        return self.config.get("scheduling", {
+            "default_export_server": "target",
+            "default_export_path": "/mnt/md127/Schedules/Contributors/Jay"
+        })
+    
+    def update_scheduling_settings(self, settings: Dict[str, Any]):
+        """Update scheduling settings"""
+        if "scheduling" not in self.config:
+            self.config["scheduling"] = {}
+        
+        self.config["scheduling"].update(settings)
+        
+        if self.config.get("ui_settings", {}).get("auto_save_config", True):
+            self.save_config()

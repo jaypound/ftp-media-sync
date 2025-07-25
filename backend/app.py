@@ -9,19 +9,30 @@ from config_manager import ConfigManager
 from file_analyzer import file_analyzer
 from database import db_manager
 from scheduler import scheduler
+from scheduler_postgres import scheduler_postgres
 import logging
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
+import uuid
 
 # Load environment variables from .env file
 load_dotenv()
 
 def convert_objectid_to_string(obj):
     """Convert ObjectId and datetime objects to JSON serializable format"""
+    from datetime import date, time
+    from decimal import Decimal
+    
     if isinstance(obj, ObjectId):
         return str(obj)
     elif isinstance(obj, datetime):
         return obj.isoformat()
+    elif isinstance(obj, date):
+        return obj.isoformat()
+    elif isinstance(obj, time):
+        return obj.strftime('%H:%M:%S')
+    elif isinstance(obj, Decimal):
+        return float(obj)
     elif isinstance(obj, dict):
         return {key: convert_objectid_to_string(value) for key, value in obj.items()}
     elif isinstance(obj, list):
@@ -77,6 +88,9 @@ def save_config():
         
         if 'sync_settings' in data:
             config_manager.update_sync_settings(data['sync_settings'])
+        
+        if 'scheduling' in data:
+            config_manager.update_scheduling_settings(data['scheduling'])
         
         return jsonify({'success': True, 'message': 'Configuration saved'})
     except Exception as e:
@@ -562,7 +576,7 @@ def get_analyzed_content():
         logger.info(f"Filters: content_type={content_type}, duration_category={duration_category}, search={search}")
         
         # Connect to database if not already connected
-        if db_manager.collection is None:
+        if not db_manager.connected:
             success = db_manager.connect()
             if not success:
                 return jsonify({
@@ -570,61 +584,22 @@ def get_analyzed_content():
                     'message': 'Failed to connect to database'
                 })
         
-        # Build query filters
-        query = {"analysis_completed": True}
+        # Get analyzed content from PostgreSQL
+        content_list = db_manager.get_analyzed_content_for_scheduling(
+            content_type=content_type,
+            duration_category=duration_category,
+            search=search
+        )
         
-        # Filter by content type
-        if content_type:
-            query["content_type"] = content_type
+        logger.info(f"Found {len(content_list)} content items")
         
-        # Filter by duration category
-        if duration_category:
-            query["duration_category"] = duration_category
-        
-        # Get all analyzed content
-        logger.info(f"Query: {query}")
-        cursor = db_manager.collection.find(query)
-        all_content = list(cursor)
-        logger.info(f"Found {len(all_content)} content items before filtering")
-        
-        # Apply additional filters
-        filtered_content = []
-        for content in all_content:
-            # Text search filter
-            if search:
-                searchable_text = f"{content.get('file_name', '')} {content.get('content_title', '')} {content.get('summary', '')}".lower()
-                if search not in searchable_text:
-                    continue
-            
-            # Check if content is still available for scheduling (not expired)
-            scheduling = content.get('scheduling', {})
-            available_for_scheduling = scheduling.get('available_for_scheduling', True)
-            
-            if available_for_scheduling:
-                # Check expiry date
-                expiry_date = scheduling.get('content_expiry_date')
-                if expiry_date and isinstance(expiry_date, datetime):
-                    if expiry_date < datetime.utcnow():
-                        # Content has expired
-                        continue
-                
-                filtered_content.append(content)
-        
-        logger.info(f"After filtering: {len(filtered_content)} content items")
-        
-        # Convert ObjectIds and sort by priority score
-        safe_content = convert_objectid_to_string(filtered_content)
-        
-        # Sort by priority score (highest first) and then by engagement score
-        sorted_content = sorted(safe_content, key=lambda x: (
-            x.get('scheduling', {}).get('priority_score', 0),
-            x.get('engagement_score', 0)
-        ), reverse=True)
+        # Convert any datetime objects to strings
+        safe_content = convert_objectid_to_string(content_list)
         
         return jsonify({
             'success': True,
-            'content': sorted_content,
-            'count': len(sorted_content),
+            'content': safe_content,
+            'count': len(safe_content),
             'filters_applied': {
                 'content_type': content_type,
                 'duration_category': duration_category,
@@ -639,15 +614,14 @@ def get_analyzed_content():
 
 @app.route('/api/create-schedule', methods=['POST'])
 def create_schedule():
-    """Create a daily schedule for ATL26"""
+    """Create a daily schedule for Comcast Channel 26"""
     logger.info("=== CREATE SCHEDULE REQUEST ===")
     try:
         data = request.json
         schedule_date = data.get('date')
-        timeslot = data.get('timeslot')  # Optional - if not provided, creates all timeslots
-        use_engagement = data.get('use_engagement_scoring', True)
+        schedule_name = data.get('schedule_name')  # Optional schedule name
         
-        logger.info(f"Creating schedule for date: {schedule_date}, timeslot: {timeslot or 'all timeslots'}, engagement: {use_engagement}")
+        logger.info(f"Creating schedule for date: {schedule_date}")
         
         if not schedule_date:
             return jsonify({
@@ -655,8 +629,8 @@ def create_schedule():
                 'message': 'Schedule date is required'
             })
         
-        # Create schedule using scheduler (timeslot is optional)
-        result = scheduler.create_daily_schedule(schedule_date, timeslot, use_engagement)
+        # Create schedule using PostgreSQL scheduler
+        result = scheduler_postgres.create_daily_schedule(schedule_date, schedule_name)
         
         return jsonify(result)
         
@@ -667,14 +641,13 @@ def create_schedule():
 
 @app.route('/api/get-schedule', methods=['POST'])
 def get_schedule():
-    """Get schedule for a specific date and timeslot"""
+    """Get schedule for a specific date"""
     logger.info("=== GET SCHEDULE REQUEST ===")
     try:
         data = request.json
         date = data.get('date')
-        timeslot = data.get('timeslot')
         
-        logger.info(f"Getting schedule for date: {date}, timeslot: {timeslot}")
+        logger.info(f"Getting schedule for date: {date}")
         
         if not date:
             return jsonify({
@@ -683,17 +656,41 @@ def get_schedule():
             })
         
         # Get schedule
-        schedule = scheduler.get_schedule(date, timeslot)
+        schedule = scheduler_postgres.get_schedule_by_date(date)
         
         if schedule:
+            # Get schedule items
+            items = scheduler_postgres.get_schedule_items(schedule['id'])
+            
+            # Convert time objects to strings and ensure duration is a proper number
+            for item in items:
+                if 'scheduled_start_time' in item and hasattr(item['scheduled_start_time'], 'strftime'):
+                    item['scheduled_start_time'] = item['scheduled_start_time'].strftime('%H:%M:%S')
+                # Ensure scheduled_duration_seconds is a float, not Decimal
+                if 'scheduled_duration_seconds' in item and item['scheduled_duration_seconds'] is not None:
+                    item['scheduled_duration_seconds'] = float(item['scheduled_duration_seconds'])
+                # Convert last_scheduled_date to ISO format if present
+                if 'last_scheduled_date' in item and item['last_scheduled_date'] is not None:
+                    if hasattr(item['last_scheduled_date'], 'isoformat'):
+                        item['last_scheduled_date'] = item['last_scheduled_date'].isoformat()
+                    else:
+                        item['last_scheduled_date'] = str(item['last_scheduled_date'])
+            
+            schedule['items'] = items
+            schedule['total_items'] = len(items)
+            schedule['total_duration_hours'] = float(schedule.get('total_duration_seconds', 0)) / 3600 if schedule.get('total_duration_seconds') else 0
+            
+            # Convert schedule dates to strings
+            safe_schedule = convert_objectid_to_string(schedule)
+            
             return jsonify({
                 'success': True,
-                'schedule': scheduler.convert_schedule_for_json(schedule)
+                'schedule': safe_schedule
             })
         else:
             return jsonify({
                 'success': False,
-                'message': f'No schedule found for {date}' + (f' {timeslot}' if timeslot else '')
+                'message': f'No schedule found for {date}'
             })
         
     except Exception as e:
@@ -718,9 +715,18 @@ def delete_schedule():
             })
         
         # Delete schedule
-        result = scheduler.delete_schedule(schedule_id)
+        success = scheduler_postgres.delete_schedule(int(schedule_id))
         
-        return jsonify(result)
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Schedule {schedule_id} deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Failed to delete schedule {schedule_id}'
+            })
         
     except Exception as e:
         error_msg = f"Delete schedule error: {str(e)}"
@@ -729,16 +735,23 @@ def delete_schedule():
 
 @app.route('/api/list-schedules', methods=['GET'])
 def list_schedules():
-    """List all schedules with optional date range"""
+    """List all active schedules"""
     logger.info("=== LIST SCHEDULES REQUEST ===")
     try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        # Get active schedules from PostgreSQL
+        schedules = scheduler_postgres.get_active_schedules()
         
-        logger.info(f"Listing schedules from {start_date} to {end_date}")
+        # Convert datetime objects to strings
+        for schedule in schedules:
+            if 'air_date' in schedule and schedule['air_date']:
+                schedule['air_date'] = schedule['air_date'].isoformat()
+            if 'created_date' in schedule and schedule['created_date']:
+                schedule['created_date'] = schedule['created_date'].isoformat()
+            # Format duration
+            if schedule.get('total_duration'):
+                schedule['total_duration_hours'] = float(schedule['total_duration']) / 3600
         
-        # Get schedules
-        schedules = scheduler.get_all_schedules(start_date, end_date)
+        logger.info(f"Found {len(schedules)} active schedules")
         
         return jsonify({
             'success': True,
@@ -751,77 +764,17 @@ def list_schedules():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
-@app.route('/api/preview-schedule', methods=['POST'])
-def preview_schedule():
-    """Preview a schedule without saving it"""
-    logger.info("=== PREVIEW SCHEDULE REQUEST ===")
-    try:
-        data = request.json
-        schedule_date = data.get('date')
-        timeslot = data.get('timeslot')
-        use_engagement = data.get('use_engagement_scoring', True)
-        
-        logger.info(f"Previewing schedule for date: {schedule_date}, timeslot: {timeslot}")
-        
-        if not schedule_date or not timeslot:
-            return jsonify({
-                'success': False,
-                'message': 'Date and timeslot are required'
-            })
-        
-        # Get available content
-        from datetime import datetime
-        target_date = datetime.strptime(schedule_date, '%Y-%m-%d')
-        available_content = scheduler.get_available_content_for_timeslot(timeslot, target_date)
-        
-        if not available_content:
-            return jsonify({
-                'success': False,
-                'message': f'No available content found for {timeslot} timeslot'
-            })
-        
-        # Create preview schedule
-        if use_engagement:
-            preview_items = scheduler.create_engagement_based_schedule(available_content, timeslot, target_date)
-        else:
-            preview_items = scheduler.create_basic_schedule(available_content, timeslot, target_date)
-        
-        # Calculate statistics
-        total_duration = sum(item['duration'] for item in preview_items)
-        timeslot_config = scheduler.config['timeslots'].get(timeslot, {})
-        timeslot_duration = timeslot_config.get('duration_hours', 3) * 3600
-        
-        preview_data = {
-            'items': preview_items,
-            'total_items': len(preview_items),
-            'total_duration': total_duration,
-            'total_duration_formatted': f"{total_duration // 60}m {total_duration % 60}s",
-            'timeslot_duration': timeslot_duration,
-            'fill_percentage': (total_duration / timeslot_duration * 100) if timeslot_duration > 0 else 0,
-            'available_content_count': len(available_content),
-            'engagement_scoring_enabled': use_engagement
-        }
-        
-        return jsonify({
-            'success': True,
-            'preview': preview_data
-        })
-        
-    except Exception as e:
-        error_msg = f"Preview schedule error: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return jsonify({'success': False, 'message': error_msg})
+
 
 @app.route('/api/create-weekly-schedule', methods=['POST'])
 def create_weekly_schedule():
-    """Create a weekly schedule for ATL26"""
+    """Create a weekly schedule (7 days)"""
     logger.info("=== CREATE WEEKLY SCHEDULE REQUEST ===")
     try:
         data = request.json
         start_date = data.get('start_date')
-        use_engagement = data.get('use_engagement_scoring', True)
         
-        logger.info(f"Creating weekly schedule starting: {start_date}, engagement: {use_engagement}")
+        logger.info(f"Creating weekly schedule starting: {start_date}")
         
         if not start_date:
             return jsonify({
@@ -829,8 +782,8 @@ def create_weekly_schedule():
                 'message': 'Start date is required'
             })
         
-        # Create weekly schedule using scheduler
-        result = scheduler.create_weekly_schedule(start_date, use_engagement)
+        # Create weekly schedule using PostgreSQL scheduler
+        result = scheduler_postgres.create_weekly_schedule(start_date)
         
         return jsonify(result)
         
@@ -838,6 +791,182 @@ def create_weekly_schedule():
         error_msg = f"Create weekly schedule error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/export-schedule', methods=['POST'])
+def export_schedule():
+    """Export a schedule to FTP server in Castus format"""
+    logger.info("=== EXPORT SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        date = data.get('date')
+        export_server = data.get('export_server')
+        export_path = data.get('export_path')
+        filename = data.get('filename')
+        format_type = data.get('format', 'castus')
+        
+        logger.info(f"Exporting schedule for {date} to {export_server}:{export_path}")
+        
+        if not date or not export_server or not export_path:
+            return jsonify({
+                'success': False,
+                'message': 'Date, export server, and export path are required'
+            })
+        
+        # Check if FTP manager exists for the export server
+        if export_server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{export_server} server not connected'
+            })
+        
+        # Get the schedule
+        schedule = scheduler_postgres.get_schedule_by_date(date)
+        if not schedule:
+            return jsonify({
+                'success': False,
+                'message': f'No schedule found for {date}'
+            })
+        
+        # Get schedule items
+        items = scheduler_postgres.get_schedule_items(schedule['id'])
+        
+        # Generate Castus format schedule
+        if format_type == 'castus':
+            # Determine if it's a daily or weekly schedule
+            schedule_content = generate_castus_schedule(schedule, items, date)
+            
+            # Use provided filename or generate default
+            if not filename:
+                schedule_date = datetime.strptime(date, '%Y-%m-%d')
+                day_name = schedule_date.strftime('%a').lower()
+                filename = f"{day_name}_{date.replace('-', '')}.sch"
+            
+            # Full path for export
+            full_path = f"{export_path}/{filename}"
+            
+            # Write to temporary file first - explicitly preserve TABs
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.sch') as temp_file:
+                # Write as binary to ensure no text processing happens
+                temp_file.write(schedule_content.encode('utf-8'))
+                temp_file_path = temp_file.name
+            
+            # Debug: Check if TABs are in the generated content
+            logger.debug(f"Schedule content contains TABs: {chr(9) in schedule_content}")
+            logger.debug(f"First item block sample: {repr(schedule_content[200:300])}")
+            
+            try:
+                # Upload to FTP server
+                ftp_manager = ftp_managers[export_server]
+                success = ftp_manager.upload_file(temp_file_path, full_path)
+                
+                if success:
+                    file_size = os.path.getsize(temp_file_path)
+                    return jsonify({
+                        'success': True,
+                        'message': f'Schedule exported successfully to {export_server}',
+                        'file_path': full_path,
+                        'file_size': file_size
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Failed to upload schedule file to FTP server'
+                    })
+            finally:
+                # Clean up temp file
+                os.unlink(temp_file_path)
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Unsupported export format: {format_type}'
+            })
+        
+    except Exception as e:
+        error_msg = f"Export schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+def generate_castus_schedule(schedule, items, date):
+    """Generate schedule content in Castus format"""
+    # For now, always generate daily format
+    # Weekly format will be handled separately later
+    
+    # Start with header for daily schedule
+    lines = []
+    lines.append("*daily")
+    lines.append("defaults, of the day{")
+    lines.append("}")
+    lines.append("time slot length = 30")
+    lines.append("scrolltime = 12:00 am")
+    lines.append("filter script = ")
+    lines.append("global default=")
+    lines.append("text encoding = UTF-8")
+    lines.append("schedule format version = 5.0.0.4 2021/01/15")
+    
+    # Add schedule items
+    for idx, item in enumerate(items):
+        start_time = item['scheduled_start_time']
+        duration_seconds = float(item['scheduled_duration_seconds'])
+        
+        # Calculate end time
+        start_dt = datetime.strptime(f"2000-01-01 {start_time}", "%Y-%m-%d %H:%M:%S")
+        end_dt = start_dt + timedelta(seconds=duration_seconds)
+        
+        # Format times with milliseconds for daily schedule
+        # Extract milliseconds from duration
+        whole_seconds = int(duration_seconds)
+        milliseconds = int((duration_seconds - whole_seconds) * 1000)
+        
+        # Special handling for first item - should start at exactly 12:00 am
+        if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0:
+            start_time_formatted = "12:00 am"
+        else:
+            # For other start times, add .000 if no milliseconds
+            start_time_formatted = start_dt.strftime("%I:%M:%S").lstrip("0") + ".000 " + start_dt.strftime("%p").lower()
+        
+        # For end time, include the actual milliseconds
+        end_time_formatted = end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
+        
+        # Add FTP path prefix if not already present
+        file_path = item['file_path']
+        if not file_path.startswith('/mnt/main/ATL26 On-Air Content/'):
+            # Preserve subdirectory structure
+            # Remove common prefixes like /media/videos/ but keep the subdirectory structure
+            path_parts = file_path.split('/')
+            
+            # Find where the content starts (after common prefixes)
+            content_start_idx = 0
+            for i, part in enumerate(path_parts):
+                if part in ['media', 'videos', 'content', 'files']:
+                    content_start_idx = i + 1
+                    break
+            
+            # Get the relative path from content start
+            if content_start_idx > 0 and content_start_idx < len(path_parts):
+                relative_path = '/'.join(path_parts[content_start_idx:])
+            else:
+                # If no common prefix found, just use the filename
+                relative_path = path_parts[-1]
+            
+            file_path = f"/mnt/main/ATL26 On-Air Content/{relative_path}"
+        
+        lines.append("{")
+        # Explicitly use TAB character (ASCII 9) to ensure it's not converted
+        TAB = chr(9)
+        lines.append(f"{TAB}item={file_path}")
+        lines.append(f"{TAB}loop=0")
+        
+        # Use GUID if available from assets
+        guid = item.get('guid', str(uuid.uuid4()))
+        lines.append(f"{TAB}guid={{{guid}}}")
+        
+        # Daily format times
+        lines.append(f"{TAB}start={start_time_formatted}")
+        lines.append(f"{TAB}end={end_time_formatted}")
+        lines.append("}")
+    
+    return "\n".join(lines)
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

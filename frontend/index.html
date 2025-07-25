@@ -484,19 +484,12 @@
                         <div class="filter-row">
                             <select id="contentTypeFilter">
                                 <option value="">All Content Types</option>
-                                <option value="AN">AN - Atlanta Now</option>
-                                <option value="BMP">BMP - Bump</option>
-                                <option value="IMOW">IMOW - In My Own Words</option>
-                                <option value="IM">IM - Inclusion Months</option>
-                                <option value="IA">IA - Inside Atlanta</option>
-                                <option value="LM">LM - Legislative Minute</option>
-                                <option value="MTG">MTG - Meeting</option>
-                                <option value="MAF">MAF - Moving Atlanta Forward</option>
-                                <option value="PKG">PKG - Package</option>
-                                <option value="PMO">PMO - Promo</option>
-                                <option value="SZL">SZL - Sizzle</option>
-                                <option value="SPP">SPP - Special Project</option>
-                                <option value="OTH">OTH - Other</option>
+                                <option value="psa">PSA - Public Service Announcement</option>
+                                <option value="meeting">Meeting</option>
+                                <option value="pkg">Package</option>
+                                <option value="ia">Inside Atlanta</option>
+                                <option value="announcement">Announcement</option>
+                                <option value="other">Other</option>
                             </select>
                             <select id="durationCategoryFilter">
                                 <option value="">All Durations</option>
@@ -528,37 +521,12 @@
                             <label for="scheduleDate">Schedule Date</label>
                             <input type="date" id="scheduleDate" value="">
                         </div>
-                        <div class="form-group">
-                            <label for="scheduleTimeslot">Target Timeslot (Optional)</label>
-                            <select id="scheduleTimeslot">
-                                <option value="">All Timeslots</option>
-                                <option value="overnight">Overnight (12-6 AM)</option>
-                                <option value="early_morning">Early Morning (6-9 AM)</option>
-                                <option value="morning">Morning (9 AM-12 PM)</option>
-                                <option value="afternoon">Afternoon (12-6 PM)</option>
-                                <option value="prime_time">Prime Time (6-9 PM)</option>
-                                <option value="evening">Evening (9 PM-12 AM)</option>
-                            </select>
-                            <small>Leave blank to create schedules for all timeslots</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="weeklyStartDate">Weekly Schedule Start Date</label>
-                            <input type="date" id="weeklyStartDate" value="">
-                            <small>For creating a full week of schedules (7 days, all timeslots)</small>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="enableEngagementScoring" checked>
-                            <label for="enableEngagementScoring">Use AI engagement scoring for content prioritization</label>
-                        </div>
                         <div class="schedule-buttons">
                             <button class="button success" onclick="createDailySchedule()">
                                 <i class="fas fa-calendar-plus"></i> Create Daily Schedule
                             </button>
-                            <button class="button primary" onclick="createWeeklySchedule()">
+                            <button class="button success" onclick="createWeeklySchedule()">
                                 <i class="fas fa-calendar-week"></i> Create Weekly Schedule
-                            </button>
-                            <button class="button secondary" onclick="previewSchedule()">
-                                <i class="fas fa-eye"></i> Preview
                             </button>
                         </div>
                         </div>
@@ -609,6 +577,68 @@
                     <div class="modal-footer">
                         <button class="button secondary" onclick="closeConfigModal()">Cancel</button>
                         <button class="button primary" onclick="saveScheduleConfig()">Save</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Export Schedule Modal -->
+            <div id="exportModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-download"></i> Export Schedule</h3>
+                        <button class="modal-close" onclick="closeExportModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Schedule Date</label>
+                            <p id="exportScheduleDate" style="font-weight: bold; margin: 5px 0;"></p>
+                        </div>
+                        <div class="form-group">
+                            <label for="modalExportServer">Export Server</label>
+                            <select id="modalExportServer" class="form-control">
+                                <option value="source">Source Server</option>
+                                <option value="target" selected>Target Server</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="modalExportPath">Export Path</label>
+                            <input type="text" id="modalExportPath" class="form-control" value="/mnt/md127/Schedules/Contributors/Jay" placeholder="/path/to/export">
+                        </div>
+                        <div class="form-group">
+                            <label for="modalExportFilename">Filename</label>
+                            <input type="text" id="modalExportFilename" class="form-control" placeholder="mon_20250127.sch">
+                        </div>
+                        <div class="form-group">
+                            <label for="modalExportFormat">Export Format</label>
+                            <select id="modalExportFormat" class="form-control">
+                                <option value="castus_daily">Castus Daily Schedule</option>
+                                <option value="castus_weekly" disabled>Castus Weekly Schedule (Coming Soon)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="button secondary" onclick="closeExportModal()">Cancel</button>
+                        <button class="button primary" onclick="confirmExport()">
+                            <i class="fas fa-download"></i> Export
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Export Result Modal -->
+            <div id="exportResultModal" class="modal" style="display: none;">
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h3 id="exportResultTitle"><i class="fas fa-info-circle"></i> Export Result</h3>
+                        <button class="modal-close" onclick="closeExportResultModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" style="text-align: center; padding: 30px;">
+                        <div id="exportResultIcon" style="font-size: 48px; margin-bottom: 20px;"></div>
+                        <h4 id="exportResultMessage" style="margin-bottom: 10px;"></h4>
+                        <p id="exportResultDetails" style="color: #666;"></p>
+                    </div>
+                    <div class="modal-footer" style="justify-content: center;">
+                        <button class="button primary" onclick="closeExportResultModal()">OK</button>
                     </div>
                 </div>
             </div>
