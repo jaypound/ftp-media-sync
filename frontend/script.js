@@ -1750,7 +1750,8 @@ function addToAnalysisQueue(fileId) {
     analysisQueue.push({
         id: fileId,
         file: file,
-        filePath: filePath
+        filePath: filePath,
+        is_reanalysis: isAnalyzed  // Mark as reanalysis if file was already analyzed
     });
     
     // Update button state based on whether this is a reanalysis or new analysis
@@ -1844,6 +1845,73 @@ function addAllUnanalyzedToAnalysisQueue() {
     }
 }
 
+function addAllAnalyzedToReanalysisQueue() {
+    log('🚀 Reanalyze All button clicked!');
+    
+    if (sourceFiles.length === 0) {
+        log('No files scanned - scan files first', 'error');
+        return;
+    }
+    
+    // Find all video files that are already analyzed
+    const videoFiles = sourceFiles.filter(file => isVideoFileEligible(file.name));
+    const analyzedFiles = videoFiles.filter(file => file.is_analyzed);
+    
+    if (analyzedFiles.length === 0) {
+        log('No analyzed video files found', 'error');
+        return;
+    }
+    
+    log(`📁 Adding all ${analyzedFiles.length} analyzed video files to reanalysis queue`);
+    
+    let addedCount = 0;
+    let skippedCount = 0;
+    
+    // Add each analyzed file to the analysis queue
+    analyzedFiles.forEach(file => {
+        const fileId = btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '');
+        
+        // Check if already in queue
+        const alreadyInQueue = analysisQueue.find(item => 
+            (item.file.path === file.path) || 
+            (item.file.name === file.name && item.file.size === file.size)
+        );
+        
+        if (!alreadyInQueue) {
+            analysisQueue.push({
+                id: fileId,
+                file: file,
+                is_reanalysis: true  // Mark as reanalysis
+            });
+            addedCount++;
+            
+            // Update button state for this file
+            const button = document.querySelector(`button[data-file-path="${file.path || file.name}"]`);
+            if (button) {
+                button.classList.add('added');
+                button.disabled = true;
+                const fileItem = button.closest('.scanned-file-item');
+                if (fileItem) {
+                    fileItem.classList.add('queued');
+                }
+            }
+        } else {
+            skippedCount++;
+        }
+    });
+    
+    if (addedCount > 0) {
+        log(`📋 Added ${addedCount} analyzed files for reanalysis (${analysisQueue.length} total files)`);
+        if (skippedCount > 0) {
+            log(`⏭️ Skipped ${skippedCount} files (already in queue)`);
+        }
+        updateAnalysisButtonState();
+        updateAnalyzeAllButtonState();
+    } else {
+        log('All analyzed files are already in analysis queue', 'warning');
+    }
+}
+
 function updateAnalyzeAllButtonState() {
     const analyzeAllButton = document.getElementById('analyzeAllUnanalyzedButton');
     if (analyzeAllButton) {
@@ -1872,9 +1940,19 @@ function updateAnalyzeAllButtonState() {
             analyzeAllButton.textContent = 'Analyze All Unanalyzed (all queued)';
             analyzeAllButton.title = 'All unanalyzed files are already queued';
         } else {
-            analyzeAllButton.disabled = true;
-            analyzeAllButton.textContent = 'Analyze All Unanalyzed (0 files)';
-            analyzeAllButton.title = 'No unanalyzed video files found';
+            // Check if we have analyzed files for reanalysis
+            const analyzedFiles = videoFiles.filter(file => file.is_analyzed);
+            if (analyzedFiles.length > 0) {
+                // All files are analyzed - show reanalyze option
+                analyzeAllButton.disabled = false;
+                analyzeAllButton.textContent = `Reanalyze All (${analyzedFiles.length} files)`;
+                analyzeAllButton.title = `Force reanalysis of ${analyzedFiles.length} already analyzed files`;
+                analyzeAllButton.onclick = function() { addAllAnalyzedToReanalysisQueue(); };
+            } else {
+                analyzeAllButton.disabled = true;
+                analyzeAllButton.textContent = 'No video files found';
+                analyzeAllButton.title = 'No video files found to analyze';
+            }
         }
     }
 }
@@ -2359,7 +2437,7 @@ async function startAnalysis() {
         
         try {
             // Check if this file is being reanalyzed
-            const isReanalysis = queueItem.file.is_analyzed || false;
+            const isReanalysis = queueItem.is_reanalysis || queueItem.file.is_analyzed || false;
             
             const response = await fetch('http://127.0.0.1:5000/api/analyze-files', {
                 method: 'POST',
