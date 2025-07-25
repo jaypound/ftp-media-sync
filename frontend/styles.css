@@ -1303,8 +1303,8 @@ small {
 /* Schedule Table Display Styles */
 .schedule-table-header {
     display: grid;
-    grid-template-columns: 130px 1fr;
-    gap: 20px;
+    grid-template-columns: 100px 100px 1fr 180px 80px 120px;
+    gap: 15px;
     padding: 12px 15px;
     background: var(--primary-color);
     color: white;
@@ -1317,9 +1317,9 @@ small {
 
 .schedule-item-row {
     display: grid;
-    grid-template-columns: 130px 1fr;
+    grid-template-columns: 100px 100px 1fr 180px 80px 120px;
     min-width: 300px;
-    gap: 20px;
+    gap: 15px;
     padding: 12px 15px;
     border-bottom: 1px solid var(--border-color);
     background: var(--card-background);
@@ -1337,11 +1337,17 @@ small {
 
 .col-start-time,
 .col-end-time,
-.col-duration {
+.col-duration,
+.col-category,
+.col-last-scheduled {
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-size: 13px;
     color: var(--text-primary);
     font-weight: 500;
+}
+
+.col-category {
+    font-size: 13px;
 }
 
 .col-title {
@@ -1384,7 +1390,11 @@ small {
     }
     
     .col-start-time::before { content: "Start: "; font-weight: 600; }
+    .col-end-time::before { content: "End: "; font-weight: 600; }
     .col-title::before { content: "Title: "; font-weight: 600; }
+    .col-category::before { content: "Category: "; font-weight: 600; }
+    .col-duration::before { content: "Duration: "; font-weight: 600; }
+    .col-last-scheduled::before { content: "Last Scheduled: "; font-weight: 600; }
 }
 
 /* Available Content Display Styles */

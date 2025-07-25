@@ -1131,6 +1131,17 @@ function populateFormFromConfig(config) {
         document.getElementById('overwriteExisting').checked = sync.overwrite_existing === true;
         document.getElementById('dryRun').checked = sync.dry_run_default !== false;
     }
+    
+    // Store scheduling/export settings in localStorage for modal use
+    if (config.scheduling) {
+        const sched = config.scheduling;
+        if (sched.default_export_server) {
+            localStorage.setItem('exportServer', sched.default_export_server);
+        }
+        if (sched.default_export_path) {
+            localStorage.setItem('exportPath', sched.default_export_path);
+        }
+    }
 }
 
 function getConfigFromForm() {
@@ -3477,7 +3488,7 @@ function displayAvailableContent() {
                     <span class="content-title">${content.content_title || content.file_name}</span>
                     <span class="content-type">${getContentTypeLabel(content.content_type)}</span>
                     <span class="content-duration">${duration} (${durationCategory})</span>
-                    <span class="engagement-score">Engagement: ${engagementScore}/10</span>
+                    <span class="engagement-score">Engagement: ${engagementScore}%</span>
                 </div>
                 <div class="content-actions">
                     <button class="button small primary" onclick="addToSchedule('${contentId}')">
@@ -3498,31 +3509,20 @@ function displayAvailableContent() {
 // Schedule Creation Functions
 async function createDailySchedule() {
     const scheduleDate = document.getElementById('scheduleDate').value;
-    const timeslot = document.getElementById('scheduleTimeslot').value;
-    const useEngagement = document.getElementById('enableEngagementScoring').checked;
     
     if (!scheduleDate) {
         log('❌ Please select a schedule date', 'error');
         return;
     }
     
-    if (timeslot) {
-        log(`📅 Creating daily schedule for ${scheduleDate} in ${timeslot} timeslot`);
-    } else {
-        log(`📅 Creating full daily schedule for ${scheduleDate} (all timeslots)`);
-    }
-    log(`🧠 AI engagement scoring: ${useEngagement ? 'enabled' : 'disabled'}`);
+    log(`📅 Creating daily schedule for ${scheduleDate}...`);
+    log(`🔄 Using duration category rotation: ID → Short Form → Long Form → Spots`);
     
     try {
         const requestBody = {
             date: scheduleDate,
-            use_engagement_scoring: useEngagement
+            schedule_name: `Daily Schedule - ${scheduleDate}`
         };
-        
-        // Only include timeslot if one is selected
-        if (timeslot) {
-            requestBody.timeslot = timeslot;
-        }
         
         const response = await fetch('http://127.0.0.1:5000/api/create-schedule', {
             method: 'POST',
@@ -3535,34 +3535,20 @@ async function createDailySchedule() {
         if (result.success) {
             log(`✅ ${result.message}`);
             
-            // Handle single schedule result
             if (result.schedule_id) {
                 log(`📋 Schedule ID: ${result.schedule_id}`);
-                if (result.schedule) {
-                    log(`📊 Created ${result.schedule.total_items} items (${Math.floor(result.schedule.total_duration / 60)}m ${result.schedule.total_duration % 60}s)`);
-                }
+                log(`📊 Created ${result.total_items} items`);
+                log(`⏱️ Total duration: ${result.total_duration_hours.toFixed(1)} hours`);
             }
             
-            // Handle multiple schedules result (full daily schedule)
-            if (result.created_schedules) {
-                log(`📊 Summary: ${result.total_created} schedules created`);
-                result.created_schedules.forEach(schedule => {
-                    log(`  ✓ ${schedule.timeslot}: ${schedule.total_items} items (${Math.floor(schedule.total_duration / 60)}m ${schedule.total_duration % 60}s)`);
-                });
-                
-                if (result.failed_timeslots && result.failed_timeslots.length > 0) {
-                    log(`⚠️ ${result.total_failed} timeslots failed:`, 'warning');
-                    result.failed_timeslots.forEach(failure => {
-                        log(`  ❌ ${failure.timeslot}: ${failure.error}`, 'warning');
-                    });
-                }
-            }
+            // Set the view date to the newly created schedule
+            document.getElementById('viewScheduleDate').value = scheduleDate;
             
-            // Refresh schedule display if viewing the same date
-            const viewDate = document.getElementById('viewScheduleDate').value;
-            if (viewDate === scheduleDate) {
-                await viewDailySchedule();
-            }
+            // Refresh schedule display
+            await viewDailySchedule();
+            
+            // Also refresh the schedule list if it's open
+            await listAllSchedules();
         } else {
             log(`❌ Failed to create schedule: ${result.message}`, 'error');
         }
@@ -3573,24 +3559,30 @@ async function createDailySchedule() {
 }
 
 async function createWeeklySchedule() {
-    const weeklyStartDate = document.getElementById('weeklyStartDate').value;
-    const useEngagement = document.getElementById('enableEngagementScoring').checked;
+    const scheduleDate = document.getElementById('scheduleDate').value;
     
-    if (!weeklyStartDate) {
-        log('❌ Please select a weekly start date', 'error');
+    if (!scheduleDate) {
+        log('❌ Please select a start date for the weekly schedule', 'error');
         return;
     }
     
-    log(`📅 Creating weekly schedule starting ${weeklyStartDate} (7 days, all timeslots)`);
-    log(`🧠 AI engagement scoring: ${useEngagement ? 'enabled' : 'disabled'}`);
+    // Calculate the Monday of the week containing the selected date
+    const selectedDate = new Date(scheduleDate);
+    const dayOfWeek = selectedDate.getDay();
+    const monday = new Date(selectedDate);
+    monday.setDate(selectedDate.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    
+    const weekStartDate = monday.toISOString().split('T')[0];
+    
+    log(`📅 Creating weekly schedule starting Monday ${weekStartDate}...`);
+    log(`🔄 Creating schedules for 7 days...`);
     
     try {
         const response = await fetch('http://127.0.0.1:5000/api/create-weekly-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                start_date: weeklyStartDate,
-                use_engagement_scoring: useEngagement
+                start_date: weekStartDate
             })
         });
         
@@ -3751,7 +3743,7 @@ async function deleteSchedule() {
         }
         
         const schedule = result.schedule;
-        const scheduleId = schedule.schedule_id;
+        const scheduleId = schedule.id;
         
         if (confirm(`Are you sure you want to delete the schedule for ${viewDate}?\n\nThis will delete ${schedule.total_items} scheduled items.`)) {
             log(`🗑️ Deleting schedule for ${viewDate}...`);
@@ -3817,70 +3809,53 @@ function displayScheduleList(schedules) {
         return;
     }
     
-    // Group schedules by date for better organization
-    const schedulesByDate = {};
-    schedules.forEach(schedule => {
-        const dateKey = schedule.date.split('T')[0]; // Extract date part
-        if (!schedulesByDate[dateKey]) {
-            schedulesByDate[dateKey] = [];
-        }
-        schedulesByDate[dateKey].push(schedule);
-    });
-    
     let html = `
         <div class="schedule-list-header">
-            <h4>📋 All Schedules (${schedules.length} total)</h4>
+            <h4>📋 Active Daily Schedules (${schedules.length} total)</h4>
         </div>
         <div class="schedule-list">
     `;
     
-    // Sort dates and display schedules
-    const sortedDates = Object.keys(schedulesByDate).sort();
+    // Sort schedules by air_date (newest first)
+    schedules.sort((a, b) => {
+        const dateA = new Date(a.air_date);
+        const dateB = new Date(b.air_date);
+        return dateB - dateA;
+    });
     
-    for (const date of sortedDates) {
-        const daySchedules = schedulesByDate[date];
-        // Parse date more carefully to avoid Invalid Date
-        const dateObj = new Date(date + 'T00:00:00'); // Ensure proper ISO format
+    for (const schedule of schedules) {
+        const airDate = schedule.air_date.split('T')[0];
+        const dateObj = new Date(airDate + 'T00:00:00');
         const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+        const createdAt = new Date(schedule.created_date).toLocaleString();
+        const totalDurationHours = schedule.total_duration_hours || 0;
+        const totalDurationFormatted = `${totalDurationHours.toFixed(1)} hours`;
         
         html += `
-            <div class="schedule-date-group">
-                <h5>📅 ${dayName}, ${date} (${daySchedules.length} schedules)</h5>
-        `;
-        
-        // Sort schedules by timeslot order
-        const timeslotOrder = ['overnight', 'early_morning', 'morning', 'afternoon', 'prime_time', 'evening'];
-        daySchedules.sort((a, b) => {
-            return timeslotOrder.indexOf(a.timeslot) - timeslotOrder.indexOf(b.timeslot);
-        });
-        
-        for (const schedule of daySchedules) {
-            const createdAt = new Date(schedule.created_at).toLocaleString();
-            const totalDuration = formatDuration(schedule.total_duration);
-            const timeslotLabel = scheduleConfig.TIMESLOTS[schedule.timeslot]?.label || schedule.timeslot;
-            
-            html += `
-                <div class="schedule-list-item" data-schedule-id="${schedule.schedule_id}">
-                    <div class="schedule-item-header">
-                        <span class="timeslot-badge">${timeslotLabel}</span>
-                        <span class="schedule-stats">${schedule.total_items} items • ${totalDuration}</span>
-                        <div class="schedule-item-actions">
-                            <button class="button small primary" onclick="viewScheduleDetails('${schedule.schedule_id}', '${date}', '${schedule.timeslot}')">
-                                <i class="fas fa-eye"></i> View
-                            </button>
-                            <button class="button small warning" onclick="deleteScheduleById('${schedule.schedule_id}', '${date}', '${schedule.timeslot}')">
-                                <i class="fas fa-trash"></i> Delete
-                            </button>
-                        </div>
+            <div class="schedule-list-item" data-schedule-id="${schedule.id}">
+                <div class="schedule-item-header">
+                    <div style="flex: 1;">
+                        <h5 style="margin: 0;">📅 ${dayName}, ${airDate}</h5>
+                        <span class="schedule-stats">${schedule.item_count || 0} items • ${totalDurationFormatted}</span>
                     </div>
-                    <div class="schedule-item-details">
-                        <small>ID: ${schedule.schedule_id} • Created: ${createdAt} • AI Scoring: ${schedule.engagement_scoring_enabled ? 'ON' : 'OFF'}</small>
+                    <div class="schedule-item-actions">
+                        <button class="button small primary" onclick="viewScheduleDetails(${schedule.id}, '${airDate}')">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                        <button class="button small warning" onclick="deleteScheduleById(${schedule.id}, '${airDate}')">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
                     </div>
                 </div>
-            `;
-        }
-        
-        html += '</div>';
+                <div class="schedule-item-details">
+                    <small>
+                        ${schedule.schedule_name || 'Daily Schedule'} • 
+                        Channel: ${schedule.channel || 'Comcast Channel 26'} • 
+                        Created: ${createdAt}
+                    </small>
+                </div>
+            </div>
+        `;
     }
     
     html += '</div>';
@@ -3888,16 +3863,18 @@ function displayScheduleList(schedules) {
     scheduleDisplay.innerHTML = html;
 }
 
-async function viewScheduleDetails(scheduleId, date, timeslot) {
-    log(`👁️ Loading schedule details for ${date} ${timeslot}...`);
+async function viewScheduleDetails(scheduleId, date) {
+    log(`👁️ Loading schedule details for ${date}...`);
+    
+    // Set the view date field
+    document.getElementById('viewScheduleDate').value = date;
     
     try {
         const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                date: date,
-                timeslot: timeslot
+                date: date
             })
         });
         
@@ -3905,7 +3882,7 @@ async function viewScheduleDetails(scheduleId, date, timeslot) {
         
         if (result.success && result.schedule) {
             displayScheduleDetails(result.schedule);
-            log(`✅ Loaded schedule details for ${date} ${timeslot}`);
+            log(`✅ Loaded schedule details for ${date}`);
         } else {
             log(`❌ Failed to load schedule details: ${result.message}`, 'error');
         }
@@ -3915,8 +3892,8 @@ async function viewScheduleDetails(scheduleId, date, timeslot) {
     }
 }
 
-async function deleteScheduleById(scheduleId, date, timeslot) {
-    if (!confirm(`Are you sure you want to delete the ${timeslot} schedule for ${date}?`)) {
+async function deleteScheduleById(scheduleId, date) {
+    if (!confirm(`Are you sure you want to delete the schedule for ${date}?`)) {
         return;
     }
     
@@ -3954,9 +3931,120 @@ function exportSchedule() {
         return;
     }
     
-    log(`📤 Exporting schedule for ${viewDate}`);
-    log('⚠️ Schedule export functionality coming soon');
-    // TODO: Implement schedule export (CSV, PDF, etc.)
+    // Show the export modal
+    document.getElementById('exportScheduleDate').textContent = viewDate;
+    document.getElementById('exportModal').style.display = 'block';
+    
+    // Load saved export settings if available
+    const savedServer = localStorage.getItem('exportServer') || 'target';
+    const savedPath = localStorage.getItem('exportPath') || '/mnt/md127/Schedules/Contributors/Jay';
+    
+    document.getElementById('modalExportServer').value = savedServer;
+    document.getElementById('modalExportPath').value = savedPath;
+    
+    // Generate default filename based on date
+    const scheduleDate = new Date(viewDate);
+    const dayName = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const dateStr = viewDate.replace(/-/g, '');
+    const defaultFilename = `${dayName}_${dateStr}.sch`;
+    
+    document.getElementById('modalExportFilename').value = defaultFilename;
+}
+
+function closeExportModal() {
+    document.getElementById('exportModal').style.display = 'none';
+}
+
+async function confirmExport() {
+    const viewDate = document.getElementById('exportScheduleDate').textContent;
+    const exportServer = document.getElementById('modalExportServer').value;
+    const exportPath = document.getElementById('modalExportPath').value;
+    const exportFilename = document.getElementById('modalExportFilename').value;
+    const exportFormat = document.getElementById('modalExportFormat').value;
+    
+    if (!exportPath) {
+        log('❌ Please specify an export path', 'error');
+        return;
+    }
+    
+    if (!exportFilename) {
+        log('❌ Please specify a filename', 'error');
+        return;
+    }
+    
+    // Save preferences
+    localStorage.setItem('exportServer', exportServer);
+    localStorage.setItem('exportPath', exportPath);
+    
+    const fullPath = `${exportPath}/${exportFilename}`;
+    
+    closeExportModal();
+    
+    log(`📤 Exporting schedule for ${viewDate} to ${exportServer} server...`);
+    log(`📂 Export path: ${exportPath}`);
+    log(`📄 Filename: ${exportFilename}`);
+    log(`📋 Format: ${exportFormat === 'castus_daily' ? 'Castus Daily Schedule' : 'Unknown'}`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/export-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: viewDate,
+                export_server: exportServer,
+                export_path: exportPath,
+                filename: exportFilename,
+                format: 'castus' // Always use castus format for now
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`, 'success');
+            if (result.file_path) {
+                log(`📄 Exported to: ${result.file_path}`);
+            }
+            if (result.file_size) {
+                log(`📊 File size: ${formatFileSize(result.file_size)}`);
+            }
+            
+            // Show success modal
+            showExportResult(true, 'Export Successful!', `Schedule exported to ${result.file_path || fullPath}`);
+        } else {
+            log(`❌ ${result.message}`, 'error');
+            
+            // Show failure modal
+            showExportResult(false, 'Export Failed', result.message);
+        }
+    } catch (error) {
+        log(`❌ Error exporting schedule: ${error.message}`, 'error');
+        showExportResult(false, 'Export Error', error.message);
+    }
+}
+
+function showExportResult(success, message, details) {
+    const modal = document.getElementById('exportResultModal');
+    const icon = document.getElementById('exportResultIcon');
+    const msgElement = document.getElementById('exportResultMessage');
+    const detailsElement = document.getElementById('exportResultDetails');
+    
+    if (success) {
+        icon.innerHTML = '<i class="fas fa-check-circle" style="color: #28a745;"></i>';
+        msgElement.textContent = message;
+        msgElement.style.color = '#28a745';
+    } else {
+        icon.innerHTML = '<i class="fas fa-times-circle" style="color: #dc3545;"></i>';
+        msgElement.textContent = message;
+        msgElement.style.color = '#dc3545';
+    }
+    
+    detailsElement.textContent = details;
+    modal.style.display = 'block';
+}
+
+function closeExportResultModal() {
+    document.getElementById('exportResultModal').style.display = 'none';
 }
 
 // Helper functions for schedule display
@@ -3965,46 +4053,67 @@ function displayScheduleDetails(schedule) {
     
     if (!scheduleDisplay) return;
     
-    const createdAt = new Date(schedule.created_at).toLocaleString();
-    const totalDuration = formatTimeHHMMSSmmm(schedule.total_duration);
+    const airDate = schedule.air_date ? schedule.air_date.split('T')[0] : 'Unknown';
+    const createdAt = new Date(schedule.created_date || schedule.created_at).toLocaleString();
+    const totalDurationHours = schedule.total_duration_hours || 0;
     
     let html = `
         <div class="schedule-header">
-            <h4>📅 Daily Schedule for ${schedule.date.split('T')[0]}</h4>
-            <p><strong>Created:</strong> ${createdAt} | <strong>Items:</strong> ${schedule.total_items} | <strong>Total Duration:</strong> ${totalDuration}</p>
-            <p><strong>Engagement Scoring:</strong> ${schedule.engagement_scoring_enabled ? 'ON' : 'OFF'}</p>
+            <h4>📅 ${schedule.schedule_name || 'Daily Schedule'}</h4>
+            <p><strong>Air Date:</strong> ${airDate} | <strong>Channel:</strong> ${schedule.channel || 'Comcast Channel 26'}</p>
+            <p><strong>Created:</strong> ${createdAt} | <strong>Items:</strong> ${schedule.total_items || 0} | <strong>Total Duration:</strong> ${totalDurationHours.toFixed(1)} hours</p>
         </div>
         <div class="schedule-items">
             <div class="schedule-table-header">
                 <span class="col-start-time">Start Time</span>
+                <span class="col-end-time">End Time</span>
                 <span class="col-title">Title</span>
+                <span class="col-category">Category</span>
+                <span class="col-duration">Duration</span>
+                <span class="col-last-scheduled">Last Scheduled</span>
             </div>
     `;
     
     if (schedule.items && schedule.items.length > 0) {
-        let currentTime = 0; // Track cumulative time in seconds
-        
         schedule.items.forEach((item, index) => {
-            const startTime = formatTimeHHMMSSmmm(currentTime);
-            const endTime = formatTimeHHMMSSmmm(currentTime + item.duration);
-            const itemDuration = formatTimeHHMMSSmmm(item.duration);
+            const startTime = item.scheduled_start_time || '00:00:00';
+            const durationSeconds = item.scheduled_duration_seconds || 0;
             
-            // Extract content type description from configuration
+            // Calculate end time
+            const endTime = calculateEndTime(startTime, durationSeconds);
+            
+            // Format duration as timecode
+            const durationTimecode = formatDurationTimecode(durationSeconds);
+            
+            // Extract content type description
             const contentTypeLabel = getContentTypeLabel(item.content_type);
             
-            // Extract file title from file name (remove date and type prefix)
-            const fileTitle = extractFileTitle(item.file_name, item.content_title);
+            // Use content title or file name
+            const title = item.content_title || item.file_name || 'Untitled';
+            const categoryLabel = item.duration_category ? item.duration_category.replace('_', ' ').toUpperCase() : '';
             
-            
+            // Format last scheduled date
+            let lastScheduledDisplay = 'Never';
+            if (item.last_scheduled_date) {
+                const lastScheduledDate = new Date(item.last_scheduled_date);
+                const month = (lastScheduledDate.getMonth() + 1).toString().padStart(2, '0');
+                const day = lastScheduledDate.getDate().toString().padStart(2, '0');
+                const year = lastScheduledDate.getFullYear().toString().slice(-2);
+                const hours = lastScheduledDate.getHours().toString().padStart(2, '0');
+                const minutes = lastScheduledDate.getMinutes().toString().padStart(2, '0');
+                lastScheduledDisplay = `${month}/${day}/${year} ${hours}:${minutes}`;
+            }
             
             html += `
                 <div class="schedule-item-row">
                     <span class="col-start-time">${startTime}</span>
-                    <span class="col-title">${fileTitle}</span>
+                    <span class="col-end-time">${endTime}</span>
+                    <span class="col-title" title="${item.file_name}">${title}</span>
+                    <span class="col-category">${categoryLabel}</span>
+                    <span class="col-duration">${durationTimecode}</span>
+                    <span class="col-last-scheduled">${lastScheduledDisplay}</span>
                 </div>
             `;
-            
-            currentTime += item.duration;
         });
     } else {
         html += '<div class="schedule-no-items">No scheduled items found.</div>';
@@ -4023,6 +4132,42 @@ function formatTimeHHMMSSmmm(seconds) {
     const milliseconds = Math.floor((seconds % 1) * 1000);
     
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+}
+
+// Calculate end time from start time and duration
+function calculateEndTime(startTime, durationSeconds) {
+    // Parse start time (HH:MM:SS)
+    const [hours, minutes, seconds] = startTime.split(':').map(Number);
+    
+    // Ensure durationSeconds is a number (handle string/decimal inputs)
+    // PostgreSQL returns NUMERIC which should be converted to float in backend
+    const duration = parseFloat(durationSeconds) || 0;
+    
+    // Convert start time to total seconds
+    const startTotalSeconds = hours * 3600 + minutes * 60 + seconds;
+    
+    // Add duration
+    let endTotalSeconds = startTotalSeconds + duration;
+    
+    // Calculate new time components (handle 24+ hour wraparound)
+    const endHours = Math.floor(endTotalSeconds / 3600) % 24;
+    const endMinutes = Math.floor((endTotalSeconds % 3600) / 60);
+    const endSeconds = Math.floor(endTotalSeconds % 60);
+    
+    // Format as HH:MM:SS
+    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:${endSeconds.toString().padStart(2, '0')}`;
+}
+
+// Format duration in seconds to H:MM:SS format
+function formatDurationTimecode(durationSeconds) {
+    const duration = parseFloat(durationSeconds) || 0;
+    
+    const hours = Math.floor(duration / 3600);
+    const minutes = Math.floor((duration % 3600) / 60);
+    const seconds = Math.floor(duration % 60);
+    
+    // Format as H:MM:SS (single digit hours, double digit minutes/seconds)
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 // Get content type label from configuration
