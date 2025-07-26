@@ -765,6 +765,7 @@ class PostgreSQLDatabaseManager:
             for row in results:
                 content = {
                     '_id': row['mongo_id'] or str(row['id']),
+                    'id': row['id'],  # Include PostgreSQL ID
                     'guid': str(row['guid']),
                     'file_name': row['file_name'],
                     'file_path': row['file_path'],

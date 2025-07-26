@@ -1226,13 +1226,21 @@ async function testConnection(serverType) {
     log(`Testing connection to ${serverType} server (${config.host}:${config.port})...`);
     
     try {
+        console.log('Testing connection with config:', config);
         const response = await fetch('http://127.0.0.1:5000/api/test-connection', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
         
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const result = await response.json();
+        console.log('Test connection result:', result);
         
         if (result.success) {
             log(`✅ ${result.message}`, 'success');
@@ -3479,8 +3487,8 @@ function displayAvailableContent() {
         const durationCategory = getDurationCategory(content.file_duration);
         const engagementScore = content.engagement_score || 'N/A';
         
-        // Use _id as the content identifier (ObjectId converted to string)
-        const contentId = content._id || content.guid || 'unknown';
+        // Use PostgreSQL id as the content identifier
+        const contentId = content.id || content._id || content.guid || 'unknown';
         
         html += `
             <div class="content-item" data-content-id="${contentId}">
@@ -3490,7 +3498,17 @@ function displayAvailableContent() {
                     <span class="content-duration">${duration} (${durationCategory})</span>
                     <span class="engagement-score">Engagement: ${engagementScore}%</span>
                 </div>
-                <div class="content-actions">
+                <div class="content-actions">`;
+        
+        // Show add to template button if template is loaded
+        if (currentTemplate) {
+            html += `
+                    <button class="button small success content-item-add-btn" onclick="addToTemplate('${contentId}')">
+                        <i class="fas fa-plus"></i> Add to Template
+                    </button>`;
+        }
+        
+        html += `
                     <button class="button small primary" onclick="addToSchedule('${contentId}')">
                         <i class="fas fa-calendar-plus"></i> Add to Schedule
                     </button>
@@ -4707,4 +4725,478 @@ function viewContentDetails(contentId) {
 // Initialize scheduling when page loads
 document.addEventListener('DOMContentLoaded', function() {
     initializeSchedulingDates();
+    initializeCollapsibleSections();
 });
+
+// Initialize collapsible sections
+function initializeCollapsibleSections() {
+    const cards = document.querySelectorAll('.scheduling-card h3');
+    cards.forEach(header => {
+        header.addEventListener('click', function() {
+            const card = this.parentElement;
+            card.classList.toggle('collapsed');
+        });
+    });
+}
+
+
+// Template Editor Functions
+let currentTemplate = null;
+let selectedTemplateFile = null;
+
+function showLoadTemplateModal() {
+    document.getElementById('loadTemplateModal').style.display = 'block';
+    
+    // Load default path from scheduling settings
+    const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
+    const defaultPath = schedulingSettings.defaultExportPath || '/mnt/md127/Schedules';
+    document.getElementById('templatePath').value = defaultPath;
+    
+    // Clear previous file list
+    document.getElementById('templateFileList').innerHTML = '<p style="color: #666;">Select a server and click Refresh to load schedule files</p>';
+    document.getElementById('loadTemplateBtn').disabled = true;
+}
+
+function closeLoadTemplateModal() {
+    document.getElementById('loadTemplateModal').style.display = 'none';
+    selectedTemplateFile = null;
+}
+
+async function loadTemplateFiles() {
+    const server = document.getElementById('templateServer').value;
+    const path = document.getElementById('templatePath').value;
+    
+    if (!server) {
+        log('Please select a server', 'error');
+        return;
+    }
+    
+    const fileList = document.getElementById('templateFileList');
+    fileList.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading schedule files...</p>';
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/list-schedule-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server, path })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.files) {
+            if (result.files.length === 0) {
+                fileList.innerHTML = '<p style="color: #666;">No schedule files found in this directory</p>';
+            } else {
+                let html = '';
+                result.files.forEach(file => {
+                    html += `
+                        <div class="file-item" style="padding: 8px; border: 1px solid #333; margin: 5px 0; cursor: pointer; border-radius: 4px;"
+                             onclick="selectTemplateFile('${file.path}', '${file.name}')">
+                            <i class="fas fa-file"></i> ${file.name}
+                            <span style="float: right; color: #666;">${formatFileSize(file.size)}</span>
+                        </div>
+                    `;
+                });
+                fileList.innerHTML = html;
+            }
+        } else {
+            fileList.innerHTML = `<p style="color: #ff4444;">Error: ${result.message || 'Failed to load files'}</p>`;
+        }
+    } catch (error) {
+        fileList.innerHTML = `<p style="color: #ff4444;">Error: ${error.message}</p>`;
+    }
+}
+
+function selectTemplateFile(path, name) {
+    selectedTemplateFile = { path, name };
+    
+    // Highlight selected file
+    const fileItems = document.querySelectorAll('.file-item');
+    fileItems.forEach(item => {
+        item.style.background = 'transparent';
+        item.style.border = '1px solid #333';
+    });
+    
+    event.currentTarget.style.background = 'rgba(33, 150, 243, 0.2)';
+    event.currentTarget.style.border = '1px solid var(--primary-color)';
+    
+    // Enable load button
+    document.getElementById('loadTemplateBtn').disabled = false;
+}
+
+async function loadSelectedTemplate() {
+    console.log('loadSelectedTemplate called');
+    
+    if (!selectedTemplateFile) {
+        log('Please select a template file', 'error');
+        console.error('No template file selected');
+        return;
+    }
+    
+    const server = document.getElementById('templateServer').value;
+    console.log('Loading template:', selectedTemplateFile, 'from server:', server);
+    
+    try {
+        log('Loading template...', 'info');
+        log(`📥 Loading template: ${selectedTemplateFile.name} from ${server} server`);
+        
+        const response = await fetch('http://127.0.0.1:5000/api/load-schedule-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                server: server,
+                file_path: selectedTemplateFile.path
+            })
+        });
+        
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('Load template result:', result);
+        
+        if (result.success && result.template) {
+            currentTemplate = result.template;
+            currentTemplate.filename = result.filename;
+            
+            // Display template info
+            displayTemplate();
+            
+            // Enable template buttons
+            document.getElementById('clearTemplateBtn').disabled = false;
+            document.getElementById('saveTemplateBtn').disabled = false;
+            document.getElementById('exportTemplateBtn').disabled = false;
+            
+            // Update available content to show add buttons
+            if (availableContent && availableContent.length > 0) {
+                displayAvailableContent(availableContent);
+            }
+            
+            closeLoadTemplateModal();
+            log(`Template loaded: ${result.filename}`, 'success');
+            log(`✅ Template loaded successfully: ${result.filename} with ${currentTemplate.items.length} items`);
+        } else {
+            const errorMsg = result.message || 'Unknown error';
+            log(`Failed to load template: ${errorMsg}`, 'error');
+            log(`❌ Failed to load template: ${errorMsg}`, 'error');
+            console.error('Load template failed:', result);
+        }
+    } catch (error) {
+        log(`Error loading template: ${error.message}`, 'error');
+        log(`❌ Error loading template: ${error.message}`, 'error');
+        console.error('Load template error:', error);
+    }
+}
+
+function recalculateTemplateTimes() {
+    if (!currentTemplate || !currentTemplate.items) return;
+    
+    let currentTime = "00:00:00";
+    
+    currentTemplate.items.forEach(item => {
+        item.start_time = currentTime;
+        const duration = parseFloat(item.duration_seconds) || 0;
+        
+        // Calculate end time
+        const endTime = calculateEndTime(currentTime, duration);
+        item.end_time = endTime;
+        
+        // Update current time for next item
+        currentTime = endTime;
+    });
+}
+
+function displayTemplate() {
+    if (!currentTemplate) return;
+    
+    // Recalculate times before display
+    recalculateTemplateTimes();
+    
+    // Show template info
+    document.getElementById('templateInfo').style.display = 'block';
+    document.getElementById('templateName').textContent = currentTemplate.filename || 'Untitled';
+    document.getElementById('templateItemCount').textContent = currentTemplate.items.length;
+    
+    // Calculate total duration
+    let totalDuration = 0;
+    currentTemplate.items.forEach(item => {
+        totalDuration += parseFloat(item.duration_seconds) || 0;
+    });
+    
+    const hours = Math.floor(totalDuration / 3600);
+    const minutes = Math.floor((totalDuration % 3600) / 60);
+    const seconds = Math.floor(totalDuration % 60);
+    document.getElementById('templateDuration').textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    
+    // Display template items
+    const templateDisplay = document.getElementById('templateDisplay');
+    templateDisplay.style.display = 'block';
+    
+    if (currentTemplate.items.length === 0) {
+        templateDisplay.innerHTML = '<p style="color: #666; text-align: center;">No items in template. Add items from Available Content.</p>';
+    } else {
+        let html = `
+            <div class="template-item" style="font-weight: bold; background: rgba(33, 150, 243, 0.1); border-bottom: 2px solid rgba(33, 150, 243, 0.3);">
+                <span>#</span>
+                <span>Start Time</span>
+                <span>File Name</span>
+                <span>Duration</span>
+                <span>End Time</span>
+                <span>Actions</span>
+            </div>
+        `;
+        currentTemplate.items.forEach((item, index) => {
+            const durationTimecode = formatDurationTimecode(item.duration_seconds || 0);
+            const hasAssetId = item.asset_id || item.content_id;
+            const itemStyle = hasAssetId ? '' : 'opacity: 0.6;';
+            const itemTitle = hasAssetId ? item.file_path : `${item.file_path} (Not in database - must be added from Available Content)`;
+            
+            html += `
+                <div class="template-item" style="${itemStyle}">
+                    <span style="color: #666;">${index + 1}</span>
+                    <span>${item.start_time}</span>
+                    <span title="${itemTitle}">
+                        ${item.filename}
+                        ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i>' : ''}
+                    </span>
+                    <span>${durationTimecode}</span>
+                    <span>${item.end_time}</span>
+                    <div class="template-item-actions">
+                        <button class="button danger small" onclick="removeTemplateItem(${index})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button class="button secondary small" onclick="moveTemplateItem(${index}, 'up')" ${index === 0 ? 'disabled' : ''}>
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+                        <button class="button secondary small" onclick="moveTemplateItem(${index}, 'down')" ${index === currentTemplate.items.length - 1 ? 'disabled' : ''}>
+                            <i class="fas fa-arrow-down"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        templateDisplay.innerHTML = html;
+    }
+}
+
+function clearTemplate() {
+    if (confirm('Are you sure you want to clear the current template?')) {
+        currentTemplate = null;
+        document.getElementById('templateInfo').style.display = 'none';
+        document.getElementById('templateDisplay').style.display = 'none';
+        
+        // Disable template buttons
+        document.getElementById('clearTemplateBtn').disabled = true;
+        document.getElementById('saveTemplateBtn').disabled = true;
+        document.getElementById('exportTemplateBtn').disabled = true;
+        
+        // Update available content to remove add buttons
+        if (availableContent && availableContent.length > 0) {
+            displayAvailableContent(availableContent);
+        }
+        
+        log('Template cleared', 'info');
+    }
+}
+
+function removeTemplateItem(index) {
+    if (currentTemplate && currentTemplate.items) {
+        currentTemplate.items.splice(index, 1);
+        displayTemplate();
+        log('Item removed from template', 'info');
+    }
+}
+
+function moveTemplateItem(index, direction) {
+    if (!currentTemplate || !currentTemplate.items) return;
+    
+    const items = currentTemplate.items;
+    if (direction === 'up' && index > 0) {
+        [items[index], items[index - 1]] = [items[index - 1], items[index]];
+    } else if (direction === 'down' && index < items.length - 1) {
+        [items[index], items[index + 1]] = [items[index + 1], items[index]];
+    }
+    
+    displayTemplate();
+}
+
+function addToTemplate(assetId) {
+    if (!currentTemplate) {
+        log('Please load a template first', 'error');
+        return;
+    }
+    
+    console.log('Adding to template, assetId:', assetId);
+    
+    // Find the content item by id (PostgreSQL), _id (MongoDB), or guid
+    const contentItem = availableContent.find(item => 
+        item.id == assetId || item._id === assetId || item.guid === assetId
+    );
+    
+    if (!contentItem) {
+        log('Content item not found', 'error');
+        console.error('Could not find content item with ID:', assetId);
+        console.log('Available items:', availableContent.map(item => ({_id: item._id, guid: item.guid, id: item.id})));
+        return;
+    }
+    
+    // Create template item from content
+    const templateItem = {
+        file_path: contentItem.file_path,
+        filename: contentItem.file_name,
+        duration_seconds: contentItem.file_duration || contentItem.duration_seconds,
+        start_time: '',  // Will be calculated when saving
+        end_time: '',    // Will be calculated when saving
+        guid: contentItem.guid || '',
+        loop: '0',
+        content_id: contentItem.id || contentItem._id,  // Use PostgreSQL id first
+        content_title: contentItem.content_title,
+        content_type: contentItem.content_type,
+        asset_id: contentItem.id || contentItem._id  // Use PostgreSQL id for backend
+    };
+    
+    // Initialize items array if needed
+    if (!currentTemplate.items) {
+        currentTemplate.items = [];
+    }
+    
+    // Add to template
+    currentTemplate.items.push(templateItem);
+    
+    // Update display
+    displayTemplate();
+    log(`Added "${contentItem.content_title || contentItem.file_name}" to template`, 'success');
+}
+
+async function saveTemplateAsSchedule() {
+    if (!currentTemplate || currentTemplate.items.length === 0) {
+        log('Template is empty', 'error');
+        return;
+    }
+    
+    const scheduleDate = prompt('Enter schedule date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+    if (!scheduleDate) return;
+    
+    try {
+        log('Creating schedule from template...', 'info');
+        
+        // Debug logging
+        console.log('Current template:', currentTemplate);
+        console.log('Template items:', currentTemplate.items);
+        
+        // Prepare schedule data - only include items with valid asset IDs
+        const validItems = currentTemplate.items.filter(item => item.content_id || item.asset_id);
+        
+        if (validItems.length === 0) {
+            log('No valid items with asset IDs in template. Items must be added from Available Content.', 'error');
+            return;
+        }
+        
+        console.log(`Creating schedule with ${validItems.length} items from template with ${currentTemplate.items.length} total items`);
+        console.log('Valid items being sent:', validItems);
+        
+        const scheduleData = {
+            air_date: scheduleDate,
+            schedule_name: `Schedule from ${currentTemplate.filename || 'template'}`,
+            channel: 'Comcast Channel 26',
+            items: validItems.map((item, index) => {
+                const scheduleItem = {
+                    asset_id: item.asset_id || item.content_id,
+                    order_index: index,
+                    scheduled_start_time: '00:00:00',  // Will be calculated by backend
+                    scheduled_duration_seconds: parseFloat(item.duration_seconds) || 0
+                };
+                console.log(`Item ${index}:`, scheduleItem);
+                return scheduleItem;
+            })
+        };
+        
+        console.log('Schedule data being sent:', scheduleData);
+        log(`Sending ${scheduleData.items.length} items to create schedule`, 'info');
+        
+        const response = await fetch('http://127.0.0.1:5000/api/create-schedule-from-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scheduleData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`Schedule created successfully! ${result.message}`, 'success');
+            
+            if (result.skipped_count > 0) {
+                log(`⚠️ Note: ${result.skipped_count} template items were skipped because they haven't been added from Available Content`, 'info');
+            }
+            
+            // Optionally view the created schedule
+            if (confirm('View the created schedule?')) {
+                document.getElementById('viewScheduleDate').value = scheduleDate;
+                viewDailySchedule();
+            }
+        } else {
+            log(`Failed to create schedule: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        log(`Error creating schedule: ${error.message}`, 'error');
+    }
+}
+
+async function exportTemplate() {
+    if (!currentTemplate || currentTemplate.items.length === 0) {
+        log('Template is empty', 'error');
+        return;
+    }
+    
+    // Use the export modal for consistency
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('exportScheduleDate').textContent = `Template: ${currentTemplate.filename}`;
+    
+    // Show export modal
+    document.getElementById('exportModal').style.display = 'block';
+    
+    // Override the confirmExport function temporarily
+    window.confirmExportTemplate = async function() {
+        const exportServer = document.getElementById('modalExportServer').value;
+        const exportPath = document.getElementById('modalExportPath').value;
+        const filename = document.getElementById('modalExportFilename').value;
+        
+        if (!exportServer || !exportPath || !filename) {
+            log('Please fill in all export fields', 'error');
+            return;
+        }
+        
+        try {
+            // Generate schedule content for the template
+            const response = await fetch('http://127.0.0.1:5000/api/export-template', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    template: currentTemplate,
+                    export_server: exportServer,
+                    export_path: exportPath,
+                    filename: filename
+                })
+            });
+            
+            const result = await response.json();
+            
+            closeExportModal();
+            
+            if (result.success) {
+                showExportResult(true, 'Template Exported!', `Template exported to ${result.file_path}`);
+            } else {
+                showExportResult(false, 'Export Failed', result.message);
+            }
+        } catch (error) {
+            closeExportModal();
+            showExportResult(false, 'Export Error', error.message);
+        }
+    };
+    
+    // Update the export button onclick
+    document.querySelector('#exportModal .button.primary').setAttribute('onclick', 'confirmExportTemplate()');
+}

@@ -8,7 +8,7 @@ from file_scanner import FileScanner
 from config_manager import ConfigManager
 from file_analyzer import file_analyzer
 from database import db_manager
-from scheduler import scheduler
+# from scheduler import scheduler  # MongoDB scheduler - no longer used
 from scheduler_postgres import scheduler_postgres
 import logging
 from bson import ObjectId
@@ -967,6 +967,393 @@ def generate_castus_schedule(schedule, items, date):
         lines.append("}")
     
     return "\n".join(lines)
+
+@app.route('/api/list-schedule-files', methods=['POST'])
+def list_schedule_files():
+    """List schedule files (.sch) from FTP server"""
+    try:
+        data = request.json
+        server = data.get('server')
+        path = data.get('path', '/mnt/md127/Schedules')
+        
+        if not server or server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'Invalid server or server not connected: {server}'
+            })
+        
+        ftp_manager = ftp_managers[server]
+        
+        # List files in the specified path
+        all_files = ftp_manager.list_files(path)
+        
+        # Filter for .sch files
+        schedule_files = []
+        for file in all_files:
+            if file['name'].lower().endswith('.sch'):
+                schedule_files.append({
+                    'name': file['name'],
+                    'size': file['size'],
+                    'path': os.path.join(path, file['name'])
+                })
+        
+        return jsonify({
+            'success': True,
+            'files': schedule_files
+        })
+        
+    except Exception as e:
+        error_msg = f"List schedule files error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/load-schedule-template', methods=['POST'])
+def load_schedule_template():
+    """Load a schedule template file from FTP server"""
+    logger.info("=== LOAD SCHEDULE TEMPLATE REQUEST ===")
+    try:
+        data = request.json
+        server = data.get('server')
+        file_path = data.get('file_path')
+        
+        logger.info(f"Server: {server}, File path: {file_path}")
+        
+        if not server or not file_path:
+            logger.error("Missing required parameters")
+            return jsonify({
+                'success': False,
+                'message': 'Server and file path are required'
+            })
+        
+        if server not in ftp_managers:
+            logger.error(f"Server {server} not in ftp_managers. Available: {list(ftp_managers.keys())}")
+            return jsonify({
+                'success': False,
+                'message': f'{server} server not connected'
+            })
+        
+        ftp_manager = ftp_managers[server]
+        logger.info(f"Using FTP manager for {server}")
+        
+        # Download file to temporary location
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.sch') as temp_file:
+            temp_file_path = temp_file.name
+        
+        logger.info(f"Downloading {file_path} to temp file {temp_file_path}")
+        success = ftp_manager.download_file(file_path, temp_file_path)
+        
+        if not success:
+            logger.error("Failed to download file from FTP")
+            os.unlink(temp_file_path)
+            return jsonify({
+                'success': False,
+                'message': 'Failed to download template file'
+            })
+        
+        try:
+            # Parse the schedule file
+            logger.info(f"Reading downloaded file from {temp_file_path}")
+            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            logger.info(f"File content length: {len(content)} chars")
+            logger.debug(f"First 200 chars: {content[:200]}")
+            
+            # Parse Castus schedule format
+            schedule_data = parse_castus_schedule(content)
+            
+            logger.info(f"Parsed schedule: type={schedule_data['type']}, items={len(schedule_data['items'])}")
+            
+            return jsonify({
+                'success': True,
+                'template': schedule_data,
+                'filename': os.path.basename(file_path)
+            })
+            
+        finally:
+            os.unlink(temp_file_path)
+        
+    except Exception as e:
+        error_msg = f"Load template error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+def parse_castus_schedule(content):
+    """Parse Castus schedule file format"""
+    lines = content.strip().split('\n')
+    
+    schedule_data = {
+        'type': 'daily',  # default
+        'items': [],
+        'header': {}
+    }
+    
+    current_item = None
+    in_item_block = False
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Detect schedule type
+        if line == '*daily':
+            schedule_data['type'] = 'daily'
+        elif line == '*weekly':
+            schedule_data['type'] = 'weekly'
+        
+        # Start of item block
+        elif line == '{':
+            in_item_block = True
+            current_item = {}
+        
+        # End of item block
+        elif line == '}' and in_item_block:
+            if current_item and 'item' in current_item:
+                # Extract filename from path
+                file_path = current_item['item']
+                filename = os.path.basename(file_path)
+                
+                # Convert to schedule item format
+                item = {
+                    'file_path': file_path,
+                    'filename': filename,
+                    'start_time': current_item.get('start', ''),
+                    'end_time': current_item.get('end', ''),
+                    'guid': current_item.get('guid', '').strip('{}'),
+                    'loop': current_item.get('loop', '0')
+                }
+                
+                # Calculate duration from start/end times if available
+                if item['start_time'] and item['end_time']:
+                    duration = calculate_duration_from_times(item['start_time'], item['end_time'])
+                    item['duration_seconds'] = duration
+                
+                schedule_data['items'].append(item)
+            
+            in_item_block = False
+            current_item = None
+        
+        # Inside item block
+        elif in_item_block and current_item is not None:
+            # Remove leading TAB or spaces
+            line_content = line.lstrip('\t ')
+            if '=' in line_content:
+                key, value = line_content.split('=', 1)
+                current_item[key.strip()] = value.strip()
+        
+        # Header information
+        elif '=' in line and not in_item_block:
+            key, value = line.split('=', 1)
+            schedule_data['header'][key.strip()] = value.strip()
+    
+    return schedule_data
+
+def calculate_duration_from_times(start_time, end_time):
+    """Calculate duration in seconds from start/end time strings"""
+    try:
+        # Parse times like "12:00 am", "12:30:45.123 pm"
+        import re
+        
+        def parse_time(time_str):
+            # Remove milliseconds for parsing
+            time_clean = re.sub(r'\.\d+', '', time_str)
+            
+            # Parse time
+            from datetime import datetime
+            
+            # Try different time formats
+            for fmt in ["%I:%M:%S %p", "%I:%M %p"]:
+                try:
+                    return datetime.strptime(time_clean, fmt)
+                except ValueError:
+                    continue
+            
+            raise ValueError(f"Unable to parse time: {time_str}")
+        
+        start_dt = parse_time(start_time)
+        end_dt = parse_time(end_time)
+        
+        # Handle day boundary
+        if end_dt < start_dt:
+            end_dt = end_dt.replace(day=end_dt.day + 1)
+        
+        duration = (end_dt - start_dt).total_seconds()
+        return duration
+        
+    except:
+        return 0
+
+@app.route('/api/create-schedule-from-template', methods=['POST'])
+def create_schedule_from_template():
+    """Create a schedule from a template with manually added items"""
+    try:
+        data = request.json
+        air_date = data.get('air_date')
+        schedule_name = data.get('schedule_name', 'Daily Schedule')
+        channel = data.get('channel', 'Comcast Channel 26')
+        items = data.get('items', [])
+        
+        logger.info(f"Creating schedule from template: {schedule_name} for {air_date} with {len(items)} items")
+        
+        if not air_date:
+            return jsonify({
+                'success': False,
+                'message': 'Air date is required'
+            })
+        
+        # Create an empty schedule using the new method
+        result = scheduler_postgres.create_empty_schedule(
+            schedule_date=air_date,
+            schedule_name=schedule_name
+        )
+        
+        if not result['success']:
+            return jsonify(result)
+        
+        schedule_id = result['schedule_id']
+        logger.info(f"Created empty schedule with ID: {schedule_id}")
+        
+        added_count = 0
+        skipped_count = 0
+        
+        # Now add only the template items
+        for idx, item in enumerate(items):
+            asset_id = item.get('asset_id')
+            
+            # Debug logging
+            logger.info(f"Processing item {idx}: asset_id={asset_id}, type={type(asset_id)}")
+            
+            # Check if asset_id looks like a MongoDB ObjectId (24 hex chars)
+            if asset_id and isinstance(asset_id, str) and len(asset_id) == 24 and all(c in '0123456789abcdef' for c in asset_id.lower()):
+                logger.warning(f"Asset ID {asset_id} appears to be a MongoDB ObjectId, not a PostgreSQL integer")
+                skipped_count += 1
+                continue
+            
+            if asset_id:
+                try:
+                    # Ensure asset_id is an integer
+                    asset_id = int(asset_id)
+                    
+                    scheduler_postgres.add_item_to_schedule(
+                        schedule_id,
+                        asset_id,
+                        order_index=idx,
+                        scheduled_start_time='00:00:00',  # Will be recalculated
+                        scheduled_duration_seconds=item.get('scheduled_duration_seconds', 0)
+                    )
+                    added_count += 1
+                    logger.info(f"Added item {idx} with asset_id {asset_id}")
+                except ValueError as ve:
+                    logger.warning(f"Failed to convert asset_id to integer: {asset_id}")
+                    skipped_count += 1
+                except Exception as item_error:
+                    logger.warning(f"Failed to add item {idx} with asset_id {asset_id}: {str(item_error)}")
+                    skipped_count += 1
+            else:
+                logger.warning(f"Skipping item {idx} - no asset_id")
+                skipped_count += 1
+        
+        # Recalculate start times
+        scheduler_postgres.recalculate_schedule_times(schedule_id)
+            
+        message = f'Schedule created with {added_count} items'
+        if skipped_count > 0:
+            message += f' ({skipped_count} items skipped - no asset ID)'
+        
+        logger.info(f"Template schedule created: {added_count} items added, {skipped_count} skipped")
+        
+        return jsonify({
+            'success': True,
+            'schedule_id': schedule_id,
+            'message': message,
+            'added_count': added_count,
+            'skipped_count': skipped_count
+        })
+            
+    except Exception as e:
+        error_msg = f"Create schedule from template error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/export-template', methods=['POST'])
+def export_template():
+    """Export a template as a schedule file"""
+    try:
+        data = request.json
+        template = data.get('template')
+        export_server = data.get('export_server')
+        export_path = data.get('export_path')
+        filename = data.get('filename')
+        
+        if not template or not export_server or not export_path or not filename:
+            return jsonify({
+                'success': False,
+                'message': 'Template, export server, path, and filename are required'
+            })
+        
+        # Check if FTP manager exists for the export server
+        if export_server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{export_server} server not connected'
+            })
+        
+        # Generate schedule content from template
+        # Calculate start/end times for items
+        current_time = datetime.strptime("00:00:00", "%H:%M:%S")
+        
+        for item in template['items']:
+            item['scheduled_start_time'] = current_time.strftime("%H:%M:%S")
+            duration_seconds = float(item.get('duration_seconds', 0))
+            current_time += timedelta(seconds=duration_seconds)
+            
+        # Create a mock schedule object for the generator
+        mock_schedule = {
+            'id': 0,
+            'air_date': datetime.now().strftime('%Y-%m-%d'),
+            'schedule_name': template.get('filename', 'Template'),
+            'channel': 'Comcast Channel 26'
+        }
+        
+        # Generate Castus format
+        schedule_content = generate_castus_schedule(mock_schedule, template['items'], mock_schedule['air_date'])
+        
+        # Write to temporary file - explicitly preserve TABs
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.sch') as temp_file:
+            # Write as binary to ensure no text processing happens
+            temp_file.write(schedule_content.encode('utf-8'))
+            temp_file_path = temp_file.name
+        
+        try:
+            # Full path for export
+            full_path = f"{export_path}/{filename}"
+            
+            # Upload to FTP server
+            ftp_manager = ftp_managers[export_server]
+            success = ftp_manager.upload_file(temp_file_path, full_path)
+            
+            if success:
+                file_size = os.path.getsize(temp_file_path)
+                return jsonify({
+                    'success': True,
+                    'message': f'Template exported successfully to {export_server}',
+                    'file_path': full_path,
+                    'file_size': file_size
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to upload template file to FTP server'
+                })
+        finally:
+            # Clean up temp file
+            os.unlink(temp_file_path)
+            
+    except Exception as e:
+        error_msg = f"Export template error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
