@@ -200,6 +200,155 @@ class PostgreSQLScheduler:
                 'message': f'Error creating schedule: {str(e)}'
             }
     
+    def add_item_to_schedule(self, schedule_id: int, asset_id: str, order_index: int = 0, 
+                           scheduled_start_time: str = '00:00:00', scheduled_duration_seconds: float = 0) -> bool:
+        """Add a single item to an existing schedule"""
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Get asset information
+            cursor.execute("""
+                SELECT 
+                    a.id as asset_id,
+                    i.id as instance_id,
+                    a.duration_seconds,
+                    i.file_name
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id
+                WHERE a.id = %s
+                ORDER BY i.created_at DESC
+                LIMIT 1
+            """, (asset_id,))
+            
+            asset = cursor.fetchone()
+            if not asset:
+                logger.error(f"Asset not found: {asset_id}")
+                return False
+            
+            # Insert schedule item
+            cursor.execute("""
+                INSERT INTO scheduled_items (
+                    schedule_id, asset_id, instance_id, sequence_number,
+                    scheduled_start_time, scheduled_duration_seconds, created_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s
+                )
+            """, (
+                schedule_id,
+                asset['asset_id'],
+                asset['instance_id'],
+                order_index + 1,  # sequence_number is 1-based
+                scheduled_start_time,
+                scheduled_duration_seconds or asset['duration_seconds'],
+                datetime.now()
+            ))
+            
+            conn.commit()
+            cursor.close()
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error adding item to schedule: {str(e)}")
+            return False
+        finally:
+            db_manager._put_connection(conn)
+    
+    def recalculate_schedule_times(self, schedule_id: int) -> bool:
+        """Recalculate start times for all items in a schedule"""
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Get all items in the schedule ordered by sequence
+            cursor.execute("""
+                SELECT id, scheduled_duration_seconds
+                FROM scheduled_items
+                WHERE schedule_id = %s
+                ORDER BY sequence_number
+            """, (schedule_id,))
+            
+            items = cursor.fetchall()
+            
+            # Update start times
+            current_time = 0  # Start at midnight (0 seconds)
+            
+            for item in items:
+                # Convert seconds to time string
+                hours = int(current_time // 3600)
+                minutes = int((current_time % 3600) // 60)
+                seconds = int(current_time % 60)
+                start_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                
+                # Update the item
+                cursor.execute("""
+                    UPDATE scheduled_items
+                    SET scheduled_start_time = %s
+                    WHERE id = %s
+                """, (start_time, item['id']))
+                
+                # Add duration for next item
+                current_time += float(item['scheduled_duration_seconds'])
+            
+            # Update total duration in schedule
+            cursor.execute("""
+                UPDATE schedules
+                SET total_duration_seconds = %s
+                WHERE id = %s
+            """, (current_time, schedule_id))
+            
+            conn.commit()
+            cursor.close()
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error recalculating schedule times: {str(e)}")
+            return False
+        finally:
+            db_manager._put_connection(conn)
+    
+    def create_empty_schedule(self, schedule_date: str, schedule_name: str = None) -> Dict[str, Any]:
+        """Create an empty schedule without auto-filling content"""
+        try:
+            # Parse date
+            schedule_dt = datetime.strptime(schedule_date, '%Y-%m-%d')
+            
+            # Check if schedule already exists
+            existing = self.get_schedule_by_date(schedule_date)
+            if existing:
+                return {
+                    'success': False,
+                    'message': f'Schedule already exists for {schedule_date}',
+                    'schedule_id': existing['id']
+                }
+            
+            # Create schedule record
+            schedule_id = self._create_schedule_record(
+                schedule_date=schedule_dt.date(),
+                schedule_name=schedule_name or f"Daily Schedule - {schedule_date}"
+            )
+            
+            if not schedule_id:
+                return {
+                    'success': False,
+                    'message': 'Failed to create schedule record'
+                }
+            
+            return {
+                'success': True,
+                'schedule_id': schedule_id,
+                'message': 'Empty schedule created successfully'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating empty schedule: {str(e)}")
+            return {
+                'success': False,
+                'message': str(e)
+            }
+    
     def _create_schedule_record(self, schedule_date, schedule_name: str) -> Optional[int]:
         """Create a schedule record in the database"""
         conn = db_manager._get_connection()
