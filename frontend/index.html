@@ -491,18 +491,26 @@
                 
                 <!-- Available Content Section -->
                 <div class="scheduling-card">
-                    <h3><i class="fas fa-video"></i> Available Content</h3>
+                    <h3><i class="fas fa-video"></i> Available Content <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d;"></span></h3>
                     <div class="card-content">
                         <div class="content-filters">
                         <div class="filter-row">
                             <select id="contentTypeFilter">
                                 <option value="">All Content Types</option>
-                                <option value="psa">PSA - Public Service Announcement</option>
-                                <option value="meeting">Meeting</option>
-                                <option value="pkg">Package</option>
-                                <option value="ia">Inside Atlanta</option>
-                                <option value="announcement">Announcement</option>
-                                <option value="other">Other</option>
+                                <option value="AN">Atlanta Now</option>
+                                <option value="BMP">Bumps</option>
+                                <option value="IMOW">IMOW</option>
+                                <option value="IM">Inclusion Months</option>
+                                <option value="IA">Inside Atlanta</option>
+                                <option value="LM">Legislative Minute</option>
+                                <option value="MTG">Meetings</option>
+                                <option value="MAF">Moving Atlanta Forward</option>
+                                <option value="PKG">Packages</option>
+                                <option value="PMO">Promos</option>
+                                <option value="PSA">PSAs</option>
+                                <option value="SZL">Sizzles</option>
+                                <option value="SPP">Special Projects</option>
+                                <option value="OTHER">Other</option>
                             </select>
                             <select id="durationCategoryFilter">
                                 <option value="">All Durations</option>
@@ -582,6 +590,9 @@
                             </button>
                             <button class="button secondary" onclick="listAllSchedules()">
                                 <i class="fas fa-list"></i> List All Schedules
+                            </button>
+                            <button class="button success" onclick="showLoadScheduleFromFTPModal()">
+                                <i class="fas fa-file-import"></i> Load from FTP
                             </button>
                             <button class="button warning" onclick="deleteSchedule()">
                                 <i class="fas fa-trash"></i> Delete Schedule
@@ -716,6 +727,50 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Load Schedule from FTP Modal -->
+            <div id="loadScheduleFromFTPModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-file-import"></i> Load Schedule from Castus</h3>
+                        <button class="modal-close" onclick="closeLoadScheduleFromFTPModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="scheduleLoadServer">Select Server</label>
+                            <select id="scheduleLoadServer" class="form-control" onchange="loadScheduleFilesFromFTP()">
+                                <option value="">Select a server...</option>
+                                <option value="source">Source Server (castus1)</option>
+                                <option value="target">Target Server (castus2)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="scheduleLoadPath">Schedule Path</label>
+                            <input type="text" id="scheduleLoadPath" class="form-control" value="/mnt/md127/Schedules" placeholder="/path/to/schedules">
+                            <button class="button secondary small" onclick="loadScheduleFilesFromFTP()" style="margin-top: 5px;">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <label>Available Schedule Files</label>
+                            <div id="scheduleLoadFileList" class="file-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
+                                <p style="color: #666;">Select a server and click Refresh to load schedule files</p>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="scheduleLoadDate">Schedule Date</label>
+                            <input type="date" id="scheduleLoadDate" class="form-control">
+                            <small>Date this schedule should be saved for in the database</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="button secondary" onclick="closeLoadScheduleFromFTPModal()">Cancel</button>
+                        <button class="button primary" onclick="loadSelectedScheduleFromFTP()" id="loadScheduleFromFTPBtn" disabled>
+                            <i class="fas fa-file-import"></i> Load Schedule
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Scanned Files Display -->
@@ -795,6 +850,60 @@
         </div>
     </div>
 
+    <!-- Rename Content Modal -->
+    <div id="renameContentModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> Rename Content File</h3>
+                <button class="modal-close" onclick="closeRenameDialog()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="renameContentInfo" style="margin-bottom: 20px;">
+                    <!-- Current file info will be populated here -->
+                </div>
+                
+                <div class="form-group">
+                    <label>Current File Name</label>
+                    <input type="text" id="currentFileName" class="form-control" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label>New File Name</label>
+                    <input type="text" id="newFileName" class="form-control">
+                    <small class="form-help">Format: YYMMDD_TYPE_Description.mp4</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Encoded Date (from database)</label>
+                    <input type="text" id="encodedDateDisplay" class="form-control" readonly>
+                </div>
+                
+                
+                <div class="rename-actions">
+                    <button class="button primary" onclick="generateSuggestedName()">
+                        <i class="fas fa-magic"></i> Suggest Name
+                    </button>
+                    <button class="button secondary" onclick="previewRename()">
+                        <i class="fas fa-eye"></i> Preview
+                    </button>
+                </div>
+                
+                <div id="renamePreview" style="margin-top: 20px; display: none;">
+                    <!-- Preview will be shown here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button danger" onclick="executeRename()">
+                    <i class="fas fa-save"></i> Apply Changes
+                </button>
+                <button class="button secondary" onclick="closeRenameDialog()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notificationContainer" class="notification-container"></div>
+    
     <script src="script.js"></script>
 </body>
 </html>

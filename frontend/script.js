@@ -37,6 +37,52 @@ let stopAnalysisRequested = false;
 let syncStats = { processed: 0, total: 0, errors: 0 };
 let analysisStats = { processed: 0, total: 0, errors: 0 };
 
+// Notification System
+function showNotification(title, message, type = 'info', duration = 5000) {
+    const container = document.getElementById('notificationContainer');
+    
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    
+    // Determine icon based on type
+    let icon = '';
+    switch(type) {
+        case 'success':
+            icon = '<i class="fas fa-check-circle"></i>';
+            break;
+        case 'error':
+            icon = '<i class="fas fa-exclamation-circle"></i>';
+            break;
+        case 'info':
+            icon = '<i class="fas fa-info-circle"></i>';
+            break;
+    }
+    
+    notification.innerHTML = `
+        <span class="notification-icon">${icon}</span>
+        <div class="notification-content">
+            <div class="notification-title">${title}</div>
+            ${message ? `<div class="notification-message">${message}</div>` : ''}
+        </div>
+        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
+    `;
+    
+    // Add to container
+    container.appendChild(notification);
+    
+    // Trigger animation
+    setTimeout(() => notification.classList.add('show'), 10);
+    
+    // Auto-remove after duration
+    if (duration > 0) {
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
+        }, duration);
+    }
+}
+
 // Utility functions
 function log(message, type = 'info') {
     const status = document.getElementById('status');
@@ -960,6 +1006,64 @@ async function processResultsWithProgress(results) {
     }
 }
 
+// Auto-connect to servers on startup
+async function autoConnectServers() {
+    log('🔄 Auto-connecting to FTP servers...');
+    
+    // Check if source server is configured
+    const sourceHost = document.getElementById('sourceHost').value;
+    const sourceUser = document.getElementById('sourceUser').value;
+    const sourcePass = document.getElementById('sourcePass').value;
+    
+    if (sourceHost && sourceUser && sourcePass) {
+        log('📡 Connecting to source server (castus1)...');
+        try {
+            await testConnection('source');
+            // Update dashboard display
+            const sourceStatusText = document.getElementById('sourceStatusText');
+            if (sourceStatusText) {
+                sourceStatusText.innerHTML = `✅ Connected to castus1`;
+                sourceStatusText.style.color = '#28a745';
+            }
+            const sourceStatus = document.getElementById('sourceStatus');
+            if (sourceStatus) {
+                sourceStatus.textContent = 'Source Server (castus1)';
+            }
+        } catch (error) {
+            log(`⚠️ Failed to connect to source server: ${error.message}`, 'error');
+        }
+    }
+    
+    // Check if target server is configured
+    const targetHost = document.getElementById('targetHost').value;
+    const targetUser = document.getElementById('targetUser').value;
+    const targetPass = document.getElementById('targetPass').value;
+    
+    if (targetHost && targetUser && targetPass) {
+        log('📡 Connecting to target server (castus2)...');
+        try {
+            await testConnection('target');
+            // Update dashboard display
+            const targetStatusText = document.getElementById('targetStatusText');
+            if (targetStatusText) {
+                targetStatusText.innerHTML = `✅ Connected to castus2`;
+                targetStatusText.style.color = '#28a745';
+            }
+            const targetStatus = document.getElementById('targetStatus');
+            if (targetStatus) {
+                targetStatus.textContent = 'Target Server (castus2)';
+            }
+        } catch (error) {
+            log(`⚠️ Failed to connect to target server: ${error.message}`, 'error');
+        }
+    }
+    
+    // If no servers configured, show a helpful message
+    if (!sourceHost && !targetHost) {
+        log('ℹ️ No servers configured. Please go to Servers tab to configure FTP connections.');
+    }
+}
+
 // Configuration management functions
 async function loadConfig() {
     const loadButton = document.querySelector('button[onclick="loadConfig()"]');
@@ -1540,23 +1644,29 @@ function updateDashboardStats() {
     // Update source server status
     const sourceStatusText = document.getElementById('sourceStatusText');
     const sourceHost = document.getElementById('sourceHost').value;
-    if (sourceHost) {
-        sourceStatusText.textContent = `${sourceHost} - Ready`;
-        sourceStatusText.style.color = 'var(--success-color)';
-    } else {
-        sourceStatusText.textContent = 'Not Configured';
-        sourceStatusText.style.color = 'var(--text-secondary)';
+    // Only update if not already showing connected status
+    if (sourceStatusText && !sourceStatusText.innerHTML.includes('Connected')) {
+        if (sourceHost) {
+            sourceStatusText.textContent = 'Not Connected';
+            sourceStatusText.style.color = 'var(--warning-color)';
+        } else {
+            sourceStatusText.textContent = 'Not Configured';
+            sourceStatusText.style.color = 'var(--text-secondary)';
+        }
     }
     
     // Update target server status
     const targetStatusText = document.getElementById('targetStatusText');
     const targetHost = document.getElementById('targetHost').value;
-    if (targetHost) {
-        targetStatusText.textContent = `${targetHost} - Ready`;
-        targetStatusText.style.color = 'var(--success-color)';
-    } else {
-        targetStatusText.textContent = 'Not Configured';
-        targetStatusText.style.color = 'var(--text-secondary)';
+    // Only update if not already showing connected status
+    if (targetStatusText && !targetStatusText.innerHTML.includes('Connected')) {
+        if (targetHost) {
+            targetStatusText.textContent = 'Not Connected';
+            targetStatusText.style.color = 'var(--warning-color)';
+        } else {
+            targetStatusText.textContent = 'Not Configured';
+            targetStatusText.style.color = 'var(--text-secondary)';
+        }
     }
     
     // Update file count
@@ -2255,7 +2365,12 @@ window.addEventListener('load', function() {
     showPanel('dashboard');
     
     // Auto-load config on startup
-    loadConfig();
+    loadConfig().then(() => {
+        // Auto-connect to servers after config is loaded
+        setTimeout(() => {
+            autoConnectServers();
+        }, 1000);
+    });
     
     // Check backend health
     checkBackendHealth();
@@ -3011,6 +3126,24 @@ function updateBulkDeleteButtonStates() {
 // SCHEDULING SYSTEM FUNCTIONS
 // ========================================
 
+// Content Type Mappings
+const CONTENT_TYPE_MAPPINGS = {
+    'AN': { code: 'AN', name: 'ATLANTA NOW', folder: 'ATLANTA NOW' },
+    'BMP': { code: 'BMP', name: 'BUMPS', folder: 'BUMPS' },
+    'IMOW': { code: 'IMOW', name: 'IMOW', folder: 'IMOW' },
+    'IM': { code: 'IM', name: 'INCLUSION MONTHS', folder: 'INCLUSION MONTHS' },
+    'IA': { code: 'IA', name: 'INSIDE ATLANTA', folder: 'INSIDE ATLANTA' },
+    'LM': { code: 'LM', name: 'LEGISLATIVE MINUTE', folder: 'LEGISLATIVE MINUTE' },
+    'MTG': { code: 'MTG', name: 'MEETINGS', folder: 'MEETINGS' },
+    'MAF': { code: 'MAF', name: 'MOVING ATLANTA FORWARD', folder: 'MOVING ATLANTA FORWARD' },
+    'PKG': { code: 'PKG', name: 'PACKAGES', folder: 'PKGS' },
+    'PMO': { code: 'PMO', name: 'PROMOS', folder: 'PROMOS' },
+    'PSA': { code: 'PSA', name: 'PSAs', folder: 'PSAs' },
+    'SZL': { code: 'SZL', name: 'SIZZLES', folder: 'SIZZLES' },
+    'SPP': { code: 'SPP', name: 'SPECIAL PROJECTS', folder: 'SPECIAL PROJECTS' },
+    'OTHER': { code: 'OTHER', name: 'OTHER', folder: 'OTHER' }
+};
+
 // Scheduling Constants and Configuration
 const SCHEDULING_CONFIG = {
     // Duration categories in seconds
@@ -3403,9 +3536,17 @@ async function loadAvailableContent() {
             displayAvailableContent();
             log(`✅ Loaded ${availableContent.length} available content items`);
             
+            // Update the count display in the header
+            const countElement = document.getElementById('contentCount');
+            if (countElement) {
+                countElement.textContent = `(${availableContent.length} items)`;
+            }
+            
             // Log some details about the content for debugging
             if (availableContent.length > 0) {
                 log(`📊 Content types found: ${[...new Set(availableContent.map(c => c.content_type))].join(', ')}`);
+                // Debug: log first item structure
+                console.log('First content item structure:', availableContent[0]);
             }
         } else {
             log(`❌ Failed to load content: ${result.message}`, 'error');
@@ -3472,20 +3613,118 @@ function showPlaceholderContent() {
     log('📺 Showing demo content (backend endpoint not yet implemented)');
 }
 
+// Content sorting variables
+let contentSortField = 'title';
+let contentSortOrder = 'asc';
+
+// Rename dialog variables
+let currentRenameContent = null;
+
+// Function to update content type
+async function updateContentType(contentId, newType) {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/update-content-type', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content_id: contentId,
+                content_type: newType
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Content Type Updated', `Successfully updated content type to ${newType}`, 'success');
+            
+            // Update the content in availableContent array
+            const content = availableContent.find(c => c.id == contentId || c._id == contentId);
+            if (content) {
+                content.content_type = newType;
+            }
+            
+            // Update the dropdown's data-original attribute
+            const dropdown = document.querySelector(`[data-content-id="${contentId}"] .content-type-dropdown`);
+            if (dropdown) {
+                dropdown.setAttribute('data-original', newType);
+            }
+        } else {
+            showNotification('Update Failed', result.message, 'error');
+            
+            // Revert the dropdown to original value
+            const dropdown = document.querySelector(`[data-content-id="${contentId}"] .content-type-dropdown`);
+            if (dropdown) {
+                const originalValue = dropdown.getAttribute('data-original');
+                dropdown.value = originalValue;
+            }
+        }
+    } catch (error) {
+        showNotification('Error', error.message, 'error');
+        
+        // Revert the dropdown to original value
+        const dropdown = document.querySelector(`[data-content-id="${contentId}"] .content-type-dropdown`);
+        if (dropdown) {
+            const originalValue = dropdown.getAttribute('data-original');
+            dropdown.value = originalValue;
+        }
+    }
+}
+
 function displayAvailableContent() {
     const contentList = document.getElementById('availableContentList');
+    
+    // Update the count display
+    const countElement = document.getElementById('contentCount');
+    if (countElement) {
+        countElement.textContent = `(${availableContent.length} items)`;
+    }
     
     if (availableContent.length === 0) {
         contentList.innerHTML = '<p>No content matches the current filters</p>';
         return;
     }
     
-    let html = '<div class="available-content">';
+    // Add sort header
+    let html = `
+        <div class="content-sort-header">
+            <span class="sort-field" data-field="title" onclick="sortContent('title')">
+                Title ${getSortIcon('title')}
+            </span>
+            <span class="sort-field" data-field="type" onclick="sortContent('type')">
+                Type ${getSortIcon('type')}
+            </span>
+            <span class="sort-field" data-field="duration" onclick="sortContent('duration')">
+                Duration ${getSortIcon('duration')}
+            </span>
+            <span class="sort-field" data-field="category" onclick="sortContent('category')">
+                Category ${getSortIcon('category')}
+            </span>
+            <span class="sort-field" data-field="engagement" onclick="sortContent('engagement')">
+                Score ${getSortIcon('engagement')}
+            </span>
+            <span class="sort-field" data-field="lastScheduled" onclick="sortContent('lastScheduled')">
+                Last Scheduled ${getSortIcon('lastScheduled')}
+            </span>
+            <span style="text-align: center;">Actions</span>
+        </div>
+    `;
+    
+    html += '<div class="available-content">';
     
     availableContent.forEach(content => {
-        const duration = formatDuration(content.file_duration);
+        const durationTimecode = formatDurationTimecode(content.file_duration || 0);
         const durationCategory = getDurationCategory(content.file_duration);
         const engagementScore = content.engagement_score || 'N/A';
+        
+        // Format last scheduled date
+        let lastScheduledDisplay = 'Never';
+        if (content.scheduling?.last_scheduled_date) {
+            const lastDate = new Date(content.scheduling.last_scheduled_date);
+            const month = (lastDate.getMonth() + 1).toString().padStart(2, '0');
+            const day = lastDate.getDate().toString().padStart(2, '0');
+            const year = lastDate.getFullYear().toString().slice(-2);
+            lastScheduledDisplay = `${month}/${day}/${year}`;
+        }
         
         // Use PostgreSQL id as the content identifier
         const contentId = content.id || content._id || content.guid || 'unknown';
@@ -3493,27 +3732,47 @@ function displayAvailableContent() {
         html += `
             <div class="content-item" data-content-id="${contentId}">
                 <div class="content-info">
-                    <span class="content-title">${content.content_title || content.file_name}</span>
-                    <span class="content-type">${getContentTypeLabel(content.content_type)}</span>
-                    <span class="content-duration">${duration} (${durationCategory})</span>
-                    <span class="engagement-score">Engagement: ${engagementScore}%</span>
+                    <span class="content-title" title="${content.file_name}">${content.content_title || content.file_name}</span>
+                    <select class="content-type-dropdown" onchange="updateContentType('${contentId}', this.value)" data-original="${content.content_type ? content.content_type.toUpperCase() : ''}">
+                        <option value="AN" ${content.content_type && content.content_type.toUpperCase() === 'AN' ? 'selected' : ''}>Atlanta Now</option>
+                        <option value="BMP" ${content.content_type && content.content_type.toUpperCase() === 'BMP' ? 'selected' : ''}>Bump</option>
+                        <option value="IMOW" ${content.content_type && content.content_type.toUpperCase() === 'IMOW' ? 'selected' : ''}>In My Own Words</option>
+                        <option value="IM" ${content.content_type && content.content_type.toUpperCase() === 'IM' ? 'selected' : ''}>Inclusion Months</option>
+                        <option value="IA" ${content.content_type && content.content_type.toUpperCase() === 'IA' ? 'selected' : ''}>Inside Atlanta</option>
+                        <option value="LM" ${content.content_type && content.content_type.toUpperCase() === 'LM' ? 'selected' : ''}>Legislative Minute</option>
+                        <option value="MTG" ${content.content_type && content.content_type.toUpperCase() === 'MTG' ? 'selected' : ''}>Meeting</option>
+                        <option value="MAF" ${content.content_type && content.content_type.toUpperCase() === 'MAF' ? 'selected' : ''}>Moving Atlanta Forward</option>
+                        <option value="PKG" ${content.content_type && content.content_type.toUpperCase() === 'PKG' ? 'selected' : ''}>Package</option>
+                        <option value="PMO" ${content.content_type && content.content_type.toUpperCase() === 'PMO' ? 'selected' : ''}>Promo</option>
+                        <option value="PSA" ${content.content_type && content.content_type.toUpperCase() === 'PSA' ? 'selected' : ''}>PSA</option>
+                        <option value="SZL" ${content.content_type && content.content_type.toUpperCase() === 'SZL' ? 'selected' : ''}>Sizzle</option>
+                        <option value="SPP" ${content.content_type && content.content_type.toUpperCase() === 'SPP' ? 'selected' : ''}>Special Projects</option>
+                        <option value="OTHER" ${content.content_type && content.content_type.toUpperCase() === 'OTHER' ? 'selected' : ''}>Other</option>
+                    </select>
+                    <span class="content-duration">${durationTimecode}</span>
+                    <span class="content-category">${durationCategory.toUpperCase()}</span>
+                    <span class="engagement-score">${engagementScore}%</span>
+                    <span class="content-last-scheduled">${lastScheduledDisplay}</span>
                 </div>
-                <div class="content-actions">`;
+                <div class="content-actions">
+                    <button class="button small primary" onclick="addToSchedule('${contentId}')" title="Add to Schedule">
+                        <i class="fas fa-calendar-plus"></i>
+                    </button>`;
         
         // Show add to template button if template is loaded
         if (currentTemplate) {
             html += `
-                    <button class="button small success content-item-add-btn" onclick="addToTemplate('${contentId}')">
-                        <i class="fas fa-plus"></i> Add to Template
+                    <button class="button small success" onclick="addToTemplate('${contentId}')" title="Add to Template">
+                        <i class="fas fa-plus"></i>
                     </button>`;
         }
         
         html += `
-                    <button class="button small primary" onclick="addToSchedule('${contentId}')">
-                        <i class="fas fa-calendar-plus"></i> Add to Schedule
+                    <button class="button small warning" onclick="showRenameDialog('${contentId}')" title="Rename/Fix">
+                        <i class="fas fa-edit"></i> R
                     </button>
-                    <button class="button small secondary" onclick="viewContentDetails('${contentId}')">
-                        <i class="fas fa-info"></i> Details
+                    <button class="button small secondary" onclick="viewContentDetails('${contentId}')" title="View Details">
+                        <i class="fas fa-info"></i>
                     </button>
                 </div>
             </div>
@@ -3719,6 +3978,7 @@ async function viewDailySchedule() {
         
         if (result.success && result.schedule) {
             const schedule = result.schedule;
+            currentSchedule = schedule;  // Store the current schedule
             log(`✅ Schedule found for ${viewDate}`);
             
             // Display schedule in the schedule display area
@@ -3726,6 +3986,7 @@ async function viewDailySchedule() {
             
         } else {
             log(`📭 No schedule found for ${viewDate}`);
+            currentSchedule = null;  // Clear current schedule
             clearScheduleDisplay();
         }
         
@@ -4027,10 +4288,24 @@ async function confirmExport() {
                 log(`📊 File size: ${formatFileSize(result.file_size)}`);
             }
             
+            // Show success notification
+            showNotification(
+                'Schedule Exported',
+                `Successfully exported to ${exportFilename}`,
+                'success'
+            );
+            
             // Show success modal
             showExportResult(true, 'Export Successful!', `Schedule exported to ${result.file_path || fullPath}`);
         } else {
             log(`❌ ${result.message}`, 'error');
+            
+            // Show error notification
+            showNotification(
+                'Export Failed',
+                result.message,
+                'error'
+            );
             
             // Show failure modal
             showExportResult(false, 'Export Failed', result.message);
@@ -4190,6 +4465,8 @@ function formatDurationTimecode(durationSeconds) {
 
 // Get content type label from configuration
 function getContentTypeLabel(contentType) {
+    // Convert to uppercase for mapping
+    const upperType = contentType ? contentType.toUpperCase() : '';
     const contentTypeMap = {
         'AN': 'Atlanta Now',
         'BMP': 'Bump',
@@ -4206,7 +4483,7 @@ function getContentTypeLabel(contentType) {
         'OTH': 'Other'
     };
     
-    return contentTypeMap[contentType] || contentType || 'Unknown';
+    return contentTypeMap[upperType] || upperType || 'Unknown';
 }
 
 // Extract file title from filename and content_title
@@ -4236,6 +4513,7 @@ function extractFileTitle(fileName, contentTitle) {
 }
 
 function clearScheduleDisplay() {
+    currentSchedule = null;  // Clear current schedule
     const scheduleDisplay = document.getElementById('scheduleDisplay');
     if (scheduleDisplay) {
         scheduleDisplay.innerHTML = '<p>Select a date and click "View Schedule" to display the daily schedule</p>';
@@ -4244,11 +4522,30 @@ function clearScheduleDisplay() {
 
 // Collapsible card functionality
 function initializeCollapsibleCards() {
-    const cards = document.querySelectorAll('.scheduling-card h3');
-    cards.forEach(header => {
+    // Initialize scheduling cards
+    const schedulingCards = document.querySelectorAll('.scheduling-card h3');
+    schedulingCards.forEach(header => {
         header.addEventListener('click', function() {
             const card = this.parentElement;
             toggleCard(card);
+        });
+    });
+    
+    // Initialize regular cards with collapsible functionality
+    const regularCards = document.querySelectorAll('.card-header h3');
+    regularCards.forEach(header => {
+        const showButton = header.parentElement.querySelector('button[id*="toggle"]');
+        if (showButton) {
+            // This card has its own toggle button, don't add click to header
+            return;
+        }
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', function() {
+            const card = this.closest('.card');
+            const content = card.querySelector('.card-content, .status, .file-list');
+            if (content) {
+                content.style.display = content.style.display === 'none' ? 'block' : 'none';
+            }
         });
     });
 }
@@ -4714,35 +5011,619 @@ function formatDuration(seconds) {
     }
 }
 
-function addToSchedule(contentId) {
-    log(`📅 Adding content ${contentId} to schedule (not yet implemented)`);
+async function addToSchedule(contentId) {
+    // Check if we have a current schedule loaded
+    if (!currentSchedule || !currentSchedule.id) {
+        // Try to get the date from the view field
+        const viewDate = document.getElementById('viewScheduleDate').value;
+        if (!viewDate) {
+            showNotification(
+                'No Schedule Selected',
+                'Please select or load a schedule first',
+                'error'
+            );
+            return;
+        }
+        
+        // Load the schedule for the selected date
+        await viewDailySchedule();
+        
+        if (!currentSchedule || !currentSchedule.id) {
+            showNotification(
+                'No Schedule Found',
+                'No schedule exists for the selected date. Please create a schedule first.',
+                'error'
+            );
+            return;
+        }
+    }
+    
+    try {
+        log(`📅 Adding content ${contentId} to schedule ${currentSchedule.id}...`);
+        
+        const response = await fetch('http://127.0.0.1:5000/api/add-item-to-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                schedule_id: currentSchedule.id,
+                asset_id: contentId
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ Content added to schedule successfully at position ${result.order_index + 1}`);
+            
+            // Get content details for notification
+            const contentItem = availableContent.find(c => 
+                (c.id || c._id || c.guid) == contentId
+            );
+            const contentTitle = contentItem ? (contentItem.content_title || contentItem.file_name) : 'Content';
+            
+            // Show success notification
+            showNotification(
+                'Added to Schedule',
+                `"${contentTitle}" has been added at position ${result.order_index + 1}`,
+                'success'
+            );
+            
+            // Refresh the schedule display
+            await viewDailySchedule();
+            
+            if (contentItem) {
+                log(`📺 Added "${contentTitle}" to schedule`);
+            }
+        } else {
+            log(`❌ Failed to add content: ${result.message}`, 'error');
+            showNotification(
+                'Failed to Add Content',
+                result.message,
+                'error'
+            );
+        }
+    } catch (error) {
+        log(`❌ Error adding content to schedule: ${error.message}`, 'error');
+        showNotification(
+            'Error',
+            error.message,
+            'error'
+        );
+    }
+}
+
+// Rename/Fix Content Functions
+function showRenameDialog(contentId) {
+    const content = availableContent.find(c => 
+        (c.id || c._id || c.guid) == contentId
+    );
+    
+    if (!content) {
+        showNotification('Error', 'Content not found', 'error');
+        return;
+    }
+    
+    currentRenameContent = content;
+    
+    // Populate modal with current info
+    document.getElementById('currentFileName').value = content.file_name || '';
+    document.getElementById('newFileName').value = content.file_name || '';
+    
+    // Format encoded date for display
+    let encodedDateStr = 'Not available';
+    if (content.encoded_date) {
+        const date = new Date(content.encoded_date);
+        const year = date.getFullYear().toString().slice(-2);
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        encodedDateStr = `${year}${month}${day}`;
+    }
+    document.getElementById('encodedDateDisplay').value = encodedDateStr;
+    
+    // Show content info
+    const infoHtml = `
+        <strong>File Path:</strong> ${content.file_path || 'N/A'}<br>
+        <strong>Current Type:</strong> ${getContentTypeLabel(content.content_type || '')} (${content.content_type || 'Not set'})<br>
+        <strong>Duration:</strong> ${formatDurationTimecode(content.file_duration || 0)}<br>
+        <strong>Title:</strong> ${content.content_title || content.file_name}
+    `;
+    document.getElementById('renameContentInfo').innerHTML = infoHtml;
+    
+    // Show modal
+    document.getElementById('renameContentModal').style.display = 'block';
+}
+
+function closeRenameDialog() {
+    document.getElementById('renameContentModal').style.display = 'none';
+    document.getElementById('renamePreview').style.display = 'none';
+    currentRenameContent = null;
+}
+
+function generateSuggestedName() {
+    if (!currentRenameContent) return;
+    
+    // Get encoded date
+    let dateStr = '';
+    if (currentRenameContent.encoded_date) {
+        const date = new Date(currentRenameContent.encoded_date);
+        const year = date.getFullYear().toString().slice(-2);
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        dateStr = `${year}${month}${day}`;
+    } else {
+        // Try to extract from filename
+        const match = currentRenameContent.file_name.match(/^(\d{6})/);
+        if (match) {
+            dateStr = match[1];
+        } else {
+            showNotification('Warning', 'No encoded date available', 'error');
+            return;
+        }
+    }
+    
+    // Get content type from current content
+    const contentType = currentRenameContent.content_type;
+    if (!contentType) {
+        showNotification('Error', 'Content type not set. Please update content type first using the dropdown in the content list.', 'error');
+        return;
+    }
+    
+    // Extract description from current filename
+    const currentName = currentRenameContent.file_name;
+    let description = '';
+    
+    // Remove date and type prefix to get description
+    const descMatch = currentName.match(/^\d{6}[-_]?\w*[-_]?(.+?)\.mp4$/i);
+    if (descMatch) {
+        description = descMatch[1].trim();
+    } else {
+        // Use content title or fallback
+        description = currentRenameContent.content_title || 'Content';
+    }
+    
+    // Clean up description
+    description = description.replace(/[^\w\s-]/g, ' ').trim();
+    description = description.replace(/\s+/g, '_');
+    
+    // Generate new name
+    const newName = `${dateStr}_${contentType}_${description}.mp4`;
+    document.getElementById('newFileName').value = newName;
+    
+    showNotification('Success', 'Suggested name generated', 'success', 3000);
+}
+
+function previewRename() {
+    const newFileName = document.getElementById('newFileName').value;
+    
+    if (!newFileName) {
+        showNotification('Error', 'Please enter a new filename', 'error');
+        return;
+    }
+    
+    // Extract content type from the new filename
+    const typeMatch = newFileName.match(/^\d{6}_(\w+)_/);
+    const extractedType = typeMatch ? typeMatch[1] : null;
+    
+    // Content type folder mappings
+    const folderMappings = {
+        'AN': 'ATLANTA NOW',
+        'BMP': 'BUMPS',
+        'IMOW': 'IMOW',
+        'IM': 'INCLUSION MONTHS',
+        'IA': 'INSIDE ATLANTA',
+        'LM': 'LEGISLATIVE MINUTE',
+        'MTG': 'MEETINGS',
+        'MAF': 'MOVING ATLANTA FORWARD',
+        'PKG': 'PKGS',
+        'PMO': 'PROMOS',
+        'PSA': 'PSAs',
+        'SZL': 'SIZZLES',
+        'SPP': 'SPECIAL PROJECTS',
+        'OTHER': 'OTHER'
+    };
+    
+    const previewHtml = `
+        <h4>Preview Changes:</h4>
+        <div class="preview-item">
+            <strong>Original:</strong><br>
+            ${currentRenameContent.file_name}
+        </div>
+        <div class="preview-item">
+            <strong>New Name:</strong><br>
+            ${newFileName}
+        </div>
+        <div class="preview-item">
+            <strong>Current Type:</strong> ${currentRenameContent.content_type || 'None'}<br>
+            <strong>Type in Filename:</strong> ${extractedType || 'Invalid'}
+        </div>
+        <div class="preview-item">
+            <strong>Target Folder:</strong><br>
+            ${folderMappings[extractedType] || 'Unknown - file will be moved to OTHER'}
+        </div>
+    `;
+    
+    document.getElementById('renamePreview').innerHTML = previewHtml;
+    document.getElementById('renamePreview').style.display = 'block';
+}
+
+async function executeRename() {
+    if (!currentRenameContent) return;
+    
+    const newFileName = document.getElementById('newFileName').value;
+    
+    if (!newFileName) {
+        showNotification('Error', 'Please enter a new filename', 'error');
+        return;
+    }
+    
+    // Validate filename format
+    if (!newFileName.match(/^\d{6}_\w+_.+\.mp4$/)) {
+        showNotification('Error', 'Invalid filename format. Use: YYMMDD_TYPE_Description.mp4', 'error');
+        return;
+    }
+    
+    // Extract content type from the new filename to determine folder
+    const typeMatch = newFileName.match(/^\d{6}_(\w+)_/);
+    const newContentType = typeMatch ? typeMatch[1] : currentRenameContent.content_type;
+    
+    try {
+        showNotification('Processing', 'Renaming file...', 'info');
+        
+        const response = await fetch('http://127.0.0.1:5000/api/rename-content', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content_id: currentRenameContent.id || currentRenameContent._id,
+                old_file_name: currentRenameContent.file_name,
+                old_file_path: currentRenameContent.file_path,
+                new_file_name: newFileName,
+                new_content_type: newContentType  // Used only for determining target folder
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification(
+                'Success',
+                'File renamed successfully',
+                'success'
+            );
+            closeRenameDialog();
+            // Reload content to show changes
+            await loadAvailableContent();
+        } else {
+            showNotification('Error', result.message || 'Rename failed', 'error');
+        }
+    } catch (error) {
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Content sorting functions
+function getSortIcon(field) {
+    if (contentSortField !== field) {
+        return '<i class="fas fa-sort" style="opacity: 0.3;"></i>';
+    }
+    return contentSortOrder === 'asc' ? 
+        '<i class="fas fa-sort-up"></i>' : 
+        '<i class="fas fa-sort-down"></i>';
+}
+
+function sortContent(field) {
+    // Toggle sort order if clicking the same field
+    if (contentSortField === field) {
+        contentSortOrder = contentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        contentSortField = field;
+        contentSortOrder = 'asc';
+    }
+    
+    // Sort the content array
+    availableContent.sort((a, b) => {
+        let aVal, bVal;
+        
+        switch (field) {
+            case 'title':
+                aVal = (a.content_title || a.file_name || '').toLowerCase();
+                bVal = (b.content_title || b.file_name || '').toLowerCase();
+                break;
+            case 'type':
+                aVal = a.content_type || '';
+                bVal = b.content_type || '';
+                break;
+            case 'duration':
+                aVal = parseFloat(a.file_duration) || 0;
+                bVal = parseFloat(b.file_duration) || 0;
+                break;
+            case 'category':
+                aVal = getDurationCategory(a.file_duration);
+                bVal = getDurationCategory(b.file_duration);
+                break;
+            case 'engagement':
+                aVal = parseFloat(a.engagement_score) || 0;
+                bVal = parseFloat(b.engagement_score) || 0;
+                break;
+            case 'lastScheduled':
+                aVal = a.scheduling?.last_scheduled_date ? new Date(a.scheduling.last_scheduled_date).getTime() : 0;
+                bVal = b.scheduling?.last_scheduled_date ? new Date(b.scheduling.last_scheduled_date).getTime() : 0;
+                break;
+            default:
+                return 0;
+        }
+        
+        // Compare values
+        if (aVal < bVal) return contentSortOrder === 'asc' ? -1 : 1;
+        if (aVal > bVal) return contentSortOrder === 'asc' ? 1 : -1;
+        return 0;
+    });
+    
+    // Redisplay the sorted content
+    displayAvailableContent();
 }
 
 function viewContentDetails(contentId) {
-    log(`ℹ️ Viewing details for content ${contentId} (not yet implemented)`);
+    // Find the content item - convert contentId to match the type
+    const content = availableContent.find(c => {
+        const itemId = c.id || c._id || c.guid;
+        // Compare both as strings and as numbers to handle type mismatches
+        return itemId == contentId || itemId === contentId || 
+               String(itemId) === String(contentId);
+    });
+    
+    if (!content) {
+        log(`❌ Content not found: ${contentId}`, 'error');
+        console.error('Available content IDs:', availableContent.map(c => ({
+            id: c.id,
+            _id: c._id,
+            guid: c.guid
+        })));
+        return;
+    }
+    
+    // Format details
+    const durationTimecode = formatDurationTimecode(content.file_duration || 0);
+    const durationCategory = getDurationCategory(content.file_duration);
+    const lastScheduled = content.scheduling?.last_scheduled_date ? 
+        new Date(content.scheduling.last_scheduled_date).toLocaleString() : 'Never';
+    const totalAirings = content.scheduling?.total_airings || 0;
+    
+    // Create modal content
+    const modalHtml = `
+        <div class="modal" id="contentDetailsModal" style="display: block;">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-info-circle"></i> Content Details</h3>
+                    <button class="modal-close" onclick="closeContentDetailsModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <h4 style="margin-top: 0;">${content.content_title || content.file_name}</h4>
+                    
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 0.75rem; margin-top: 1rem;">
+                        <strong>File Name:</strong>
+                        <span>${content.file_name}</span>
+                        
+                        <strong>File Path:</strong>
+                        <span style="word-break: break-all;">${content.file_path}</span>
+                        
+                        <strong>Content Type:</strong>
+                        <span>${getContentTypeLabel(content.content_type)} (${content.content_type})</span>
+                        
+                        <strong>Duration:</strong>
+                        <span>${durationTimecode} (${durationCategory})</span>
+                        
+                        <strong>File Size:</strong>
+                        <span>${formatFileSize(content.file_size)}</span>
+                        
+                        <strong>Engagement Score:</strong>
+                        <span>${content.engagement_score || 'N/A'}%</span>
+                        
+                        <strong>Last Scheduled:</strong>
+                        <span>${lastScheduled}</span>
+                        
+                        <strong>Total Airings:</strong>
+                        <span>${totalAirings}</span>
+                        
+                        ${content.summary ? `
+                        <strong>Summary:</strong>
+                        <span style="grid-column: 2;">${content.summary}</span>
+                        ` : ''}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="button secondary" onclick="closeContentDetailsModal()">Close</button>
+                    ${currentTemplate ? `
+                    <button class="button success" onclick="addToTemplateFromDetails('${contentId}')">
+                        <i class="fas fa-plus"></i> Add to Template
+                    </button>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeContentDetailsModal() {
+    const modal = document.getElementById('contentDetailsModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function addToTemplateFromDetails(contentId) {
+    addToTemplate(contentId);
+    closeContentDetailsModal();
 }
 
 // Initialize scheduling when page loads
 document.addEventListener('DOMContentLoaded', function() {
     initializeSchedulingDates();
-    initializeCollapsibleSections();
 });
-
-// Initialize collapsible sections
-function initializeCollapsibleSections() {
-    const cards = document.querySelectorAll('.scheduling-card h3');
-    cards.forEach(header => {
-        header.addEventListener('click', function() {
-            const card = this.parentElement;
-            card.classList.toggle('collapsed');
-        });
-    });
-}
 
 
 // Template Editor Functions
 let currentTemplate = null;
 let selectedTemplateFile = null;
+
+// Schedule Loading Functions
+let selectedScheduleFile = null;
+
+function showLoadScheduleFromFTPModal() {
+    document.getElementById('loadScheduleFromFTPModal').style.display = 'block';
+    // Set default date to today
+    document.getElementById('scheduleLoadDate').value = new Date().toISOString().split('T')[0];
+}
+
+function closeLoadScheduleFromFTPModal() {
+    document.getElementById('loadScheduleFromFTPModal').style.display = 'none';
+    selectedScheduleFile = null;
+}
+
+async function loadScheduleFilesFromFTP() {
+    const server = document.getElementById('scheduleLoadServer').value;
+    const path = document.getElementById('scheduleLoadPath').value;
+    
+    if (!server) {
+        log('Please select a server', 'error');
+        return;
+    }
+    
+    try {
+        log(`Listing schedule files from ${server} server...`);
+        
+        const response = await fetch('http://127.0.0.1:5000/api/list-schedule-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server, path })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            displayScheduleFiles(result.files);
+        } else {
+            log(`Failed to list files: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        log(`Error listing files: ${error.message}`, 'error');
+    }
+}
+
+function displayScheduleFiles(files) {
+    const fileList = document.getElementById('scheduleLoadFileList');
+    
+    if (!files || files.length === 0) {
+        fileList.innerHTML = '<p style="color: #666;">No schedule files found</p>';
+        return;
+    }
+    
+    // Filter for .sch files
+    const scheduleFiles = files.filter(f => f.name.toLowerCase().endsWith('.sch'));
+    
+    if (scheduleFiles.length === 0) {
+        fileList.innerHTML = '<p style="color: #666;">No .sch schedule files found</p>';
+        return;
+    }
+    
+    let html = '';
+    scheduleFiles.forEach(file => {
+        const isSelected = selectedScheduleFile === file.name;
+        html += `
+            <div class="file-item ${isSelected ? 'selected' : ''}" 
+                 onclick="selectScheduleFile('${file.name}', event)"
+                 style="cursor: pointer; padding: 8px; border-radius: 4px; margin-bottom: 4px;">
+                <i class="fas fa-calendar-alt"></i> ${file.name}
+                <small style="color: #666; margin-left: 10px;">${formatFileSize(file.size)}</small>
+            </div>
+        `;
+    });
+    
+    fileList.innerHTML = html;
+}
+
+function selectScheduleFile(filename, event) {
+    selectedScheduleFile = filename;
+    
+    // Update UI
+    document.querySelectorAll('#scheduleLoadFileList .file-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    
+    // Find and select the clicked item
+    if (event && event.currentTarget) {
+        event.currentTarget.classList.add('selected');
+    } else {
+        // Fallback: find by filename
+        document.querySelectorAll('#scheduleLoadFileList .file-item').forEach(item => {
+            if (item.textContent.includes(filename)) {
+                item.classList.add('selected');
+            }
+        });
+    }
+    
+    // Enable load button
+    document.getElementById('loadScheduleFromFTPBtn').disabled = false;
+}
+
+async function loadSelectedScheduleFromFTP() {
+    if (!selectedScheduleFile) {
+        log('Please select a schedule file', 'error');
+        return;
+    }
+    
+    const server = document.getElementById('scheduleLoadServer').value;
+    const path = document.getElementById('scheduleLoadPath').value;
+    const scheduleDate = document.getElementById('scheduleLoadDate').value;
+    
+    if (!scheduleDate) {
+        log('Please select a date for this schedule', 'error');
+        return;
+    }
+    
+    try {
+        log(`Loading schedule ${selectedScheduleFile} from ${server} server...`);
+        
+        const response = await fetch('http://127.0.0.1:5000/api/load-schedule-from-ftp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                server,
+                path,
+                filename: selectedScheduleFile,
+                schedule_date: scheduleDate
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ Schedule loaded successfully!`);
+            log(`📊 Created schedule with ${result.total_items} items`);
+            log(`📊 Matched ${result.matched_items} items with analyzed content`);
+            if (result.unmatched_items > 0) {
+                log(`⚠️ ${result.unmatched_items} items could not be matched to analyzed content`);
+            }
+            
+            closeLoadScheduleFromFTPModal();
+            
+            // Refresh schedule display
+            document.getElementById('viewScheduleDate').value = scheduleDate;
+            viewDailySchedule();
+        } else {
+            log(`❌ Failed to load schedule: ${result.message}`, 'error');
+            
+            // Show popup alert for duplicate schedule
+            if (result.schedule_exists) {
+                alert(result.message);
+            }
+        }
+    } catch (error) {
+        log(`❌ Error loading schedule: ${error.message}`, 'error');
+    }
+}
 
 function showLoadTemplateModal() {
     document.getElementById('loadTemplateModal').style.display = 'block';
