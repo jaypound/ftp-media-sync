@@ -3818,6 +3818,13 @@ async function createDailySchedule() {
                 log(`⏱️ Total duration: ${result.total_duration_hours.toFixed(1)} hours`);
             }
             
+            // Show success notification
+            showNotification(
+                'Schedule Created',
+                `Successfully created daily schedule with ${result.total_items} items`,
+                'success'
+            );
+            
             // Set the view date to the newly created schedule
             document.getElementById('viewScheduleDate').value = scheduleDate;
             
@@ -3828,6 +3835,17 @@ async function createDailySchedule() {
             await listAllSchedules();
         } else {
             log(`❌ Failed to create schedule: ${result.message}`, 'error');
+            
+            // Show error notification
+            showNotification(
+                'Schedule Creation Failed',
+                result.message,
+                'error'
+            );
+            
+            if (result.error_count) {
+                log(`📊 Failed after ${result.error_count} consecutive errors`, 'error');
+            }
         }
         
     } catch (error) {
@@ -3843,23 +3861,25 @@ async function createWeeklySchedule() {
         return;
     }
     
-    // Calculate the Monday of the week containing the selected date
+    // Calculate the Sunday of the week containing the selected date
     const selectedDate = new Date(scheduleDate);
     const dayOfWeek = selectedDate.getDay();
-    const monday = new Date(selectedDate);
-    monday.setDate(selectedDate.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    const sunday = new Date(selectedDate);
+    // Adjust to Sunday (day 0)
+    sunday.setDate(selectedDate.getDate() - dayOfWeek);
     
-    const weekStartDate = monday.toISOString().split('T')[0];
+    const weekStartDate = sunday.toISOString().split('T')[0];
     
-    log(`📅 Creating weekly schedule starting Monday ${weekStartDate}...`);
-    log(`🔄 Creating schedules for 7 days...`);
+    log(`📅 Creating single weekly schedule starting Sunday ${weekStartDate}...`);
+    log(`🔄 Creating schedule with 7 days of content...`);
     
     try {
         const response = await fetch('http://127.0.0.1:5000/api/create-weekly-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                start_date: weekStartDate
+                start_date: weekStartDate,
+                schedule_type: 'single'  // Create single weekly schedule
             })
         });
         
@@ -3867,36 +3887,63 @@ async function createWeeklySchedule() {
         
         if (result.success) {
             log(`✅ ${result.message}`);
-            log(`📊 Weekly Summary: ${result.total_created} schedules created across 7 days`);
             
-            // Group schedules by date for better display
-            const schedulesByDate = {};
-            result.created_schedules.forEach(schedule => {
-                if (!schedulesByDate[schedule.date]) {
-                    schedulesByDate[schedule.date] = [];
+            if (result.schedule_type === 'weekly') {
+                // Single weekly schedule
+                log(`📊 Weekly Summary: ${result.total_items} items scheduled`);
+                log(`⏱️ Total Duration: ${result.total_duration_hours.toFixed(1)} hours`);
+                log(`🆔 Schedule ID: ${result.schedule_id}`);
+                
+                // Show success notification
+                showNotification(
+                    'Weekly Schedule Created',
+                    `Successfully created weekly schedule with ${result.total_items} items`,
+                    'success'
+                );
+            } else if (result.created_schedules) {
+                // Multiple daily schedules (old format)
+                log(`📊 Weekly Summary: ${result.total_created} schedules created across 7 days`);
+                
+                // Group schedules by date for better display
+                const schedulesByDate = {};
+                result.created_schedules.forEach(schedule => {
+                    if (!schedulesByDate[schedule.date]) {
+                        schedulesByDate[schedule.date] = [];
+                    }
+                    schedulesByDate[schedule.date].push(schedule);
+                });
+                
+                // Log schedules by date
+                Object.keys(schedulesByDate).sort().forEach(date => {
+                    const daySchedules = schedulesByDate[date];
+                    const dayName = daySchedules[0].day_of_week;
+                    log(`  📅 ${dayName} (${date}): ${daySchedules.length} timeslots`);
+                    daySchedules.forEach(schedule => {
+                        log(`    ✓ ${schedule.timeslot}: ${schedule.total_items} items (${Math.floor(schedule.total_duration / 60)}m ${schedule.total_duration % 60}s)`);
+                    });
+                });
+                
+                if (result.failed_schedules && result.failed_schedules.length > 0) {
+                    log(`⚠️ ${result.total_failed} schedules failed:`, 'warning');
+                    result.failed_schedules.forEach(failure => {
+                        const timeslotInfo = failure.timeslot ? ` (${failure.timeslot})` : '';
+                        log(`  ❌ ${failure.day_of_week} ${failure.date}${timeslotInfo}: ${failure.error}`, 'warning');
+                    });
                 }
-                schedulesByDate[schedule.date].push(schedule);
-            });
-            
-            // Log schedules by date
-            Object.keys(schedulesByDate).sort().forEach(date => {
-                const daySchedules = schedulesByDate[date];
-                const dayName = daySchedules[0].day_of_week;
-                log(`  📅 ${dayName} (${date}): ${daySchedules.length} timeslots`);
-                daySchedules.forEach(schedule => {
-                    log(`    ✓ ${schedule.timeslot}: ${schedule.total_items} items (${Math.floor(schedule.total_duration / 60)}m ${schedule.total_duration % 60}s)`);
-                });
-            });
-            
-            if (result.failed_schedules && result.failed_schedules.length > 0) {
-                log(`⚠️ ${result.total_failed} schedules failed:`, 'warning');
-                result.failed_schedules.forEach(failure => {
-                    const timeslotInfo = failure.timeslot ? ` (${failure.timeslot})` : '';
-                    log(`  ❌ ${failure.day_of_week} ${failure.date}${timeslotInfo}: ${failure.error}`, 'warning');
-                });
             }
         } else {
             log(`❌ Failed to create weekly schedule: ${result.message}`, 'error');
+            
+            // Show error notification
+            showNotification(
+                'Weekly Schedule Creation Failed',
+                result.message,
+                'error'
+            );
+            
+            if (result.error_count) {
+                log(`📊 Failed after ${result.error_count} consecutive errors`, 'error');
+            }
         }
         
     } catch (error) {
@@ -4090,7 +4137,7 @@ function displayScheduleList(schedules) {
     
     let html = `
         <div class="schedule-list-header">
-            <h4>📋 Active Daily Schedules (${schedules.length} total)</h4>
+            <h4>📋 Active Schedules (${schedules.length} total)</h4>
         </div>
         <div class="schedule-list">
     `;
@@ -4104,9 +4151,20 @@ function displayScheduleList(schedules) {
     
     for (const schedule of schedules) {
         const airDate = schedule.air_date.split('T')[0];
-        const dateObj = new Date(airDate + 'T00:00:00');
+        // Parse date components to avoid timezone issues
+        const [year, month, day] = airDate.split('-').map(num => parseInt(num));
+        const dateObj = new Date(year, month - 1, day);
         const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
-        const createdAt = new Date(schedule.created_date).toLocaleString();
+        
+        // Parse created date properly for local timezone
+        const createdAt = new Date(schedule.created_date).toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        });
         const totalDurationHours = schedule.total_duration_hours || 0;
         const totalDurationFormatted = `${totalDurationHours.toFixed(1)} hours`;
         
@@ -4202,6 +4260,69 @@ async function deleteScheduleById(scheduleId, date) {
     }
 }
 
+async function deleteAllSchedules() {
+    const confirmMessage = `Are you sure you want to delete ALL schedules?\n\nThis will:\n• Remove all schedules and scheduled items\n• Reset all scheduling history and last scheduled dates\n• This action cannot be undone!`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    // Double confirmation for such a destructive action
+    if (!confirm('This will DELETE ALL SCHEDULES PERMANENTLY. Are you absolutely sure?')) {
+        return;
+    }
+    
+    log('🗑️ Deleting all schedules...');
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-all-schedules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`);
+            log(`📊 Deleted ${result.schedules_deleted} schedules`);
+            log(`🔄 Reset ${result.metadata_reset} content scheduling records`);
+            
+            // Show success notification
+            showNotification(
+                'All Schedules Deleted',
+                result.message,
+                'success'
+            );
+            
+            // Clear the schedule display
+            clearScheduleDisplay();
+            
+            // Refresh the schedule list if it's open
+            const scheduleDisplay = document.getElementById('scheduleDisplay');
+            if (scheduleDisplay && scheduleDisplay.innerHTML.includes('schedule-list-item')) {
+                await listAllSchedules();
+            }
+        } else {
+            log(`❌ Failed to delete all schedules: ${result.message}`, 'error');
+            
+            // Show error notification
+            showNotification(
+                'Delete Failed',
+                result.message,
+                'error'
+            );
+        }
+        
+    } catch (error) {
+        log(`❌ Error deleting all schedules: ${error.message}`, 'error');
+        showNotification(
+            'Delete Failed',
+            error.message,
+            'error'
+        );
+    }
+}
+
 function exportSchedule() {
     const viewDate = document.getElementById('viewScheduleDate').value;
     
@@ -4222,7 +4343,9 @@ function exportSchedule() {
     document.getElementById('modalExportPath').value = savedPath;
     
     // Generate default filename based on date
-    const scheduleDate = new Date(viewDate);
+    // Parse date components to avoid timezone issues
+    const [year, month, day] = viewDate.split('-').map(num => parseInt(num));
+    const scheduleDate = new Date(year, month - 1, day); // month is 0-indexed
     const dayName = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
     const dateStr = viewDate.replace(/-/g, '');
     const defaultFilename = `${dayName}_${dateStr}.sch`;
@@ -4262,7 +4385,7 @@ async function confirmExport() {
     log(`📤 Exporting schedule for ${viewDate} to ${exportServer} server...`);
     log(`📂 Export path: ${exportPath}`);
     log(`📄 Filename: ${exportFilename}`);
-    log(`📋 Format: ${exportFormat === 'castus_daily' ? 'Castus Daily Schedule' : 'Unknown'}`);
+    log(`📋 Format: ${exportFormat === 'castus' ? 'Castus Daily Schedule' : exportFormat === 'castus_weekly' ? 'Castus Weekly Schedule' : 'Unknown'}`);
     
     try {
         const response = await fetch('http://127.0.0.1:5000/api/export-schedule', {
@@ -4273,7 +4396,7 @@ async function confirmExport() {
                 export_server: exportServer,
                 export_path: exportPath,
                 filename: exportFilename,
-                format: 'castus' // Always use castus format for now
+                format: exportFormat
             })
         });
         
@@ -4341,13 +4464,29 @@ function closeExportResultModal() {
 }
 
 // Helper functions for schedule display
+function parseTimeToSeconds(timeStr) {
+    const parts = timeStr.split(':');
+    const hours = parseInt(parts[0]) || 0;
+    const minutes = parseInt(parts[1]) || 0;
+    const seconds = parseFloat(parts[2]) || 0;
+    return hours * 3600 + minutes * 60 + seconds;
+}
+
 function displayScheduleDetails(schedule) {
     const scheduleDisplay = document.getElementById('scheduleDisplay');
     
     if (!scheduleDisplay) return;
     
     const airDate = schedule.air_date ? schedule.air_date.split('T')[0] : 'Unknown';
-    const createdAt = new Date(schedule.created_date || schedule.created_at).toLocaleString();
+    // Format created date in local timezone
+    const createdAt = new Date(schedule.created_date || schedule.created_at).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    });
     const totalDurationHours = schedule.total_duration_hours || 0;
     
     let html = `
@@ -4364,13 +4503,49 @@ function displayScheduleDetails(schedule) {
                 <span class="col-category">Category</span>
                 <span class="col-duration">Duration</span>
                 <span class="col-last-scheduled">Last Scheduled</span>
+                <span class="col-actions">Actions</span>
             </div>
     `;
     
     if (schedule.items && schedule.items.length > 0) {
+        // Check if this is a weekly schedule by looking at the schedule name
+        const isWeeklySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('weekly');
+        let currentDay = -1;
+        let totalDuration = 0; // Track cumulative duration to determine which day we're on
+        
         schedule.items.forEach((item, index) => {
             const startTime = item.scheduled_start_time || '00:00:00';
             const durationSeconds = item.scheduled_duration_seconds || 0;
+            
+            // For weekly schedules, calculate which day this item belongs to
+            if (isWeeklySchedule) {
+                const itemStartSeconds = parseTimeToSeconds(startTime);
+                const dayNumber = Math.floor(totalDuration / (24 * 60 * 60));
+                
+                // Add day header if we've moved to a new day
+                if (dayNumber !== currentDay && dayNumber < 7) {
+                    currentDay = dayNumber;
+                    // Parse air_date properly to avoid timezone issues
+                    const airDateStr = schedule.air_date.split('T')[0];
+                    const [year, month, day] = airDateStr.split('-').map(num => parseInt(num));
+                    const scheduleDate = new Date(year, month - 1, day);
+                    
+                    // Calculate the date for this day of the week
+                    const dayDate = new Date(year, month - 1, day + dayNumber);
+                    
+                    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const dayName = dayNames[dayDate.getDay()];
+                    const formattedDate = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    
+                    html += `
+                        <div class="schedule-day-header">
+                            <h5>${dayName} - ${formattedDate}</h5>
+                        </div>
+                    `;
+                }
+                
+                totalDuration += durationSeconds;
+            }
             
             // Calculate end time
             const endTime = calculateEndTime(startTime, durationSeconds);
@@ -4397,14 +4572,38 @@ function displayScheduleDetails(schedule) {
                 lastScheduledDisplay = `${month}/${day}/${year} ${hours}:${minutes}`;
             }
             
+            // Check if item is available for scheduling (default to true if not set)
+            const isAvailable = item.available_for_scheduling !== false;
+            const rowClass = isAvailable ? '' : 'disabled-item';
+            const toggleTitle = isAvailable ? 'Disable for future scheduling' : 'Enable for future scheduling';
+            const toggleIcon = isAvailable ? 'fa-toggle-on' : 'fa-toggle-off';
+            const toggleClass = isAvailable ? 'success' : 'secondary';
+            
             html += `
-                <div class="schedule-item-row">
-                    <span class="col-start-time">${startTime}</span>
-                    <span class="col-end-time">${endTime}</span>
+                <div class="schedule-item-row ${rowClass}" data-item-id="${item.id}" data-schedule-id="${schedule.id}">
+                    <span class="col-start-time">${formatTimeWithFrames(startTime)}</span>
+                    <span class="col-end-time">${formatTimeWithFrames(endTime)}</span>
                     <span class="col-title" title="${item.file_name}">${title}</span>
                     <span class="col-category">${categoryLabel}</span>
                     <span class="col-duration">${durationTimecode}</span>
                     <span class="col-last-scheduled">${lastScheduledDisplay}</span>
+                    <span class="col-actions">
+                        <button class="button secondary small" onclick="viewScheduleItemDetails(${schedule.id}, ${item.id || item.asset_id}, ${index})" title="View details">
+                            <i class="fas fa-info"></i>
+                        </button>
+                        <button class="button ${toggleClass} small" onclick="toggleScheduleItemAvailability(${schedule.id}, ${item.id}, ${!isAvailable})" title="${toggleTitle}">
+                            <i class="fas ${toggleIcon}"></i>
+                        </button>
+                        <button class="button danger small" onclick="deleteScheduleItem(${schedule.id}, ${item.id}, ${index})" title="Delete item">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button class="button secondary small" onclick="moveScheduleItem(${schedule.id}, ${index}, 'up')" ${index === 0 ? 'disabled' : ''} title="Move up">
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+                        <button class="button secondary small" onclick="moveScheduleItem(${schedule.id}, ${index}, 'down')" ${index === schedule.items.length - 1 ? 'disabled' : ''} title="Move down">
+                            <i class="fas fa-arrow-down"></i>
+                        </button>
+                    </span>
                 </div>
             `;
         });
@@ -4417,6 +4616,257 @@ function displayScheduleDetails(schedule) {
     scheduleDisplay.innerHTML = html;
 }
 
+// Schedule item manipulation functions
+async function toggleScheduleItemAvailability(scheduleId, itemId, available) {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/toggle-schedule-item-availability', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                schedule_id: scheduleId,
+                item_id: itemId,
+                available: available
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Success', result.message, 'success');
+            // Reload the schedule to show updated state
+            const viewDate = document.getElementById('viewScheduleDate').value;
+            if (viewDate) {
+                await viewDailySchedule();
+            }
+        } else {
+            showNotification('Error', result.message || 'Failed to update item', 'error');
+        }
+    } catch (error) {
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+async function moveScheduleItem(scheduleId, index, direction) {
+    if (!currentSchedule || !currentSchedule.items) {
+        showNotification('Error', 'No schedule loaded', 'error');
+        return;
+    }
+    
+    const items = currentSchedule.items;
+    let newIndex;
+    
+    if (direction === 'up' && index > 0) {
+        newIndex = index - 1;
+        [items[index], items[index - 1]] = [items[index - 1], items[index]];
+    } else if (direction === 'down' && index < items.length - 1) {
+        newIndex = index + 1;
+        [items[index], items[index + 1]] = [items[index + 1], items[index]];
+    } else {
+        return; // No move needed
+    }
+    
+    // Update the display immediately for responsiveness
+    displayScheduleDetails(currentSchedule);
+    
+    try {
+        // Send update to backend
+        const response = await fetch('http://127.0.0.1:5000/api/reorder-schedule-items', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                schedule_id: scheduleId,
+                item_id: items[newIndex].id,
+                old_position: index,
+                new_position: newIndex
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Success', 'Item moved successfully', 'success');
+            // Reload the schedule to ensure sync with backend
+            const viewDate = document.getElementById('viewScheduleDate').value;
+            if (viewDate) {
+                await viewDailySchedule();
+            }
+        } else {
+            showNotification('Error', result.message || 'Failed to move item', 'error');
+            // Reload to revert changes
+            const viewDate = document.getElementById('viewScheduleDate').value;
+            if (viewDate) {
+                await viewDailySchedule();
+            }
+        }
+    } catch (error) {
+        showNotification('Error', error.message, 'error');
+        // Reload to revert changes
+        const viewDate = document.getElementById('viewScheduleDate').value;
+        if (viewDate) {
+            await viewDailySchedule();
+        }
+    }
+}
+
+async function deleteScheduleItem(scheduleId, itemId, index) {
+    if (!confirm('Are you sure you want to delete this item from the schedule?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-schedule-item', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                schedule_id: scheduleId,
+                item_id: itemId
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Success', 'Item deleted successfully', 'success');
+            // Reload the schedule
+            const viewDate = document.getElementById('viewScheduleDate').value;
+            if (viewDate) {
+                await viewDailySchedule();
+            }
+        } else {
+            showNotification('Error', result.message || 'Failed to delete item', 'error');
+        }
+    } catch (error) {
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// View schedule item details
+function viewScheduleItemDetails(scheduleId, assetId, index) {
+    if (!currentSchedule || !currentSchedule.items || !currentSchedule.items[index]) {
+        showNotification('Error', 'Schedule item not found', 'error');
+        return;
+    }
+    
+    const item = currentSchedule.items[index];
+    
+    // Format details
+    const durationTimecode = formatDurationTimecode(item.scheduled_duration_seconds || 0);
+    const startTime = formatTimeWithFrames(item.scheduled_start_time || '00:00:00');
+    const endTime = calculateEndTime(item.scheduled_start_time || '00:00:00', item.scheduled_duration_seconds || 0);
+    const contentTypeLabel = getContentTypeLabel(item.content_type);
+    const categoryLabel = item.duration_category ? item.duration_category.replace('_', ' ').toUpperCase() : '';
+    
+    // Format dates
+    let lastScheduledDisplay = 'Never';
+    if (item.last_scheduled_date) {
+        const lastScheduledDate = new Date(item.last_scheduled_date);
+        lastScheduledDisplay = lastScheduledDate.toLocaleString();
+    }
+    
+    let createdAtDisplay = 'Unknown';
+    if (item.created_at) {
+        const createdDate = new Date(item.created_at);
+        createdAtDisplay = createdDate.toLocaleString();
+    }
+    
+    // Create modal content
+    const modalHtml = `
+        <div class="modal" id="scheduleItemDetailsModal" style="display: block;">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-info-circle"></i> Schedule Item Details</h3>
+                    <button class="modal-close" onclick="closeScheduleItemDetailsModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <h4 style="margin-top: 0;">${item.content_title || item.file_name || 'Untitled'}</h4>
+                    
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 0.75rem; margin-top: 1rem;">
+                        <strong>Schedule Info:</strong>
+                        <span style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;"></span>
+                        
+                        <strong>Position:</strong>
+                        <span>#${item.sequence_number || (index + 1)} in schedule</span>
+                        
+                        <strong>Scheduled Time:</strong>
+                        <span>${startTime} - ${endTime}</span>
+                        
+                        <strong>Duration:</strong>
+                        <span>${durationTimecode}</span>
+                        
+                        <strong>Content Info:</strong>
+                        <span style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin: 0.5rem 0;"></span>
+                        
+                        <strong>File Name:</strong>
+                        <span>${item.file_name || 'N/A'}</span>
+                        
+                        <strong>File Path:</strong>
+                        <span style="word-break: break-all;">${item.file_path || 'N/A'}</span>
+                        
+                        <strong>Content Type:</strong>
+                        <span>${contentTypeLabel} (${item.content_type || 'N/A'})</span>
+                        
+                        <strong>Duration Category:</strong>
+                        <span>${categoryLabel}</span>
+                        
+                        <strong>Engagement Score:</strong>
+                        <span>${item.engagement_score || 'N/A'}%</span>
+                        
+                        <strong>Asset Info:</strong>
+                        <span style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin: 0.5rem 0;"></span>
+                        
+                        <strong>Asset ID:</strong>
+                        <span>${item.asset_id || assetId || 'N/A'}</span>
+                        
+                        <strong>Instance ID:</strong>
+                        <span>${item.instance_id || 'N/A'}</span>
+                        
+                        <strong>Item ID:</strong>
+                        <span>${item.id || 'N/A'}</span>
+                        
+                        <strong>Scheduling History:</strong>
+                        <span style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin: 0.5rem 0;"></span>
+                        
+                        <strong>Total Airings:</strong>
+                        <span>${item.total_airings || 0}</span>
+                        
+                        <strong>Last Scheduled:</strong>
+                        <span>${lastScheduledDisplay}</span>
+                        
+                        <strong>Added to Schedule:</strong>
+                        <span>${createdAtDisplay}</span>
+                        
+                        ${item.summary ? `
+                            <strong>Summary:</strong>
+                            <span style="grid-column: span 2; margin-top: 0.5rem;">
+                                <div style="background: var(--bg-secondary); padding: 10px; border-radius: 4px; margin-top: 5px;">
+                                    ${item.summary}
+                                </div>
+                            </span>
+                        ` : ''}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="button secondary" onclick="closeScheduleItemDetailsModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to page
+    const existingModal = document.getElementById('scheduleItemDetailsModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeScheduleItemDetailsModal() {
+    const modal = document.getElementById('scheduleItemDetailsModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
 // Format time in HH:MM:SS.000 format
 function formatTimeHHMMSSmmm(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -4427,40 +4877,67 @@ function formatTimeHHMMSSmmm(seconds) {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
-// Calculate end time from start time and duration
-function calculateEndTime(startTime, durationSeconds) {
-    // Parse start time (HH:MM:SS)
-    const [hours, minutes, seconds] = startTime.split(':').map(Number);
+// Calculate end time from start time and duration with frame precision
+function calculateEndTime(startTime, durationSeconds, fps = 30) {
+    // Parse start time - can be HH:MM:SS or HH:MM:SS:FF
+    const timeParts = startTime.split(':');
+    let hours = 0, minutes = 0, seconds = 0, frames = 0;
     
-    // Ensure durationSeconds is a number (handle string/decimal inputs)
-    // PostgreSQL returns NUMERIC which should be converted to float in backend
+    if (timeParts.length >= 3) {
+        hours = parseInt(timeParts[0]) || 0;
+        minutes = parseInt(timeParts[1]) || 0;
+        seconds = parseInt(timeParts[2]) || 0;
+        if (timeParts.length >= 4) {
+            frames = parseInt(timeParts[3]) || 0;
+        }
+    }
+    
+    // Ensure durationSeconds is a number
     const duration = parseFloat(durationSeconds) || 0;
     
-    // Convert start time to total seconds
-    const startTotalSeconds = hours * 3600 + minutes * 60 + seconds;
+    // Convert everything to frames for precise calculation
+    const startTotalFrames = (hours * 3600 + minutes * 60 + seconds) * fps + frames;
+    const durationFrames = Math.round(duration * fps);
+    const endTotalFrames = startTotalFrames + durationFrames;
     
-    // Add duration
-    let endTotalSeconds = startTotalSeconds + duration;
+    // Convert back to time components
+    const totalSeconds = Math.floor(endTotalFrames / fps);
+    const endFrames = endTotalFrames % fps;
+    const endHours = Math.floor(totalSeconds / 3600) % 24;
+    const endMinutes = Math.floor((totalSeconds % 3600) / 60);
+    const endSeconds = Math.floor(totalSeconds % 60);
     
-    // Calculate new time components (handle 24+ hour wraparound)
-    const endHours = Math.floor(endTotalSeconds / 3600) % 24;
-    const endMinutes = Math.floor((endTotalSeconds % 3600) / 60);
-    const endSeconds = Math.floor(endTotalSeconds % 60);
-    
-    // Format as HH:MM:SS
-    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:${endSeconds.toString().padStart(2, '0')}`;
+    // Format as HH:MM:SS:FF
+    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:${endSeconds.toString().padStart(2, '0')}:${endFrames.toString().padStart(2, '0')}`;
 }
 
-// Format duration in seconds to H:MM:SS format
-function formatDurationTimecode(durationSeconds) {
+// Format duration in seconds to HH:MM:SS:FF format (with frames)
+function formatDurationTimecode(durationSeconds, fps = 30) {
     const duration = parseFloat(durationSeconds) || 0;
     
     const hours = Math.floor(duration / 3600);
     const minutes = Math.floor((duration % 3600) / 60);
     const seconds = Math.floor(duration % 60);
+    const frames = Math.floor((duration % 1) * fps);
     
-    // Format as H:MM:SS (single digit hours, double digit minutes/seconds)
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    // Format as HH:MM:SS:FF
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+}
+
+// Convert HH:MM:SS to HH:MM:SS:FF format
+function formatTimeWithFrames(timeStr, fps = 30) {
+    if (!timeStr) return '00:00:00:00';
+    
+    const parts = timeStr.split(':');
+    if (parts.length === 4) {
+        // Already has frames
+        return timeStr;
+    } else if (parts.length === 3) {
+        // Add :00 frames
+        return `${timeStr}:00`;
+    } else {
+        return '00:00:00:00';
+    }
 }
 
 // Get content type label from configuration
@@ -5625,8 +6102,23 @@ async function loadSelectedScheduleFromFTP() {
     }
 }
 
+let currentTemplateType = 'daily'; // Track whether we're loading daily or weekly
+
 function showLoadTemplateModal() {
+    currentTemplateType = 'daily';
     document.getElementById('loadTemplateModal').style.display = 'block';
+    document.getElementById('loadTemplateModalTitle').textContent = 'Load Daily Schedule Template';
+    
+    // Load default path from scheduling settings
+    const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
+    const defaultPath = schedulingSettings.defaultExportPath || '/mnt/md127/Schedules';
+    document.getElementById('templatePath').value = defaultPath;
+}
+
+function showLoadWeeklyTemplateModal() {
+    currentTemplateType = 'weekly';
+    document.getElementById('loadTemplateModal').style.display = 'block';
+    document.getElementById('loadTemplateModalTitle').textContent = 'Load Weekly Schedule Template';
     
     // Load default path from scheduling settings
     const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
@@ -5742,14 +6234,10 @@ async function loadSelectedTemplate() {
         if (result.success && result.template) {
             currentTemplate = result.template;
             currentTemplate.filename = result.filename;
+            currentTemplate.type = result.template.type || 'daily'; // Store schedule type
             
             // Display template info
             displayTemplate();
-            
-            // Enable template buttons
-            document.getElementById('clearTemplateBtn').disabled = false;
-            document.getElementById('saveTemplateBtn').disabled = false;
-            document.getElementById('exportTemplateBtn').disabled = false;
             
             // Update available content to show add buttons
             if (availableContent && availableContent.length > 0) {
@@ -5775,13 +6263,13 @@ async function loadSelectedTemplate() {
 function recalculateTemplateTimes() {
     if (!currentTemplate || !currentTemplate.items) return;
     
-    let currentTime = "00:00:00";
+    let currentTime = "00:00:00:00"; // Start with frames
     
     currentTemplate.items.forEach(item => {
         item.start_time = currentTime;
         const duration = parseFloat(item.duration_seconds) || 0;
         
-        // Calculate end time
+        // Calculate end time with frame precision
         const endTime = calculateEndTime(currentTime, duration);
         item.end_time = endTime;
         
@@ -5798,7 +6286,8 @@ function displayTemplate() {
     
     // Show template info
     document.getElementById('templateInfo').style.display = 'block';
-    document.getElementById('templateName').textContent = currentTemplate.filename || 'Untitled';
+    const scheduleType = currentTemplate.type === 'weekly' ? 'Weekly' : 'Daily';
+    document.getElementById('templateName').textContent = `${currentTemplate.filename || 'Untitled'} (${scheduleType})`;
     document.getElementById('templateItemCount').textContent = currentTemplate.items.length;
     
     // Calculate total duration
@@ -5829,7 +6318,38 @@ function displayTemplate() {
                 <span>Actions</span>
             </div>
         `;
+        
+        // For weekly schedules, track which day we're on
+        let currentDay = '';
+        let dayTotalDuration = 0;
+        
         currentTemplate.items.forEach((item, index) => {
+            // For weekly schedules, check if we need to add a day header
+            if (currentTemplate.type === 'weekly' && item.start_time) {
+                // Extract day from start time (e.g., "wed 12:00 am" -> "wed")
+                const dayMatch = item.start_time.match(/^(\w{3})\s/);
+                if (dayMatch) {
+                    const itemDay = dayMatch[1];
+                    if (itemDay !== currentDay) {
+                        currentDay = itemDay;
+                        const dayNames = {
+                            'sun': 'Sunday',
+                            'mon': 'Monday',
+                            'tue': 'Tuesday',
+                            'wed': 'Wednesday',
+                            'thu': 'Thursday',
+                            'fri': 'Friday',
+                            'sat': 'Saturday'
+                        };
+                        html += `
+                            <div class="template-day-header" style="background: rgba(55, 126, 255, 0.15); padding: 0.5rem 1rem; margin: 0.5rem 0; font-weight: bold; color: var(--primary-color);">
+                                ${dayNames[itemDay] || itemDay.toUpperCase()}
+                            </div>
+                        `;
+                    }
+                }
+            }
+            
             const durationTimecode = formatDurationTimecode(item.duration_seconds || 0);
             const hasAssetId = item.asset_id || item.content_id;
             const itemStyle = hasAssetId ? '' : 'opacity: 0.6;';
@@ -5867,12 +6387,7 @@ function clearTemplate() {
     if (confirm('Are you sure you want to clear the current template?')) {
         currentTemplate = null;
         document.getElementById('templateInfo').style.display = 'none';
-        document.getElementById('templateDisplay').style.display = 'none';
-        
-        // Disable template buttons
-        document.getElementById('clearTemplateBtn').disabled = true;
-        document.getElementById('saveTemplateBtn').disabled = true;
-        document.getElementById('exportTemplateBtn').disabled = true;
+        document.getElementById('templateDisplay').innerHTML = '<p>Load a template file to begin editing</p>';
         
         // Update available content to remove add buttons
         if (availableContent && availableContent.length > 0) {

@@ -629,8 +629,12 @@ def create_schedule():
                 'message': 'Schedule date is required'
             })
         
+        # Get max errors from config
+        scheduling_config = config_manager.get_scheduling_settings()
+        max_errors = scheduling_config.get('max_consecutive_errors', 100)
+        
         # Create schedule using PostgreSQL scheduler
-        result = scheduler_postgres.create_daily_schedule(schedule_date, schedule_name)
+        result = scheduler_postgres.create_daily_schedule(schedule_date, schedule_name, max_errors)
         
         return jsonify(result)
         
@@ -730,6 +734,66 @@ def delete_schedule():
         
     except Exception as e:
         error_msg = f"Delete schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/delete-all-schedules', methods=['POST'])
+def delete_all_schedules():
+    """Delete all schedules and reset scheduling metadata"""
+    logger.info("=== DELETE ALL SCHEDULES REQUEST ===")
+    try:
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Delete all schedules (items will cascade)
+            cursor.execute("DELETE FROM schedules")
+            schedules_deleted = cursor.rowcount
+            
+            # Reset all scheduling metadata
+            cursor.execute("""
+                UPDATE scheduling_metadata 
+                SET last_scheduled_date = NULL, 
+                    total_airings = 0,
+                    last_scheduled_in_overnight = NULL,
+                    last_scheduled_in_early_morning = NULL,
+                    last_scheduled_in_morning = NULL,
+                    last_scheduled_in_afternoon = NULL,
+                    last_scheduled_in_prime_time = NULL,
+                    last_scheduled_in_evening = NULL,
+                    replay_count_for_overnight = 0,
+                    replay_count_for_early_morning = 0,
+                    replay_count_for_morning = 0,
+                    replay_count_for_afternoon = 0,
+                    replay_count_for_prime_time = 0,
+                    replay_count_for_evening = 0
+            """)
+            metadata_reset = cursor.rowcount
+            
+            conn.commit()
+            cursor.close()
+            
+            logger.info(f"Deleted {schedules_deleted} schedules and reset {metadata_reset} metadata records")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Successfully deleted {schedules_deleted} schedules and reset scheduling history',
+                'schedules_deleted': schedules_deleted,
+                'metadata_reset': metadata_reset
+            })
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error deleting all schedules: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'Failed to delete all schedules: {str(e)}'
+            })
+        finally:
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        error_msg = f"Delete all schedules error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
@@ -841,12 +905,15 @@ def update_content_type():
             
         except Exception as e:
             logger.error(f"Database update failed: {str(e)}")
+            if conn:
+                conn.rollback()
             return jsonify({
                 'success': False,
                 'message': f'Database update failed: {str(e)}'
             })
         finally:
-            conn.close()
+            if conn:
+                db_manager._put_connection(conn)
             
     except Exception as e:
         logger.error(f"Update content type failed: {str(e)}")
@@ -1008,6 +1075,116 @@ def rename_content():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/reorder-schedule-items', methods=['POST'])
+def reorder_schedule_items():
+    """Reorder items within a schedule"""
+    try:
+        data = request.json
+        schedule_id = data.get('schedule_id')
+        item_id = data.get('item_id')
+        old_position = data.get('old_position')
+        new_position = data.get('new_position')
+        
+        if not all([schedule_id, item_id is not None, old_position is not None, new_position is not None]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required parameters'
+            })
+        
+        logger.info(f"Reordering item {item_id} in schedule {schedule_id} from position {old_position} to {new_position}")
+        
+        # Call the scheduler method to reorder items
+        success = scheduler_postgres.reorder_schedule_items(schedule_id, old_position, new_position)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Schedule items reordered successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to reorder schedule items'
+            })
+            
+    except Exception as e:
+        error_msg = f"Reorder schedule items error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/delete-schedule-item', methods=['POST'])
+def delete_schedule_item():
+    """Delete a single item from a schedule"""
+    try:
+        data = request.json
+        schedule_id = data.get('schedule_id')
+        item_id = data.get('item_id')
+        
+        if not all([schedule_id, item_id]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required parameters'
+            })
+        
+        logger.info(f"Deleting item {item_id} from schedule {schedule_id}")
+        
+        # Call the scheduler method to delete the item
+        success = scheduler_postgres.delete_schedule_item(schedule_id, item_id)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Schedule item deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to delete schedule item'
+            })
+            
+    except Exception as e:
+        error_msg = f"Delete schedule item error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+
+@app.route('/api/toggle-schedule-item-availability', methods=['POST'])
+def toggle_schedule_item_availability():
+    """Toggle the availability of a schedule item for future scheduling"""
+    try:
+        data = request.json
+        schedule_id = data.get('schedule_id')
+        item_id = data.get('item_id')
+        available = data.get('available', True)
+        
+        if not all([schedule_id is not None, item_id is not None]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required parameters'
+            })
+        
+        logger.info(f"Toggling availability for item {item_id} in schedule {schedule_id} to {available}")
+        
+        # Update the item availability
+        success = scheduler_postgres.toggle_item_availability(schedule_id, item_id, available)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Item {"enabled" if available else "disabled"} for scheduling',
+                'available': available
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to update item availability'
+            })
+            
+    except Exception as e:
+        error_msg = f"Toggle item availability error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
 @app.route('/api/list-schedules', methods=['GET'])
 def list_schedules():
     """List all active schedules"""
@@ -1048,8 +1225,9 @@ def create_weekly_schedule():
     try:
         data = request.json
         start_date = data.get('start_date')
+        schedule_type = data.get('schedule_type', 'multiple')  # 'multiple' or 'single'
         
-        logger.info(f"Creating weekly schedule starting: {start_date}")
+        logger.info(f"Creating weekly schedule starting: {start_date}, type: {schedule_type}")
         
         if not start_date:
             return jsonify({
@@ -1057,8 +1235,15 @@ def create_weekly_schedule():
                 'message': 'Start date is required'
             })
         
+        # Get max errors from config
+        scheduling_config = config_manager.get_scheduling_settings()
+        max_errors = scheduling_config.get('max_consecutive_errors', 100)
+        
         # Create weekly schedule using PostgreSQL scheduler
-        result = scheduler_postgres.create_weekly_schedule(start_date)
+        if schedule_type == 'single':
+            result = scheduler_postgres.create_single_weekly_schedule(start_date, None, max_errors)
+        else:
+            result = scheduler_postgres.create_weekly_schedule(start_date)
         
         return jsonify(result)
         
@@ -1104,11 +1289,15 @@ def export_schedule():
         
         # Get schedule items
         items = scheduler_postgres.get_schedule_items(schedule['id'])
+        logger.info(f"Got {len(items)} items for schedule export")
+        if items:
+            logger.debug(f"First item keys: {list(items[0].keys())}")
         
         # Generate Castus format schedule
-        if format_type == 'castus':
+        if format_type == 'castus' or format_type == 'castus_weekly':
             # Determine if it's a daily or weekly schedule
-            schedule_content = generate_castus_schedule(schedule, items, date)
+            export_format = 'weekly' if format_type == 'castus_weekly' else 'daily'
+            schedule_content = generate_castus_schedule(schedule, items, date, export_format)
             
             # Use provided filename or generate default
             if not filename:
@@ -1162,49 +1351,102 @@ def export_schedule():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
-def generate_castus_schedule(schedule, items, date):
+def generate_castus_schedule(schedule, items, date, format_type='daily'):
     """Generate schedule content in Castus format"""
-    # For now, always generate daily format
-    # Weekly format will be handled separately later
     
-    # Start with header for daily schedule
     lines = []
-    lines.append("*daily")
-    lines.append("defaults, of the day{")
-    lines.append("}")
-    lines.append("time slot length = 30")
-    lines.append("scrolltime = 12:00 am")
-    lines.append("filter script = ")
-    lines.append("global default=")
-    lines.append("text encoding = UTF-8")
-    lines.append("schedule format version = 5.0.0.4 2021/01/15")
+    
+    # Parse the date to get day of week
+    schedule_date = datetime.strptime(date, '%Y-%m-%d')
+    day_of_week = schedule_date.weekday()  # 0=Monday, 6=Sunday
+    day_name = schedule_date.strftime('%a').lower()  # mon, tue, wed, etc.
+    
+    if format_type == 'weekly':
+        # Weekly format header
+        lines.append("defaults, day of the week{")
+        lines.append("}")
+        # Weekly schedules always start on Sunday (day 0 in Castus)
+        lines.append("day = 0")
+        lines.append("time slot length = 30")
+        lines.append("scrolltime = 12:00 am")
+        lines.append("filter script = ")
+        lines.append("global default=/mnt/main/Playlists/simple playlist")
+        lines.append("global default section=item duration=;")
+        lines.append("text encoding = UTF-8")
+        lines.append("schedule format version = 5.0.0.4 2021/01/15")
+    else:
+        # Daily format header
+        lines.append("*daily")
+        lines.append("defaults, of the day{")
+        lines.append("}")
+        lines.append("time slot length = 30")
+        lines.append("scrolltime = 12:00 am")
+        lines.append("filter script = ")
+        lines.append("global default=")
+        lines.append("text encoding = UTF-8")
+        lines.append("schedule format version = 5.0.0.4 2021/01/15")
     
     # Add schedule items
     for idx, item in enumerate(items):
-        start_time = item['scheduled_start_time']
-        duration_seconds = float(item['scheduled_duration_seconds'])
+        start_time = item.get('scheduled_start_time', item.get('start_time', '00:00:00'))
+        # Handle both field names for compatibility
+        duration_seconds = float(item.get('scheduled_duration_seconds', item.get('duration_seconds', 0)))
         
         # Calculate end time
-        start_dt = datetime.strptime(f"2000-01-01 {start_time}", "%Y-%m-%d %H:%M:%S")
+        # Handle different time formats
+        if isinstance(start_time, str):
+            # Handle time with frames (HH:MM:SS:FF) by removing frame part
+            time_parts = start_time.split(':')
+            if len(time_parts) == 4:
+                # Remove frames for datetime parsing
+                start_time_no_frames = ':'.join(time_parts[:3])
+            else:
+                start_time_no_frames = start_time
+            start_dt = datetime.strptime(f"2000-01-01 {start_time_no_frames}", "%Y-%m-%d %H:%M:%S")
+        else:
+            # Handle datetime.time object from PostgreSQL
+            start_dt = datetime.combine(datetime(2000, 1, 1), start_time)
         end_dt = start_dt + timedelta(seconds=duration_seconds)
         
-        # Format times with milliseconds for daily schedule
         # Extract milliseconds from duration
         whole_seconds = int(duration_seconds)
         milliseconds = int((duration_seconds - whole_seconds) * 1000)
         
-        # Special handling for first item - should start at exactly 12:00 am
-        if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0:
-            start_time_formatted = "12:00 am"
+        if format_type == 'weekly':
+            # Weekly format times include day abbreviation
+            # For weekly schedules, we need to calculate which day this item falls on
+            # based on the total duration so far
+            item_start_seconds = 0
+            for i in range(idx):
+                item_start_seconds += float(items[i].get('scheduled_duration_seconds', items[i].get('duration_seconds', 0)))
+            
+            # Calculate which day of the week this item is on
+            day_offset = int(item_start_seconds // (24 * 60 * 60))
+            item_day = (schedule_date + timedelta(days=day_offset))
+            item_day_name = item_day.strftime('%a').lower()
+            
+            # Special handling for first item - should start at exactly 12:00 am
+            if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0:
+                start_time_formatted = f"{item_day_name} 12:00 am"
+            else:
+                start_time_formatted = f"{item_day_name} " + start_dt.strftime("%I:%M:%S").lstrip("0") + ".000 " + start_dt.strftime("%p").lower()
+            
+            # For end time, include the actual milliseconds
+            end_time_formatted = f"{item_day_name} " + end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
         else:
-            # For other start times, add .000 if no milliseconds
-            start_time_formatted = start_dt.strftime("%I:%M:%S").lstrip("0") + ".000 " + start_dt.strftime("%p").lower()
-        
-        # For end time, include the actual milliseconds
-        end_time_formatted = end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
+            # Daily format times
+            # Special handling for first item - should start at exactly 12:00 am
+            if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0:
+                start_time_formatted = "12:00 am"
+            else:
+                # For other start times, add .000 if no milliseconds
+                start_time_formatted = start_dt.strftime("%I:%M:%S").lstrip("0") + ".000 " + start_dt.strftime("%p").lower()
+            
+            # For end time, include the actual milliseconds
+            end_time_formatted = end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
         
         # Get the file path from the database
-        file_path = item['file_path']
+        file_path = item.get('file_path', '')
         
         # If the path doesn't start with the expected prefix, we need to construct it
         if not file_path.startswith('/mnt/main/ATL26 On-Air Content/'):
@@ -1346,6 +1588,26 @@ def load_schedule_template():
             
             logger.info(f"Parsed schedule: type={schedule_data['type']}, items={len(schedule_data['items'])}")
             
+            # Try to match items with database assets
+            for item in schedule_data['items']:
+                filename = item.get('filename')
+                if filename:
+                    logger.debug(f"Looking up asset for: {filename}")
+                    asset_match = db_manager.find_asset_by_filename(filename)
+                    if asset_match:
+                        item['asset_id'] = asset_match['id']
+                        item['content_id'] = asset_match['id']  # For backwards compatibility
+                        item['content_type'] = asset_match.get('content_type')
+                        item['content_title'] = asset_match.get('content_title')
+                        # Use the duration from the database
+                        if asset_match.get('duration_seconds'):
+                            item['duration_seconds'] = asset_match['duration_seconds']
+                        item['matched'] = True
+                        logger.debug(f"Found match for {filename}: asset_id={asset_match['id']}, duration={asset_match.get('duration_seconds')}")
+                    else:
+                        item['matched'] = False
+                        logger.debug(f"No match found for {filename}")
+            
             return jsonify({
                 'success': True,
                 'template': schedule_data,
@@ -1381,6 +1643,10 @@ def parse_castus_schedule(content):
             schedule_data['type'] = 'daily'
         elif line == '*weekly':
             schedule_data['type'] = 'weekly'
+        elif line.startswith('day = '):
+            # Weekly format without *weekly header
+            schedule_data['type'] = 'weekly'
+            schedule_data['header']['day'] = line.split('=')[1].strip()
         
         # Start of item block
         elif line == '{':
@@ -1769,7 +2035,17 @@ def export_template():
         current_time = datetime.strptime("00:00:00", "%H:%M:%S")
         
         for item in template['items']:
-            item['scheduled_start_time'] = current_time.strftime("%H:%M:%S")
+            # Handle time with frames if present
+            if 'start_time' in item and ':' in item['start_time']:
+                time_parts = item['start_time'].split(':')
+                if len(time_parts) == 4:
+                    # Has frames, use the base time for calculation
+                    item['scheduled_start_time'] = ':'.join(time_parts[:3])
+                else:
+                    item['scheduled_start_time'] = item['start_time']
+            else:
+                item['scheduled_start_time'] = current_time.strftime("%H:%M:%S")
+            
             duration_seconds = float(item.get('duration_seconds', 0))
             current_time += timedelta(seconds=duration_seconds)
             
@@ -1782,7 +2058,9 @@ def export_template():
         }
         
         # Generate Castus format
-        schedule_content = generate_castus_schedule(mock_schedule, template['items'], mock_schedule['air_date'])
+        # Determine format type based on template type
+        format_type = 'weekly' if template.get('type') == 'weekly' else 'daily'
+        schedule_content = generate_castus_schedule(mock_schedule, template['items'], mock_schedule['air_date'], format_type)
         
         # Write to temporary file - explicitly preserve TABs
         import tempfile
