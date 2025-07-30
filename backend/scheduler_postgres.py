@@ -571,6 +571,59 @@ class PostgreSQLScheduler:
         finally:
             db_manager._put_connection(conn)
     
+    def get_schedule_by_id(self, schedule_id: int) -> Optional[Dict[str, Any]]:
+        """Get schedule by ID with all items"""
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Get schedule info
+            cursor.execute("""
+                SELECT 
+                    s.id,
+                    s.air_date,
+                    s.schedule_name,
+                    s.channel,
+                    s.created_date,
+                    s.notes,
+                    COUNT(si.id) as total_items,
+                    COALESCE(SUM(si.scheduled_duration_seconds), 0) as total_duration
+                FROM schedules s
+                LEFT JOIN scheduled_items si ON s.id = si.schedule_id
+                WHERE s.id = %s
+                GROUP BY s.id, s.air_date, s.schedule_name, s.channel, s.created_date, s.notes
+            """, (schedule_id,))
+            
+            schedule_info = cursor.fetchone()
+            
+            if not schedule_info:
+                cursor.close()
+                return None
+            
+            # Get schedule items
+            items = self.get_schedule_items(schedule_id)
+            
+            cursor.close()
+            
+            # Format response
+            return {
+                'id': schedule_info['id'],
+                'air_date': schedule_info['air_date'],
+                'schedule_name': schedule_info['schedule_name'],
+                'channel': schedule_info['channel'],
+                'total_items': int(schedule_info['total_items']),
+                'total_duration': float(schedule_info['total_duration']),
+                'created_date': schedule_info['created_date'],
+                'notes': schedule_info['notes'],
+                'items': items
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting schedule by ID: {str(e)}")
+            return None
+        finally:
+            db_manager._put_connection(conn)
+    
     def create_weekly_schedule(self, start_date: str) -> Dict[str, Any]:
         """Create schedules for an entire week (7 days)"""
         logger.info(f"Creating weekly schedule starting {start_date}")

@@ -89,6 +89,31 @@ class DatabaseManager:
             logger.error(f"Error getting analysis for {file_path}: {str(e)}")
             return None
     
+    def find_asset_by_filename(self, filename):
+        """Find an asset by filename (not full path)"""
+        if self.collection is None:
+            return None
+        
+        try:
+            result = self.collection.find_one({"file_name": filename})
+            if not result:
+                return None
+            
+            # Return simplified format for schedule matching
+            return {
+                'id': str(result['_id']),
+                'guid': result.get('guid', ''),
+                'content_type': result.get('content_type', ''),
+                'content_title': result.get('content_title', ''),
+                'duration_seconds': result.get('file_duration', 0),
+                'file_name': result.get('file_name', ''),
+                'file_path': result.get('file_path', ''),
+                'file_size': result.get('file_size', 0)
+            }
+        except Exception as e:
+            logger.error(f"Error finding asset by filename {filename}: {str(e)}")
+            return None
+    
     def upsert_analysis(self, analysis_data):
         """Insert or update analysis result"""
         if self.collection is None:

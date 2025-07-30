@@ -733,6 +733,281 @@ def delete_schedule():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/add-item-to-schedule', methods=['POST'])
+def add_item_to_schedule():
+    """Add a single item to an existing schedule"""
+    logger.info("=== ADD ITEM TO SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        schedule_id = data.get('schedule_id')
+        asset_id = data.get('asset_id')
+        
+        logger.info(f"Adding asset {asset_id} to schedule {schedule_id}")
+        
+        if not schedule_id or not asset_id:
+            return jsonify({
+                'success': False,
+                'message': 'Schedule ID and Asset ID are required'
+            })
+        
+        # Get current schedule items to determine order
+        schedule = scheduler_postgres.get_schedule_by_id(int(schedule_id))
+        if not schedule:
+            logger.error(f"Schedule {schedule_id} not found in database")
+            # Try to check if it exists with a simple query
+            return jsonify({
+                'success': False,
+                'message': f'Schedule {schedule_id} not found'
+            })
+        
+        # Determine the order index (add to end)
+        current_items = schedule.get('items', [])
+        order_index = len(current_items)
+        
+        # Calculate start time based on previous items
+        start_seconds = 0
+        for item in current_items:
+            start_seconds += float(item.get('scheduled_duration_seconds', 0))
+        
+        hours = int(start_seconds // 3600)
+        minutes = int((start_seconds % 3600) // 60)
+        seconds = int(start_seconds % 60)
+        start_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        
+        # Add item to schedule
+        success = scheduler_postgres.add_item_to_schedule(
+            schedule_id=int(schedule_id),
+            asset_id=asset_id,
+            order_index=order_index,
+            scheduled_start_time=start_time
+        )
+        
+        if success:
+            # Recalculate all schedule times
+            scheduler_postgres.recalculate_schedule_times(int(schedule_id))
+            
+            return jsonify({
+                'success': True,
+                'message': f'Item added to schedule successfully',
+                'order_index': order_index
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to add item to schedule'
+            })
+        
+    except Exception as e:
+        error_msg = f"Add item to schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/update-content-type', methods=['POST'])
+def update_content_type():
+    """Update content type only"""
+    try:
+        data = request.json
+        content_id = data.get('content_id')
+        new_content_type = data.get('content_type')
+        
+        if not all([content_id, new_content_type]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required parameters'
+            })
+        
+        logger.info(f"Updating content type for ID {content_id} to {new_content_type}")
+        
+        # Update content_type in assets table (convert to lowercase for PostgreSQL enum)
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE assets 
+                SET content_type = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (new_content_type.lower(), content_id))
+            
+            conn.commit()
+            cursor.close()
+            
+            logger.info("Content type updated successfully")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Content type updated successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"Database update failed: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'Database update failed: {str(e)}'
+            })
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Update content type failed: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/rename-content', methods=['POST'])
+def rename_content():
+    """Rename content file only"""
+    logger.info("=== RENAME CONTENT REQUEST ===")
+    try:
+        data = request.json
+        content_id = data.get('content_id')
+        old_file_name = data.get('old_file_name')
+        old_file_path = data.get('old_file_path')
+        new_file_name = data.get('new_file_name')
+        new_content_type = data.get('new_content_type', '')  # Optional for determining folder
+        
+        logger.info(f"Renaming {old_file_name} to {new_file_name}")
+        
+        if not all([content_id, old_file_name, new_file_name]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required parameters'
+            })
+        
+        # Validate filename format
+        import re
+        if not re.match(r'^\d{6}_\w+_.+\.mp4$', new_file_name):
+            return jsonify({
+                'success': False,
+                'message': 'Invalid filename format. Use: YYMMDD_TYPE_Description.mp4'
+            })
+        
+        # Determine new folder based on content type
+        content_type_mappings = {
+            'AN': 'ATLANTA NOW',
+            'BMP': 'BUMPS', 
+            'IMOW': 'IMOW',
+            'IM': 'INCLUSION MONTHS',
+            'IA': 'INSIDE ATLANTA',
+            'LM': 'LEGISLATIVE MINUTE',
+            'MTG': 'MEETINGS',
+            'MAF': 'MOVING ATLANTA FORWARD',
+            'PKG': 'PKGS',
+            'PMO': 'PROMOS',
+            'PSA': 'PSAs',
+            'SZL': 'SIZZLES',
+            'SPP': 'SPECIAL PROJECTS',
+            'OTHER': 'OTHER'
+        }
+        
+        new_folder = content_type_mappings.get(new_content_type, 'OTHER')
+        
+        # Handle old file path - if it's relative, we need to make it absolute
+        if not old_file_path.startswith('/'):
+            # Get the base path from FTP configuration
+            source_ftp = ftp_managers.get('source')
+            if source_ftp and source_ftp.config:
+                base_ftp_path = source_ftp.config.get('path', '/mnt/md127')
+                old_file_path_absolute = f"{base_ftp_path}/{old_file_path}"
+            else:
+                # Default to common path
+                old_file_path_absolute = f"/mnt/md127/{old_file_path}"
+        else:
+            old_file_path_absolute = old_file_path
+        
+        # Construct new path - all content should go under ATL26 On-Air Content
+        # Use the actual base path from the server, not a relative path
+        base_path = '/mnt/md127/ATL26 On-Air Content'
+        
+        # If file is on /mnt/main (symlink), use that instead
+        if '/mnt/main/' in old_file_path_absolute:
+            base_path = '/mnt/main/ATL26 On-Air Content'
+        
+        # Construct full new path
+        new_file_path = f"{base_path}/{new_folder}/{new_file_name}"
+        
+        logger.info(f"Old path (relative): {old_file_path}")
+        logger.info(f"Old path (absolute): {old_file_path_absolute}")
+        logger.info(f"New path: {new_file_path}")
+        
+        # Check if this is just a content type change (paths are the same)
+        path_changed = (old_file_path_absolute != new_file_path)
+        
+        # Rename files on both FTP servers (only if path actually changed)
+        rename_success = True
+        rename_messages = []
+        
+        if path_changed:
+            for server_type in ['source', 'target']:
+                if server_type in ftp_managers:
+                    ftp = ftp_managers[server_type]
+                    try:
+                        # Connect if not connected
+                        if not ftp.connected:
+                            ftp.connect()
+                        
+                        # Rename/move the file using FTP rename command
+                        # This works across directories and acts as a move
+                        ftp.ftp.rename(old_file_path_absolute, new_file_path)
+                        rename_messages.append(f"{server_type}: renamed successfully")
+                        logger.info(f"Renamed on {server_type} server")
+                    except Exception as e:
+                        logger.error(f"Failed to rename on {server_type}: {str(e)}")
+                        rename_messages.append(f"{server_type}: {str(e)}")
+                        rename_success = False
+        else:
+            logger.info("No path change needed - only updating content type in database")
+            rename_messages.append("No file rename needed - content type update only")
+        
+        # Update database
+        if rename_success:
+            # Update instances table
+            conn = db_manager._get_connection()
+            try:
+                cursor = conn.cursor()
+                
+                # Only update instances if path changed
+                if path_changed:
+                    cursor.execute("""
+                        UPDATE instances 
+                        SET file_name = %s, file_path = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE file_path = %s
+                    """, (new_file_name, new_file_path, old_file_path))
+                
+                conn.commit()
+                cursor.close()
+                
+                logger.info("Database updated successfully")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Content renamed and type updated successfully',
+                    'details': rename_messages
+                })
+                
+            except Exception as db_e:
+                conn.rollback()
+                logger.error(f"Database update failed: {str(db_e)}")
+                return jsonify({
+                    'success': False,
+                    'message': f'Files renamed but database update failed: {str(db_e)}',
+                    'details': rename_messages
+                })
+            finally:
+                db_manager._put_connection(conn)
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to rename files on FTP servers',
+                'details': rename_messages
+            })
+                
+    except Exception as e:
+        error_msg = f"Rename content error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
 @app.route('/api/list-schedules', methods=['GET'])
 def list_schedules():
     """List all active schedules"""
@@ -928,26 +1203,32 @@ def generate_castus_schedule(schedule, items, date):
         # For end time, include the actual milliseconds
         end_time_formatted = end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
         
-        # Add FTP path prefix if not already present
+        # Get the file path from the database
         file_path = item['file_path']
+        
+        # If the path doesn't start with the expected prefix, we need to construct it
         if not file_path.startswith('/mnt/main/ATL26 On-Air Content/'):
-            # Preserve subdirectory structure
-            # Remove common prefixes like /media/videos/ but keep the subdirectory structure
-            path_parts = file_path.split('/')
+            # Extract just the relevant part of the path
+            # The file_path from database might be something like:
+            # /media/videos/MEETINGS/250609_MTG_Zoning Committee Meeting.mp4
+            # We want to preserve MEETINGS/filename.mp4
             
-            # Find where the content starts (after common prefixes)
-            content_start_idx = 0
-            for i, part in enumerate(path_parts):
-                if part in ['media', 'videos', 'content', 'files']:
-                    content_start_idx = i + 1
-                    break
-            
-            # Get the relative path from content start
-            if content_start_idx > 0 and content_start_idx < len(path_parts):
-                relative_path = '/'.join(path_parts[content_start_idx:])
+            # Remove common storage prefixes
+            if file_path.startswith('/media/videos/'):
+                relative_path = file_path[len('/media/videos/'):]
+            elif file_path.startswith('/content/'):
+                relative_path = file_path[len('/content/'):]
+            elif file_path.startswith('/files/'):
+                relative_path = file_path[len('/files/'):]
             else:
-                # If no common prefix found, just use the filename
-                relative_path = path_parts[-1]
+                # If no known prefix, try to extract subdirectory + filename
+                path_parts = file_path.split('/')
+                if len(path_parts) >= 2:
+                    # Take the last two parts (subfolder/filename)
+                    relative_path = '/'.join(path_parts[-2:])
+                else:
+                    # Just the filename
+                    relative_path = path_parts[-1]
             
             file_path = f"/mnt/main/ATL26 On-Air Content/{relative_path}"
         
@@ -1148,6 +1429,29 @@ def parse_castus_schedule(content):
     
     return schedule_data
 
+def convert_to_24hour_format(time_str):
+    """Convert Castus time format (12-hour with am/pm) to 24-hour format (HH:MM:SS)"""
+    try:
+        import re
+        from datetime import datetime
+        
+        # Remove milliseconds for parsing
+        time_clean = re.sub(r'\.\d+', '', time_str)
+        
+        # Try different time formats
+        for fmt in ["%I:%M:%S %p", "%I:%M %p"]:
+            try:
+                dt = datetime.strptime(time_clean, fmt)
+                return dt.strftime("%H:%M:%S")
+            except ValueError:
+                continue
+        
+        # If no format works, return as-is (might already be 24-hour)
+        return time_str
+    except Exception as e:
+        logger.error(f"Error converting time format: {e}")
+        return "00:00:00"
+
 def calculate_duration_from_times(start_time, end_time):
     """Calculate duration in seconds from start/end time strings"""
     try:
@@ -1274,6 +1578,168 @@ def create_schedule_from_template():
         error_msg = f"Create schedule from template error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/load-schedule-from-ftp', methods=['POST'])
+def load_schedule_from_ftp():
+    """Load a schedule from FTP and create it in the database"""
+    logger.info("=== LOAD SCHEDULE FROM FTP REQUEST ===")
+    try:
+        data = request.json
+        server_type = data.get('server')
+        path = data.get('path', '/mnt/md127/Schedules')
+        filename = data.get('filename')
+        schedule_date = data.get('schedule_date')
+        
+        if not all([server_type, filename, schedule_date]):
+            return jsonify({'success': False, 'message': 'Missing required parameters'})
+        
+        # Check if server is connected
+        if server_type not in ftp_managers:
+            return jsonify({'success': False, 'message': f'{server_type} server not connected'})
+        
+        # Get FTP manager from global dictionary
+        ftp_manager = ftp_managers[server_type]
+        
+        # Download and parse schedule file
+        remote_path = f"{path}/{filename}".replace('//', '/')
+        logger.info(f"Downloading schedule from: {remote_path}")
+        
+        # Download to temporary file
+        import tempfile
+        import os
+        
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.sch', delete=False) as temp_file:
+            temp_path = temp_file.name
+            
+        try:
+            # Download file
+            success = ftp_manager.download_file(remote_path, temp_path)
+            if not success:
+                return jsonify({'success': False, 'message': 'Failed to download schedule file'})
+            
+            # Parse schedule file
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            
+            logger.info(f"Parsing schedule file for date: {schedule_date}")
+            
+            # Parse the Castus schedule format
+            schedule_data = parse_castus_schedule(content)
+            
+            # Process the schedule items
+            schedule_items = []
+            matched_count = 0
+            unmatched_count = 0
+            
+            for item in schedule_data['items']:
+                file_path = item['file_path']
+                file_name = item['filename']
+                
+                # Try to match with analyzed content
+                asset_match = db_manager.find_asset_by_filename(file_name)
+                
+                if asset_match:
+                    schedule_items.append({
+                        'file_path': file_path,
+                        'file_name': file_name,
+                        'asset_id': asset_match['id'],
+                        'duration_seconds': asset_match.get('duration_seconds', 0),
+                        'content_type': asset_match.get('content_type'),
+                        'content_title': asset_match.get('content_title'),
+                        'start_time': item.get('start_time'),
+                        'end_time': item.get('end_time'),
+                        'guid': item.get('guid')
+                    })
+                    matched_count += 1
+                else:
+                    # Still add unmatched items
+                    schedule_items.append({
+                        'file_path': file_path,
+                        'file_name': file_name,
+                        'asset_id': None,
+                        'duration_seconds': item.get('duration_seconds', 0),
+                        'content_type': None,
+                        'content_title': file_name,
+                        'start_time': item.get('start_time'),
+                        'end_time': item.get('end_time'),
+                        'guid': item.get('guid')
+                    })
+                    unmatched_count += 1
+                    logger.warning(f"No match found for file: {file_name}")
+            
+            if not schedule_items:
+                return jsonify({'success': False, 'message': 'No valid items found in schedule file'})
+            
+            # Check if schedule already exists for this date
+            existing_schedule = scheduler_postgres.get_schedule_by_date(schedule_date)
+            if existing_schedule:
+                return jsonify({
+                    'success': False, 
+                    'message': f'A schedule already exists for {schedule_date}. Please delete it first or choose a different date.',
+                    'schedule_exists': True
+                })
+            
+            # Create schedule in database
+            logger.info(f"Creating schedule for {schedule_date} with {len(schedule_items)} items")
+            
+            # Create empty schedule
+            result = scheduler_postgres.create_empty_schedule(
+                schedule_date=schedule_date,
+                schedule_name=f"Imported from {filename}"
+            )
+            
+            if not result.get('success'):
+                return jsonify(result)
+            
+            schedule_id = result['schedule_id']
+            
+            # Add items to schedule
+            success_count = 0
+            for idx, item in enumerate(schedule_items):
+                if item['asset_id']:
+                    # Use the start time from the Castus file or calculate if not available
+                    if item.get('start_time'):
+                        # Convert Castus time format (e.g., "12:30:45.123 am") to 24-hour format
+                        start_time = convert_to_24hour_format(item['start_time'])
+                    else:
+                        # Fallback: calculate based on previous items
+                        start_seconds = sum(float(schedule_items[i].get('duration_seconds', 0)) for i in range(idx))
+                        hours = int(start_seconds // 3600)
+                        minutes = int((start_seconds % 3600) // 60)
+                        seconds = int(start_seconds % 60)
+                        start_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    
+                    success = scheduler_postgres.add_item_to_schedule(
+                        schedule_id=schedule_id,
+                        asset_id=item['asset_id'],
+                        order_index=idx,
+                        scheduled_start_time=start_time,
+                        scheduled_duration_seconds=item['duration_seconds']
+                    )
+                    if success:
+                        success_count += 1
+            
+            # Recalculate times
+            scheduler_postgres.recalculate_schedule_times(schedule_id)
+            
+            return jsonify({
+                'success': True,
+                'schedule_id': schedule_id,
+                'total_items': len(schedule_items),
+                'matched_items': matched_count,
+                'unmatched_items': unmatched_count,
+                'items_added': success_count,
+                'message': f'Schedule loaded with {success_count} items'
+            })
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        
+    except Exception as e:
+        logger.error(f"Error loading schedule from FTP: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/export-template', methods=['POST'])
 def export_template():

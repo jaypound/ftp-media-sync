@@ -246,6 +246,57 @@ class PostgreSQLDatabaseManager:
         finally:
             self._put_connection(conn)
     
+    def find_asset_by_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+        """Find an asset by filename (not full path)"""
+        if not self.connected:
+            return None
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Search for the filename in instances
+            cursor.execute("""
+                SELECT 
+                    a.id,
+                    a.guid,
+                    a.content_type,
+                    a.content_title,
+                    a.duration_seconds,
+                    i.file_name,
+                    i.file_path,
+                    i.file_size
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id
+                WHERE i.file_name = %s
+                ORDER BY i.is_primary DESC, i.created_at DESC
+                LIMIT 1
+            """, (filename,))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            
+            if not result:
+                return None
+            
+            # Return simplified format for schedule matching
+            return {
+                'id': result['id'],
+                'guid': str(result['guid']),
+                'content_type': result['content_type'],
+                'content_title': result['content_title'],
+                'duration_seconds': float(result['duration_seconds']) if result['duration_seconds'] else 0,
+                'file_name': result['file_name'],
+                'file_path': result['file_path'],
+                'file_size': result['file_size']
+            }
+            
+        except Exception as e:
+            logger.error(f"Error finding asset by filename {filename}: {str(e)}")
+            return None
+        finally:
+            self._put_connection(conn)
+    
     def upsert_analysis(self, analysis_data: Dict[str, Any]) -> bool:
         """Insert or update analysis result"""
         if not self.connected:
@@ -727,11 +778,11 @@ class PostgreSQLDatabaseManager:
             # Add filters
             if content_type:
                 query += " AND a.content_type = %s"
-                params.append(content_type)
+                params.append(content_type.lower())  # Convert to lowercase for PostgreSQL enum
             
             if duration_category:
                 query += " AND a.duration_category = %s"
-                params.append(duration_category)
+                params.append(duration_category.lower())  # Convert to lowercase for PostgreSQL enum
             
             # Add search filter if provided
             if search:

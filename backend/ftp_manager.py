@@ -1,6 +1,7 @@
 import ftplib
 import os
 import logging
+import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -441,11 +442,70 @@ class FTPManager:
                 # Uploading to root directory
                 upload_filename = remote_path
             
+            # Check if file already exists and try to handle overwrite
+            try:
+                logger.debug(f"Checking if file exists: {upload_filename}")
+                existing_size = self.ftp.size(self._quote_path_if_needed(upload_filename))
+                if existing_size is not None:
+                    logger.debug(f"File exists with size {existing_size}, attempting to overwrite...")
+                    try:
+                        # Try to delete the existing file
+                        self.ftp.delete(self._quote_path_if_needed(upload_filename))
+                        logger.debug(f"Existing file deleted successfully")
+                    except Exception as del_e:
+                        logger.warning(f"Could not delete existing file: {str(del_e)}")
+                        # Some FTP servers don't allow delete but do allow overwrite
+                        # We'll continue and try STOR which might overwrite
+                        logger.debug("Will attempt to overwrite with STOR command")
+            except Exception as e:
+                # File doesn't exist, which is fine
+                logger.debug(f"File doesn't exist (this is okay): {str(e)}")
+            
             # Upload the file
             logger.debug(f"Starting upload with STOR command for: {upload_filename}")
-            with open(local_path, 'rb') as local_file:
-                result = self.ftp.storbinary(f'STOR {upload_filename}', local_file)
-                logger.debug(f"STOR command result: {result}")
+            try:
+                with open(local_path, 'rb') as local_file:
+                    result = self.ftp.storbinary(f'STOR {upload_filename}', local_file)
+                    logger.debug(f"STOR command result: {result}")
+            except Exception as stor_e:
+                logger.error(f"STOR command failed: {str(stor_e)}")
+                # Check if it's a permission or overwrite issue
+                if "550" in str(stor_e) or "553" in str(stor_e) or "exists" in str(stor_e).lower():
+                    logger.error("File exists error detected, trying alternative approach...")
+                    
+                    # Try uploading with a temporary name and then rename
+                    temp_filename = f"{upload_filename}.tmp_{int(time.time())}"
+                    logger.debug(f"Attempting to upload with temporary name: {temp_filename}")
+                    
+                    try:
+                        with open(local_path, 'rb') as local_file:
+                            result = self.ftp.storbinary(f'STOR {temp_filename}', local_file)
+                            logger.debug(f"Temporary file uploaded successfully")
+                        
+                        # Now try to delete original and rename temp
+                        try:
+                            logger.debug(f"Deleting original file: {upload_filename}")
+                            self.ftp.delete(self._quote_path_if_needed(upload_filename))
+                        except Exception as del_e2:
+                            logger.warning(f"Could not delete original: {del_e2}")
+                        
+                        try:
+                            logger.debug(f"Renaming {temp_filename} to {upload_filename}")
+                            self.ftp.rename(temp_filename, upload_filename)
+                            logger.debug("Rename successful - file overwritten")
+                        except Exception as ren_e:
+                            logger.error(f"Rename failed: {ren_e}")
+                            # Try to clean up temp file
+                            try:
+                                self.ftp.delete(temp_filename)
+                            except:
+                                pass
+                            raise Exception(f"Could not overwrite existing file: {ren_e}")
+                    except Exception as temp_e:
+                        logger.error(f"Temporary file approach also failed: {temp_e}")
+                        raise
+                else:
+                    raise
             
             # Verify the upload by checking if file exists
             try:
@@ -489,27 +549,46 @@ class FTPManager:
                 return False
         
         try:
-            # Get current directory as base
-            base_dir = self.ftp.pwd()
-            logger.debug(f"Creating directory '{path}' relative to: {base_dir}")
-            
-            # Split path into parts and create each level
-            parts = path.strip('/').split('/')
-            current_path = base_dir.rstrip('/')
-            
-            for part in parts:
-                if part:  # Skip empty parts
-                    current_path += '/' + part
-                    try:
-                        self.ftp.mkd(current_path)
-                        logger.debug(f"Created directory: {current_path}")
-                    except ftplib.error_perm as e:
-                        # Directory might already exist
-                        if "550" in str(e):  # Directory exists
-                            logger.debug(f"Directory already exists: {current_path}")
-                        else:
-                            logger.error(f"Error creating directory {current_path}: {str(e)}")
-                            return False
+            # Check if this is an absolute path
+            if path.startswith('/'):
+                # For absolute paths, create each directory level from root
+                parts = path.strip('/').split('/')
+                current_path = ''
+                
+                for part in parts:
+                    if part:  # Skip empty parts
+                        current_path += '/' + part
+                        try:
+                            self.ftp.mkd(current_path)
+                            logger.debug(f"Created directory: {current_path}")
+                        except ftplib.error_perm as e:
+                            # Directory might already exist
+                            if "550" in str(e) or "exist" in str(e).lower():  # Directory exists
+                                logger.debug(f"Directory already exists: {current_path}")
+                            else:
+                                logger.error(f"Error creating directory {current_path}: {str(e)}")
+                                return False
+            else:
+                # For relative paths, use current directory as base
+                base_dir = self.ftp.pwd()
+                logger.debug(f"Creating directory '{path}' relative to: {base_dir}")
+                
+                parts = path.split('/')
+                current_path = base_dir.rstrip('/')
+                
+                for part in parts:
+                    if part:  # Skip empty parts
+                        current_path += '/' + part
+                        try:
+                            self.ftp.mkd(current_path)
+                            logger.debug(f"Created directory: {current_path}")
+                        except ftplib.error_perm as e:
+                            # Directory might already exist
+                            if "550" in str(e) or "exist" in str(e).lower():  # Directory exists
+                                logger.debug(f"Directory already exists: {current_path}")
+                            else:
+                                logger.error(f"Error creating directory {current_path}: {str(e)}")
+                                return False
             return True
         except Exception as e:
             logger.error(f"Error creating directory {path}: {str(e)}")
