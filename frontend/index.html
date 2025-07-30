@@ -455,43 +455,9 @@
             </div>
             
             <div class="scheduling-grid">
-                <!-- Template Editor Section -->
-                <div class="scheduling-card">
-                    <h3><i class="fas fa-file-import"></i> Schedule Template Editor</h3>
-                    <div class="card-content">
-                        <div class="template-editor">
-                            <div class="template-buttons">
-                                <button class="button primary" onclick="showLoadTemplateModal()">
-                                    <i class="fas fa-file-download"></i> Load Template from FTP
-                                </button>
-                                <button class="button secondary" onclick="clearTemplate()" id="clearTemplateBtn" disabled>
-                                    <i class="fas fa-eraser"></i> Clear Template
-                                </button>
-                                <button class="button success" onclick="saveTemplateAsSchedule()" id="saveTemplateBtn" disabled>
-                                    <i class="fas fa-save"></i> Save as Schedule
-                                </button>
-                                <button class="button warning" onclick="exportTemplate()" id="exportTemplateBtn" disabled>
-                                    <i class="fas fa-upload"></i> Export Template
-                                </button>
-                            </div>
-                            <div id="templateInfo" class="template-info" style="display: none;">
-                                <p><strong>Template:</strong> <span id="templateName"></span></p>
-                                <p><strong>Items:</strong> <span id="templateItemCount">0</span></p>
-                                <p><strong>Duration:</strong> <span id="templateDuration">0:00:00</span></p>
-                            </div>
-                            <div id="templateDisplay" class="template-display" style="display: none;">
-                                <!-- Template items will be displayed here -->
-                            </div>
-                            <div class="template-help">
-                                <p><i class="fas fa-info-circle"></i> Load a template file from the FTP server, then add items from Available Content by clicking the "+" button next to each item.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
                 <!-- Available Content Section -->
-                <div class="scheduling-card">
-                    <h3><i class="fas fa-video"></i> Available Content <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d;"></span></h3>
+                <div class="scheduling-card collapsed">
+                    <h3><i class="fas fa-video"></i> <span style="position: absolute; left: 50%; transform: translateX(-50%);">Available Content</span> <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d; margin-left: auto;"></span></h3>
                     <div class="card-content">
                         <div class="content-filters">
                         <div class="filter-row">
@@ -600,11 +566,47 @@
                             <button class="button secondary" onclick="exportSchedule()">
                                 <i class="fas fa-download"></i> Export Schedule
                             </button>
+                            <button class="button danger" onclick="deleteAllSchedules()">
+                                <i class="fas fa-trash-alt"></i> Delete All Schedules
+                            </button>
                         </div>
                     </div>
                     <div id="scheduleDisplay" class="schedule-display">
                         <p>Select a date and click "View Schedule" to display the daily schedule, or click "List All Schedules" to see all available schedules</p>
                     </div>
+                    </div>
+                </div>
+                
+                <!-- Schedule Template Editor -->
+                <div class="scheduling-card collapsed">
+                    <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
+                    <div class="card-content">
+                        <div class="template-editor">
+                            <div class="template-controls">
+                                <button class="button primary" onclick="showLoadTemplateModal()">
+                                    <i class="fas fa-file-import"></i> Load Daily Schedule
+                                </button>
+                                <button class="button primary" onclick="showLoadWeeklyTemplateModal()">
+                                    <i class="fas fa-calendar-week"></i> Load Weekly Schedule
+                                </button>
+                                <button class="button secondary" onclick="clearTemplate()">
+                                    <i class="fas fa-eraser"></i> Clear Template
+                                </button>
+                                <button class="button success" onclick="saveTemplateAsSchedule()">
+                                    <i class="fas fa-calendar-plus"></i> Create Schedule
+                                </button>
+                                <button class="button warning" onclick="exportTemplate()">
+                                    <i class="fas fa-file-export"></i> Export Template
+                                </button>
+                            </div>
+                            <div id="templateInfo" class="template-info" style="display: none;">
+                                <p><strong>Template:</strong> <span id="templateName">Untitled</span></p>
+                                <p><strong>Items:</strong> <span id="templateItemCount">0</span> | <strong>Duration:</strong> <span id="templateDuration">00:00:00</span></p>
+                            </div>
+                            <div id="templateDisplay" class="template-display">
+                                <p>Load a template file to begin editing</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -657,8 +659,8 @@
                         <div class="form-group">
                             <label for="modalExportFormat">Export Format</label>
                             <select id="modalExportFormat" class="form-control">
-                                <option value="castus_daily">Castus Daily Schedule</option>
-                                <option value="castus_weekly" disabled>Castus Weekly Schedule (Coming Soon)</option>
+                                <option value="castus">Castus Daily Schedule</option>
+                                <option value="castus_weekly">Castus Weekly Schedule</option>
                             </select>
                         </div>
                     </div>
@@ -693,7 +695,7 @@
             <div id="loadTemplateModal" class="modal" style="display: none;">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3><i class="fas fa-file-download"></i> Load Schedule Template</h3>
+                        <h3><i class="fas fa-file-download"></i> <span id="loadTemplateModalTitle">Load Daily Schedule Template</span></h3>
                         <button class="modal-close" onclick="closeLoadTemplateModal()">&times;</button>
                     </div>
                     <div class="modal-body">

@@ -216,7 +216,8 @@ class ConfigManager:
         """Get scheduling settings"""
         return self.config.get("scheduling", {
             "default_export_server": "target",
-            "default_export_path": "/mnt/md127/Schedules/Contributors/Jay"
+            "default_export_path": "/mnt/md127/Schedules/Contributors/Jay",
+            "max_consecutive_errors": 100
         })
     
     def update_scheduling_settings(self, settings: Dict[str, Any]):

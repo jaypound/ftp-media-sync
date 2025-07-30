@@ -62,12 +62,19 @@ class PostgreSQLScheduler:
                     AND a.duration_category = %s
                     AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
                     AND COALESCE(sm.content_expiry_date, CURRENT_TIMESTAMP + INTERVAL '1 year') > CURRENT_TIMESTAMP
+                    AND NOT (i.file_path LIKE %s)
+                    -- Exclude assets that are disabled in any schedule
+                    AND NOT EXISTS (
+                        SELECT 1 FROM scheduled_items si
+                        WHERE si.asset_id = a.id
+                        AND si.available_for_scheduling = FALSE
+                    )
             """
             
-            params = [duration_category]
+            params = [duration_category, '%FILL%']
             
             # Exclude already scheduled items
-            if exclude_ids:
+            if exclude_ids and len(exclude_ids) > 0:
                 query += " AND a.id NOT IN %s"
                 params.append(tuple(exclude_ids))
             
@@ -84,15 +91,21 @@ class PostgreSQLScheduler:
             results = cursor.fetchall()
             cursor.close()
             
-            return results
+            # Return empty list if no results
+            return results if results else []
             
         except Exception as e:
             logger.error(f"Error getting available content: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Params: {params}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
         finally:
             db_manager._put_connection(conn)
     
-    def create_daily_schedule(self, schedule_date: str, schedule_name: str = None) -> Dict[str, Any]:
+    def create_daily_schedule(self, schedule_date: str, schedule_name: str = None, max_errors: int = 100) -> Dict[str, Any]:
         """Create a daily schedule for the specified date"""
         try:
             # Parse date
@@ -128,6 +141,10 @@ class PostgreSQLScheduler:
             sequence_number = 1
             scheduled_asset_ids = []
             
+            # Error tracking
+            consecutive_errors = 0
+            total_errors = 0
+            
             # Track which assets we've scheduled in this session
             # to update their last_scheduled_date in real-time
             scheduled_updates = {}
@@ -144,10 +161,24 @@ class PostgreSQLScheduler:
                 
                 if not available_content:
                     logger.warning(f"No available content for category: {duration_category}")
+                    consecutive_errors += 1
+                    total_errors += 1
+                    
+                    # Check if we should abort
+                    if consecutive_errors >= max_errors:
+                        logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors")
+                        # Delete the partially created schedule
+                        self.delete_schedule(schedule_id)
+                        return {
+                            'success': False,
+                            'message': f'Schedule creation failed: No available content after {total_errors} attempts. Check content availability.',
+                            'error_count': total_errors
+                        }
                     continue
                 
                 # Select the best content (first in the list due to our ordering)
                 content = available_content[0]
+                consecutive_errors = 0  # Reset consecutive error counter
                 
                 # Calculate scheduled time
                 scheduled_start = self._seconds_to_time(total_duration)
@@ -549,9 +580,11 @@ class PostgreSQLScheduler:
                     a.content_title,
                     a.duration_category,
                     a.engagement_score,
+                    a.summary,
                     i.file_name,
                     i.file_path,
-                    sm.last_scheduled_date
+                    sm.last_scheduled_date,
+                    sm.total_airings
                 FROM scheduled_items si
                 JOIN assets a ON si.asset_id = a.id
                 JOIN instances i ON si.instance_id = i.id
@@ -568,6 +601,141 @@ class PostgreSQLScheduler:
         except Exception as e:
             logger.error(f"Error getting schedule items: {str(e)}")
             return []
+        finally:
+            db_manager._put_connection(conn)
+    
+    def reorder_schedule_items(self, schedule_id: int, old_position: int, new_position: int) -> bool:
+        """Reorder items in a schedule by updating sequence numbers"""
+        if not db_manager.connected:
+            db_manager.connect()
+        
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # First get all items for this schedule ordered by sequence
+            cursor.execute("""
+                SELECT id, sequence_number 
+                FROM scheduled_items 
+                WHERE schedule_id = %s 
+                ORDER BY sequence_number
+            """, (schedule_id,))
+            
+            items = cursor.fetchall()
+            if not items or old_position >= len(items) or new_position >= len(items):
+                return False
+            
+            # Reorder the items in memory
+            item_to_move = items.pop(old_position)
+            items.insert(new_position, item_to_move)
+            
+            # Update sequence numbers for all affected items
+            for new_seq, (item_id, _) in enumerate(items):
+                cursor.execute("""
+                    UPDATE scheduled_items 
+                    SET sequence_number = %s 
+                    WHERE id = %s
+                """, (new_seq + 1, item_id))
+            
+            conn.commit()
+            cursor.close()
+            
+            logger.info(f"Successfully reordered items in schedule {schedule_id}")
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error reordering schedule items: {str(e)}")
+            return False
+        finally:
+            db_manager._put_connection(conn)
+    
+    def delete_schedule_item(self, schedule_id: int, item_id: int) -> bool:
+        """Delete a single item from a schedule and resequence remaining items"""
+        if not db_manager.connected:
+            db_manager.connect()
+        
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Delete the item
+            cursor.execute("""
+                DELETE FROM scheduled_items 
+                WHERE id = %s AND schedule_id = %s
+            """, (item_id, schedule_id))
+            
+            if cursor.rowcount == 0:
+                logger.warning(f"No item found with id {item_id} in schedule {schedule_id}")
+                return False
+            
+            # Resequence remaining items
+            cursor.execute("""
+                WITH numbered_items AS (
+                    SELECT id, ROW_NUMBER() OVER (ORDER BY sequence_number) as new_seq
+                    FROM scheduled_items
+                    WHERE schedule_id = %s
+                )
+                UPDATE scheduled_items si
+                SET sequence_number = ni.new_seq
+                FROM numbered_items ni
+                WHERE si.id = ni.id AND si.schedule_id = %s
+            """, (schedule_id, schedule_id))
+            
+            # Update schedule total duration
+            cursor.execute("""
+                UPDATE schedules 
+                SET total_duration_seconds = (
+                    SELECT COALESCE(SUM(scheduled_duration_seconds), 0)
+                    FROM scheduled_items
+                    WHERE schedule_id = %s
+                )
+                WHERE id = %s
+            """, (schedule_id, schedule_id))
+            
+            conn.commit()
+            cursor.close()
+            
+            logger.info(f"Successfully deleted item {item_id} from schedule {schedule_id}")
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error deleting schedule item: {str(e)}")
+            return False
+        finally:
+            db_manager._put_connection(conn)
+    
+    def toggle_item_availability(self, schedule_id: int, item_id: int, available: bool) -> bool:
+        """Toggle the availability of a schedule item for future scheduling"""
+        if not db_manager.connected:
+            db_manager.connect()
+        
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Update the availability field
+            cursor.execute("""
+                UPDATE scheduled_items 
+                SET available_for_scheduling = %s
+                WHERE id = %s AND schedule_id = %s
+            """, (available, item_id, schedule_id))
+            
+            if cursor.rowcount == 0:
+                logger.warning(f"No item found with id {item_id} in schedule {schedule_id}")
+                return False
+            
+            conn.commit()
+            cursor.close()
+            
+            logger.info(f"Successfully updated availability for item {item_id} to {available}")
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error toggling item availability: {str(e)}")
+            return False
         finally:
             db_manager._put_connection(conn)
     
@@ -722,6 +890,159 @@ class PostgreSQLScheduler:
             return False
         finally:
             db_manager._put_connection(conn)
+    
+    def create_single_weekly_schedule(self, start_date: str, schedule_name: str = None, max_errors: int = 100) -> Dict[str, Any]:
+        """Create a single weekly schedule containing 7 days of content"""
+        logger.info(f"Creating single weekly schedule starting {start_date}")
+        
+        try:
+            # Parse start date and ensure it's a Sunday
+            start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+            
+            # Adjust to Sunday if not already
+            if start_date_obj.weekday() != 6:  # 6 is Sunday in Python
+                days_until_sunday = (6 - start_date_obj.weekday()) % 7
+                start_date_obj = start_date_obj + timedelta(days=days_until_sunday)
+                logger.info(f"Adjusted start date to Sunday: {start_date_obj.strftime('%Y-%m-%d')}")
+            
+            # Check if schedule already exists for this week
+            existing = self.get_schedule_by_date(start_date_obj.strftime('%Y-%m-%d'))
+            if existing:
+                return {
+                    'success': False,
+                    'message': f'Weekly schedule already exists for week starting {start_date_obj.strftime("%Y-%m-%d")}',
+                    'schedule_id': existing['id']
+                }
+            
+            # Create schedule record
+            schedule_id = self._create_schedule_record(
+                schedule_date=start_date_obj.date(),
+                schedule_name=schedule_name or f"Weekly Schedule - {start_date_obj.strftime('%Y-%m-%d')}"
+            )
+            
+            if not schedule_id:
+                return {
+                    'success': False,
+                    'message': 'Failed to create schedule record'
+                }
+            
+            # Build the weekly schedule (7 days of content)
+            scheduled_items = []
+            total_duration = 0
+            sequence_number = 1
+            scheduled_asset_ids = []
+            
+            # Error tracking
+            consecutive_errors = 0
+            total_errors = 0
+            
+            # Generate content for each day
+            for day_offset in range(7):
+                current_day = start_date_obj + timedelta(days=day_offset)
+                day_name = current_day.strftime('%A')
+                logger.info(f"Generating content for {day_name}")
+                
+                # Reset rotation for each day
+                self._reset_rotation()
+                
+                # Reset scheduled assets for each day to allow content reuse across days
+                # This allows the same content to appear on different days of the week
+                # while still preventing duplicate content within the same day
+                day_scheduled_asset_ids = []
+                
+                # Target 24 hours per day
+                day_start_seconds = day_offset * 24 * 60 * 60
+                day_target_seconds = (day_offset + 1) * 24 * 60 * 60
+                
+                while total_duration < day_target_seconds:
+                    # Get next duration category
+                    duration_category = self._get_next_duration_category()
+                    
+                    # Get available content
+                    available_content = self.get_available_content(
+                        duration_category, 
+                        exclude_ids=day_scheduled_asset_ids
+                    )
+                    
+                    if not available_content:
+                        logger.warning(f"No available content for category: {duration_category}")
+                        consecutive_errors += 1
+                        total_errors += 1
+                        
+                        # Check if we should abort
+                        if consecutive_errors >= max_errors:
+                            logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors")
+                            # Delete the partially created schedule
+                            self.delete_schedule(schedule_id)
+                            return {
+                                'success': False,
+                                'message': f'Schedule creation failed: No available content after {total_errors} attempts. Check content availability.',
+                                'error_count': total_errors
+                            }
+                        continue
+                    
+                    # Select the best content
+                    content = available_content[0]
+                    consecutive_errors = 0  # Reset consecutive error counter
+                    
+                    # Calculate scheduled time within the week
+                    scheduled_start = self._seconds_to_time(total_duration)
+                    
+                    # Add to schedule
+                    item = {
+                        'schedule_id': schedule_id,
+                        'asset_id': content['asset_id'],
+                        'instance_id': content['instance_id'],
+                        'sequence_number': sequence_number,
+                        'scheduled_start_time': scheduled_start,
+                        'scheduled_duration_seconds': content['duration_seconds']
+                    }
+                    
+                    scheduled_items.append(item)
+                    scheduled_asset_ids.append(content['asset_id'])
+                    day_scheduled_asset_ids.append(content['asset_id'])
+                    
+                    # Update totals
+                    total_duration += float(content['duration_seconds'])
+                    sequence_number += 1
+                    
+                    # Update the asset's last scheduled date
+                    self._update_asset_last_scheduled(content['asset_id'], datetime.now())
+                    
+                    # Stop if we've filled the current day
+                    if total_duration >= day_target_seconds:
+                        break
+                
+                # Log day completion with info about content reuse
+                day_items = len(day_scheduled_asset_ids)
+                reused_items = day_items - len(set(day_scheduled_asset_ids))
+                logger.info(f"Completed {day_name} with {day_items} items ({reused_items} repeated within day)")
+                if day_offset > 0:
+                    logger.info(f"Content can be reused from previous days for variety across the week")
+            
+            # Save all scheduled items
+            saved_count = self._save_scheduled_items(scheduled_items)
+            
+            # Update schedule total duration
+            self._update_schedule_duration(schedule_id, total_duration)
+            
+            logger.info(f"Created weekly schedule with {saved_count} items, total duration: {total_duration/3600:.2f} hours")
+            
+            return {
+                'success': True,
+                'message': f'Successfully created weekly schedule starting {start_date_obj.strftime("%Y-%m-%d")}',
+                'schedule_id': schedule_id,
+                'total_items': saved_count,
+                'total_duration_hours': total_duration / 3600,
+                'schedule_type': 'weekly'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating single weekly schedule: {str(e)}")
+            return {
+                'success': False,
+                'message': f'Error creating weekly schedule: {str(e)}'
+            }
 
 
 # Create global scheduler instance

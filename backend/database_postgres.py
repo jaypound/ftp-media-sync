@@ -256,6 +256,9 @@ class PostgreSQLDatabaseManager:
             cursor = conn.cursor()
             
             # Search for the filename in instances
+            # Log the search
+            logger.debug(f"Searching for asset with filename: '{filename}' (length: {len(filename)})")
+            
             cursor.execute("""
                 SELECT 
                     a.id,
@@ -265,7 +268,8 @@ class PostgreSQLDatabaseManager:
                     a.duration_seconds,
                     i.file_name,
                     i.file_path,
-                    i.file_size
+                    i.file_size,
+                    i.file_duration
                 FROM assets a
                 JOIN instances i ON a.id = i.asset_id
                 WHERE i.file_name = %s
@@ -277,6 +281,19 @@ class PostgreSQLDatabaseManager:
             cursor.close()
             
             if not result:
+                logger.warning(f"No asset found for filename: '{filename}'")
+                # Try to find similar filenames for debugging
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT i.file_name 
+                    FROM instances i 
+                    WHERE i.file_name LIKE %s 
+                    LIMIT 5
+                """, (f'%{filename[:10]}%',))
+                similar = cursor.fetchall()
+                cursor.close()
+                if similar:
+                    logger.debug(f"Similar filenames found: {[s['file_name'] for s in similar]}")
                 return None
             
             # Return simplified format for schedule matching
@@ -285,10 +302,11 @@ class PostgreSQLDatabaseManager:
                 'guid': str(result['guid']),
                 'content_type': result['content_type'],
                 'content_title': result['content_title'],
-                'duration_seconds': float(result['duration_seconds']) if result['duration_seconds'] else 0,
+                'duration_seconds': float(result['file_duration']) if result['file_duration'] else float(result['duration_seconds']) if result['duration_seconds'] else 0,
                 'file_name': result['file_name'],
                 'file_path': result['file_path'],
-                'file_size': result['file_size']
+                'file_size': result['file_size'],
+                'file_duration': float(result['file_duration']) if result['file_duration'] else 0
             }
             
         except Exception as e:
@@ -771,9 +789,10 @@ class PostgreSQLDatabaseManager:
                 JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                 WHERE a.analysis_completed = TRUE
+                AND NOT (i.file_path LIKE %s)
             """
             
-            params = []
+            params = ['%FILL%']
             
             # Add filters
             if content_type:
