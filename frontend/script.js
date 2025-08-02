@@ -4741,9 +4741,11 @@ async function deleteScheduleItem(scheduleId, itemId, index) {
 }
 
 // View schedule item details
-function viewScheduleItemDetails(scheduleId, assetId, index) {
+function viewScheduleItemDetails(scheduleId, itemIdOrAssetId, index) {
     if (!currentSchedule || !currentSchedule.items || !currentSchedule.items[index]) {
         showNotification('Error', 'Schedule item not found', 'error');
+        console.error('Schedule item not found at index:', index);
+        console.log('Current schedule items:', currentSchedule?.items?.length || 0);
         return;
     }
     
@@ -4879,9 +4881,20 @@ function formatTimeHHMMSSmmm(seconds) {
 
 // Calculate end time from start time and duration with frame precision
 function calculateEndTime(startTime, durationSeconds, fps = 30) {
-    // Parse start time - can be HH:MM:SS or HH:MM:SS:FF
-    const timeParts = startTime.split(':');
+    // Handle time with microseconds (e.g., "00:00:15.015000")
+    let timeParts;
     let hours = 0, minutes = 0, seconds = 0, frames = 0;
+    
+    if (startTime.includes('.')) {
+        const [timePart, microPart] = startTime.split('.');
+        timeParts = timePart.split(':');
+        // Convert microseconds to frames
+        const microseconds = parseFloat('0.' + microPart);
+        frames = Math.floor(microseconds * fps);
+    } else {
+        // Parse start time - can be HH:MM:SS or HH:MM:SS:FF
+        timeParts = startTime.split(':');
+    }
     
     if (timeParts.length >= 3) {
         hours = parseInt(timeParts[0]) || 0;
@@ -4924,9 +4937,24 @@ function formatDurationTimecode(durationSeconds, fps = 30) {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
 }
 
-// Convert HH:MM:SS to HH:MM:SS:FF format
+// Convert HH:MM:SS or HH:MM:SS.microseconds to HH:MM:SS:FF format
 function formatTimeWithFrames(timeStr, fps = 30) {
     if (!timeStr) return '00:00:00:00';
+    
+    // Handle time with microseconds (e.g., "00:00:15.015000")
+    if (timeStr.includes('.')) {
+        const [timePart, microPart] = timeStr.split('.');
+        const parts = timePart.split(':');
+        if (parts.length === 3) {
+            const hours = parts[0];
+            const minutes = parts[1];
+            const seconds = parts[2];
+            // Convert microseconds to frames
+            const microseconds = parseFloat('0.' + microPart);
+            const frames = Math.floor(microseconds * fps);
+            return `${hours}:${minutes}:${seconds}:${frames.toString().padStart(2, '0')}`;
+        }
+    }
     
     const parts = timeStr.split(':');
     if (parts.length === 4) {

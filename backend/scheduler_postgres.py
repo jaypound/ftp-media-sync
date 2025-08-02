@@ -180,8 +180,32 @@ class PostgreSQLScheduler:
                 content = available_content[0]
                 consecutive_errors = 0  # Reset consecutive error counter
                 
+                # Check if this content would cross midnight
+                content_duration = float(content['duration_seconds'])
+                remaining_seconds = self.target_duration_seconds - total_duration
+                
+                if content_duration > remaining_seconds:
+                    # This item would exceed 24 hours
+                    # Try to find shorter content that would fit
+                    found_fitting_content = False
+                    for alt_content in available_content[1:]:  # Skip the first item we already tried
+                        alt_duration = float(alt_content['duration_seconds'])
+                        if alt_duration <= remaining_seconds:
+                            # Found content that fits!
+                            content = alt_content
+                            content_duration = alt_duration
+                            found_fitting_content = True
+                            logger.info(f"Found alternative content that fits in remaining {remaining_seconds/60:.1f} minutes")
+                            break
+                    
+                    if not found_fitting_content:
+                        # No content fits in remaining time
+                        logger.info(f"No content fits in remaining {remaining_seconds/60:.1f} minutes, stopping at {total_duration/3600:.2f} hours")
+                        break
+                
                 # Calculate scheduled time
-                scheduled_start = self._seconds_to_time(total_duration)
+                # For daily schedules, ensure time stays within 24 hours
+                scheduled_start = self._seconds_to_time(total_duration % (24 * 60 * 60))
                 
                 # Add to schedule
                 item = {
@@ -198,7 +222,7 @@ class PostgreSQLScheduler:
                 scheduled_updates[content['asset_id']] = datetime.now()
                 
                 # Update totals
-                total_duration += float(content['duration_seconds'])
+                total_duration += content_duration
                 sequence_number += 1
                 
                 # Immediately update the last_scheduled_date for this asset
@@ -500,15 +524,19 @@ class PostgreSQLScheduler:
             db_manager._put_connection(conn)
     
     def _seconds_to_time(self, total_seconds: float) -> str:
-        """Convert seconds to HH:MM:SS format"""
+        """Convert seconds to HH:MM:SS.microseconds format"""
         hours = int(total_seconds // 3600)
         minutes = int((total_seconds % 3600) // 60)
-        seconds = int(total_seconds % 60)
+        seconds = total_seconds % 60
         
-        # Handle overflow past 24 hours
-        hours = hours % 24
+        # For weekly schedules, don't wrap hours past 24
+        # The calling code should handle day boundaries
         
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        # Format with microsecond precision to avoid truncation
+        whole_seconds = int(seconds)
+        microseconds = int((seconds - whole_seconds) * 1000000)
+        
+        return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d}.{microseconds:06d}"
     
     def get_active_schedules(self) -> List[Dict[str, Any]]:
         """Get list of active schedules"""
@@ -594,6 +622,16 @@ class PostgreSQLScheduler:
             """, (schedule_id,))
             
             results = cursor.fetchall()
+            
+            # Debug: Check what we're getting from DB
+            if results and len(results) > 0:
+                logger.debug(f"get_schedule_items - First 3 items from DB:")
+                for i, r in enumerate(results[:3]):
+                    st = r.get('scheduled_start_time')
+                    logger.debug(f"  Item {i}: scheduled_start_time={st}, type={type(st)}, repr={repr(st)}")
+                    if hasattr(st, 'microsecond'):
+                        logger.debug(f"    microsecond={st.microsecond}")
+            
             cursor.close()
             
             return results
@@ -985,8 +1023,41 @@ class PostgreSQLScheduler:
                     content = available_content[0]
                     consecutive_errors = 0  # Reset consecutive error counter
                     
+                    # Check if this content would cross into the next day
+                    content_duration = float(content['duration_seconds'])
+                    remaining_seconds = day_target_seconds - total_duration
+                    
+                    if content_duration > remaining_seconds:
+                        # This item would cross into the next day
+                        # Try to find shorter content that would fit
+                        found_fitting_content = False
+                        for alt_content in available_content[1:]:  # Skip the first item we already tried
+                            alt_duration = float(alt_content['duration_seconds'])
+                            if alt_duration <= remaining_seconds:
+                                # Found content that fits!
+                                content = alt_content
+                                content_duration = alt_duration
+                                found_fitting_content = True
+                                logger.info(f"Found alternative content that fits in remaining {remaining_seconds/60:.1f} minutes")
+                                break
+                        
+                        if not found_fitting_content:
+                            # No content fits in remaining time, move to next day
+                            logger.info(f"No content fits in remaining {remaining_seconds/60:.1f} minutes on {day_name}, moving to next day")
+                            # IMPORTANT: Advance total_duration to the start of the next day
+                            # This ensures the next item starts at midnight, not in the gap
+                            total_duration = day_target_seconds
+                            break
+                    
                     # Calculate scheduled time within the week
-                    scheduled_start = self._seconds_to_time(total_duration)
+                    # For weekly schedules, we need to show the actual day/time
+                    # Convert total_duration to the day of week and time
+                    days_elapsed = int(total_duration // (24 * 60 * 60))
+                    time_in_day = total_duration % (24 * 60 * 60)
+                    scheduled_start = self._seconds_to_time(time_in_day)
+                    
+                    # Debug logging
+                    logger.debug(f"Item {sequence_number}: total_duration={total_duration:.6f}, time_in_day={time_in_day:.6f}, scheduled_start={scheduled_start}, duration={content_duration:.6f}")
                     
                     # Add to schedule
                     item = {
@@ -995,7 +1066,7 @@ class PostgreSQLScheduler:
                         'instance_id': content['instance_id'],
                         'sequence_number': sequence_number,
                         'scheduled_start_time': scheduled_start,
-                        'scheduled_duration_seconds': content['duration_seconds']
+                        'scheduled_duration_seconds': content_duration  # Use the exact duration we used for calculations
                     }
                     
                     scheduled_items.append(item)
@@ -1003,7 +1074,7 @@ class PostgreSQLScheduler:
                     day_scheduled_asset_ids.append(content['asset_id'])
                     
                     # Update totals
-                    total_duration += float(content['duration_seconds'])
+                    total_duration += content_duration
                     sequence_number += 1
                     
                     # Update the asset's last scheduled date
@@ -1019,6 +1090,12 @@ class PostgreSQLScheduler:
                 logger.info(f"Completed {day_name} with {day_items} items ({reused_items} repeated within day)")
                 if day_offset > 0:
                     logger.info(f"Content can be reused from previous days for variety across the week")
+            
+            # Debug: Log first few items to check time format
+            if scheduled_items:
+                logger.debug("First 5 scheduled items before saving:")
+                for i, item in enumerate(scheduled_items[:5]):
+                    logger.debug(f"  Item {i+1}: start_time={item['scheduled_start_time']}, duration={item['scheduled_duration_seconds']:.6f}s, type={type(item['scheduled_start_time'])}")
             
             # Save all scheduled items
             saved_count = self._save_scheduled_items(scheduled_items)
