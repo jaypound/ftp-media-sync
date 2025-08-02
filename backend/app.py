@@ -1352,6 +1352,8 @@ def export_schedule():
         return jsonify({'success': False, 'message': error_msg})
 
 def generate_castus_schedule(schedule, items, date, format_type='daily'):
+    # Reset day counter for weekly schedules
+    generate_castus_schedule.current_day = 0
     """Generate schedule content in Castus format"""
     
     lines = []
@@ -1386,6 +1388,16 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         lines.append("text encoding = UTF-8")
         lines.append("schedule format version = 5.0.0.4 2021/01/15")
     
+    # Track previous end time for overlap detection
+    previous_end_seconds = 0.0
+    
+    # Debug first few items
+    if items and len(items) > 0:
+        logger.debug("First 5 items from database:")
+        for i, item in enumerate(items[:5]):
+            st = item.get('scheduled_start_time', 'None')
+            logger.debug(f"  Item {i}: scheduled_start_time={st}, type={type(st)}")
+    
     # Add schedule items
     for idx, item in enumerate(items):
         start_time = item.get('scheduled_start_time', item.get('start_time', '00:00:00'))
@@ -1395,14 +1407,25 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         # Calculate end time
         # Handle different time formats
         if isinstance(start_time, str):
-            # Handle time with frames (HH:MM:SS:FF) by removing frame part
-            time_parts = start_time.split(':')
-            if len(time_parts) == 4:
-                # Remove frames for datetime parsing
-                start_time_no_frames = ':'.join(time_parts[:3])
+            # Handle time with microseconds (HH:MM:SS.ffffff) or frames (HH:MM:SS:FF)
+            if '.' in start_time:
+                # Has microseconds - parse them
+                time_base, micro_str = start_time.split('.')
+                time_parts = time_base.split(':')
+                hours = int(time_parts[0])
+                minutes = int(time_parts[1])
+                seconds = int(time_parts[2])
+                microseconds = int(micro_str.ljust(6, '0')[:6])  # Pad or truncate to 6 digits
+                start_dt = datetime(2000, 1, 1, hours, minutes, seconds, microseconds)
             else:
-                start_time_no_frames = start_time
-            start_dt = datetime.strptime(f"2000-01-01 {start_time_no_frames}", "%Y-%m-%d %H:%M:%S")
+                # Handle time with frames (HH:MM:SS:FF) by removing frame part
+                time_parts = start_time.split(':')
+                if len(time_parts) == 4:
+                    # Remove frames for datetime parsing
+                    start_time_no_frames = ':'.join(time_parts[:3])
+                else:
+                    start_time_no_frames = start_time
+                start_dt = datetime.strptime(f"2000-01-01 {start_time_no_frames}", "%Y-%m-%d %H:%M:%S")
         else:
             # Handle datetime.time object from PostgreSQL
             start_dt = datetime.combine(datetime(2000, 1, 1), start_time)
@@ -1414,25 +1437,120 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         
         if format_type == 'weekly':
             # Weekly format times include day abbreviation
-            # For weekly schedules, we need to calculate which day this item falls on
-            # based on the total duration so far
-            item_start_seconds = 0
-            for i in range(idx):
-                item_start_seconds += float(items[i].get('scheduled_duration_seconds', items[i].get('duration_seconds', 0)))
+            # For weekly schedules, we need to track cumulative time to determine day boundaries
+            # but use exact start times from previous items to avoid precision issues
+            
+            # Parse the actual start time from the database
+            if isinstance(start_time, str):
+                time_parts = start_time.split(':')
+                db_hours = int(time_parts[0])
+                db_minutes = int(time_parts[1])
+                db_seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+            else:
+                # Handle datetime.time object from PostgreSQL
+                db_hours = start_time.hour
+                db_minutes = start_time.minute
+                db_seconds = start_time.second + start_time.microsecond / 1000000.0
+            
+            # Calculate the actual start time in seconds from the database
+            # For weekly schedules, we need to track which day we're on
+            if idx == 0:
+                item_start_seconds = 0.0
+                current_day = 0
+            else:
+                # Check if we've moved to a new day by comparing with previous item
+                prev_item = items[idx - 1]
+                prev_start = prev_item.get('scheduled_start_time')
+                
+                if isinstance(prev_start, str):
+                    prev_parts = prev_start.split(':')
+                    prev_hours = int(prev_parts[0])
+                else:
+                    prev_hours = prev_start.hour
+                
+                # If current hour is less than previous, we've crossed midnight
+                if db_hours < prev_hours:
+                    current_day = getattr(generate_castus_schedule, 'current_day', 0) + 1
+                    generate_castus_schedule.current_day = current_day
+                else:
+                    current_day = getattr(generate_castus_schedule, 'current_day', 0)
+                
+                # Calculate exact start time including day offset
+                item_start_seconds = (current_day * 24 * 60 * 60) + (db_hours * 3600) + (db_minutes * 60) + db_seconds
+                
+                # Debug logging with comprehensive calculations
+                end_calc_seconds = item_start_seconds + duration_seconds
+                logger.debug(f"Export item {idx}:")
+                logger.debug(f"  DB start_time: {start_time} (type: {type(start_time).__name__})")
+                logger.debug(f"  Calculated start: {item_start_seconds:.6f}s = {item_start_seconds/3600:.2f}h")
+                logger.debug(f"  Duration: {duration_seconds:.6f}s")
+                logger.debug(f"  Calculated end: {end_calc_seconds:.6f}s = {end_calc_seconds/3600:.2f}h")
+                if idx > 0:
+                    logger.debug(f"  Previous end: {previous_end_seconds:.6f}s")
+                    logger.debug(f"  Gap/Overlap: {item_start_seconds - previous_end_seconds:.6f}s")
+                
+                # Check for overlap with a small tolerance for floating-point precision
+                OVERLAP_TOLERANCE = 0.001  # 1 millisecond tolerance
+                if idx > 0:
+                    gap_or_overlap = item_start_seconds - previous_end_seconds
+                    if gap_or_overlap < -OVERLAP_TOLERANCE:
+                        # Real overlap detected
+                        overlap = -gap_or_overlap
+                        logger.error(f"OVERLAP DETECTED at item {idx}: Previous end={previous_end_seconds:.6f}, Current start={item_start_seconds:.6f}, Overlap={overlap:.6f} seconds")
+                        # Abort export with error message
+                        return f"ERROR: Schedule has overlapping items at position {idx}. Item starts {overlap:.3f} seconds before previous item ends."
+                    elif abs(gap_or_overlap) <= OVERLAP_TOLERANCE:
+                        # Within tolerance - treat as continuous
+                        logger.debug(f"  Note: Tiny gap/overlap of {gap_or_overlap:.9f}s is within tolerance")
+                
+                # If we detect a midnight crossing (database shows 00:xx:xx after high hours)
+                expected_time_in_day = item_start_seconds % (24 * 60 * 60)
+                if db_hours == 0 and expected_time_in_day > 20 * 60 * 60:  # After 8pm
+                    # Advance to next day
+                    current_day = int(item_start_seconds // (24 * 60 * 60))
+                    item_start_seconds = (current_day + 1) * 24 * 60 * 60
             
             # Calculate which day of the week this item is on
             day_offset = int(item_start_seconds // (24 * 60 * 60))
             item_day = (schedule_date + timedelta(days=day_offset))
             item_day_name = item_day.strftime('%a').lower()
             
-            # Special handling for first item - should start at exactly 12:00 am
-            if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0:
+            # Format start time with actual milliseconds from database
+            # Extract milliseconds from the actual start time
+            start_milliseconds = start_dt.microsecond // 1000
+            
+            if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0 and start_dt.microsecond == 0:
                 start_time_formatted = f"{item_day_name} 12:00 am"
             else:
-                start_time_formatted = f"{item_day_name} " + start_dt.strftime("%I:%M:%S").lstrip("0") + ".000 " + start_dt.strftime("%p").lower()
+                start_time_formatted = f"{item_day_name} " + start_dt.strftime("%I:%M:%S").lstrip("0") + f".{start_milliseconds:03d} " + start_dt.strftime("%p").lower()
             
-            # For end time, include the actual milliseconds
-            end_time_formatted = f"{item_day_name} " + end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
+            # Debug the formatting
+            logger.debug(f"  start_dt info: hour={start_dt.hour}, minute={start_dt.minute}, second={start_dt.second}, microsecond={start_dt.microsecond}")
+            logger.debug(f"  start_milliseconds calculation: {start_dt.microsecond} // 1000 = {start_milliseconds}")
+            logger.debug(f"  Formatted start: {start_time_formatted}")
+            
+            # For end time, calculate based on actual start time and duration
+            # This ensures proper alignment even with gaps
+            end_seconds = item_start_seconds + duration_seconds
+            end_day_offset = int(end_seconds // (24 * 60 * 60))
+            end_time_in_day = end_seconds % (24 * 60 * 60)
+            
+            # Convert end time to hours, minutes, seconds
+            end_hours = int(end_time_in_day // 3600)
+            end_minutes = int((end_time_in_day % 3600) // 60)
+            end_whole_seconds = int(end_time_in_day % 60)
+            end_milliseconds = int((end_time_in_day % 1) * 1000)
+            
+            # Create end datetime for formatting
+            end_dt_corrected = datetime(2000, 1, 1, end_hours, end_minutes, end_whole_seconds)
+            end_item_day = schedule_date + timedelta(days=end_day_offset)
+            end_item_day_name = end_item_day.strftime('%a').lower()
+            
+            # Format end time with actual milliseconds
+            end_time_formatted = f"{end_item_day_name} " + end_dt_corrected.strftime("%I:%M:%S").lstrip("0") + f".{end_milliseconds:03d} " + end_dt_corrected.strftime("%p").lower()
+            
+            # Debug the end time formatting
+            logger.debug(f"  Formatted end: {end_time_formatted} (end_milliseconds: {end_milliseconds}, from {end_time_in_day % 1:.6f}s)")
         else:
             # Daily format times
             # Special handling for first item - should start at exactly 12:00 am
@@ -1488,6 +1606,10 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         lines.append(f"{TAB}start={start_time_formatted}")
         lines.append(f"{TAB}end={end_time_formatted}")
         lines.append("}")
+        
+        # Update previous end time for overlap detection
+        if format_type == 'weekly':
+            previous_end_seconds = item_start_seconds + duration_seconds
     
     return "\n".join(lines)
 
