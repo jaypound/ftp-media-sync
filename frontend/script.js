@@ -3154,6 +3154,9 @@ const SCHEDULING_CONFIG = {
         long_form: { min: 1200, max: Infinity, label: 'Long Form (> 20min)' }
     },
     
+    // Category rotation order
+    CATEGORY_ROTATION: ['id', 'short_form', 'long_form', 'spots'],
+    
     // Timeslots with hours (24-hour format)
     TIMESLOTS: {
         overnight: { start: 0, end: 6, label: 'Overnight (12-6 AM)' },
@@ -3222,12 +3225,21 @@ function showScheduleConfig(configType) {
             titleText = 'Content Expiration Configuration';
             bodyContent = generateExpirationConfigHTML();
             break;
+        case 'rotation':
+            titleText = 'Category Rotation Configuration';
+            bodyContent = generateRotationConfigHTML();
+            break;
     }
     
     title.textContent = titleText;
     body.innerHTML = bodyContent;
     modal.style.display = 'block';
     body.setAttribute('data-config-type', configType);
+    
+    // Initialize drag and drop for rotation configuration
+    if (configType === 'rotation') {
+        initRotationDragDrop();
+    }
 }
 
 function generateDurationConfigHTML() {
@@ -3332,31 +3344,62 @@ function generateTimeslotConfigHTML() {
 }
 
 function generateReplayConfigHTML() {
+    // Initialize with defaults if not set
+    const replayDelays = scheduleConfig.REPLAY_DELAYS || {};
+    const additionalDelays = scheduleConfig.ADDITIONAL_DELAY_PER_AIRING || {
+        id: 1,
+        spots: 2,
+        short_form: 4,
+        long_form: 8
+    };
+    
     return `
         <div class="config-section">
             <h4>Configure Replay Delays</h4>
-            <p>Set minimum hours between replays for each content category:</p>
+            <p>Set initial delay and progressive delay increase for each content category:</p>
             
-            <div class="replay-config">
-                <div class="form-group">
-                    <label>ID Replays</label>
-                    <input type="number" id="id_replay_delay" value="6" min="0"> hours
-                </div>
-                
-                <div class="form-group">
-                    <label>Spots Replays</label>
-                    <input type="number" id="spots_replay_delay" value="12" min="0"> hours
-                </div>
-                
-                <div class="form-group">
-                    <label>Short Form Replays</label>
-                    <input type="number" id="short_form_replay_delay" value="24" min="0"> hours
-                </div>
-                
-                <div class="form-group">
-                    <label>Long Form Replays</label>
-                    <input type="number" id="long_form_replay_delay" value="48" min="0"> hours
-                </div>
+            <div class="replay-config-table">
+                <table class="config-table">
+                    <thead>
+                        <tr>
+                            <th>Duration Category</th>
+                            <th>Initial Delay (hours)</th>
+                            <th>Additional Delay Per Airing (hours)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>ID</strong></td>
+                            <td><input type="number" id="id_replay_delay" value="${replayDelays.id || 6}" min="0" step="1"></td>
+                            <td><input type="number" id="id_additional_delay" value="${additionalDelays.id}" min="0" step="0.5"></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Spots</strong></td>
+                            <td><input type="number" id="spots_replay_delay" value="${replayDelays.spots || 12}" min="0" step="1"></td>
+                            <td><input type="number" id="spots_additional_delay" value="${additionalDelays.spots}" min="0" step="0.5"></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Short Form</strong></td>
+                            <td><input type="number" id="short_form_replay_delay" value="${replayDelays.short_form || 24}" min="0" step="1"></td>
+                            <td><input type="number" id="short_form_additional_delay" value="${additionalDelays.short_form}" min="0" step="0.5"></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Long Form</strong></td>
+                            <td><input type="number" id="long_form_replay_delay" value="${replayDelays.long_form || 48}" min="0" step="1"></td>
+                            <td><input type="number" id="long_form_additional_delay" value="${additionalDelays.long_form}" min="0" step="0.5"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="replay-config-note">
+                <p><strong>How it works:</strong></p>
+                <ul>
+                    <li>Initial Delay: Minimum hours before first replay</li>
+                    <li>Additional Delay: Extra hours added for each subsequent airing</li>
+                    <li>Total delay = Initial Delay + (Total Airings × Additional Delay)</li>
+                </ul>
+                <p><em>Example: If a spot has 3 airings with 12h initial + 2h additional = 12 + (3 × 2) = 18 hours minimum delay</em></p>
             </div>
         </div>
     `;
@@ -3397,11 +3440,178 @@ function generateExpirationConfigHTML() {
     `;
 }
 
+function generateRotationConfigHTML() {
+    // Get current rotation order from config or use default
+    const currentOrder = scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form'];
+    
+    return `
+        <div class="config-section">
+            <h4>Configure Category Rotation Order</h4>
+            <p>Drag categories to reorder them or add duplicates to increase their frequency:</p>
+            
+            <div class="rotation-config">
+                <div class="rotation-list-container">
+                    <h5>Current Rotation Order</h5>
+                    <ul id="rotationList" class="rotation-list">
+                        ${currentOrder.map((cat, index) => `
+                            <li class="rotation-item" data-category="${cat}" data-index="${index}" draggable="true">
+                                <span class="drag-handle">☰</span>
+                                <span class="category-name">${getCategoryDisplayName(cat)}</span>
+                                <button class="remove-btn" onclick="removeRotationItem(${index})">×</button>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+                
+                <div class="add-category-section">
+                    <h5>Add Category to Rotation</h5>
+                    <select id="categoryToAdd">
+                        <option value="id">ID</option>
+                        <option value="spots">Spots</option>
+                        <option value="short_form">Short Form</option>
+                        <option value="long_form">Long Form</option>
+                    </select>
+                    <button onclick="addCategoryToRotation()">Add to Rotation</button>
+                </div>
+                
+                <div class="rotation-preview">
+                    <h5>Rotation Preview</h5>
+                    <p id="rotationPreview">${getRotationPreview(currentOrder)}</p>
+                </div>
+            </div>
+            
+            <div class="rotation-note">
+                <p><strong>Note:</strong> The scheduler will cycle through categories in this order when selecting content. Adding duplicates increases that category's selection frequency.</p>
+            </div>
+        </div>
+    `;
+}
+
 function closeConfigModal() {
     document.getElementById('configModal').style.display = 'none';
 }
 
-function saveScheduleConfig() {
+// Helper functions for rotation configuration
+function getCategoryDisplayName(category) {
+    const names = {
+        'id': 'ID',
+        'spots': 'Spots',
+        'short_form': 'Short Form',
+        'long_form': 'Long Form'
+    };
+    return names[category] || category;
+}
+
+function getRotationPreview(order) {
+    return order.map(cat => getCategoryDisplayName(cat)).join(' → ') + ' → (repeat)';
+}
+
+function removeRotationItem(index) {
+    const rotationList = document.getElementById('rotationList');
+    const items = Array.from(rotationList.children);
+    
+    if (items.length > 1) {  // Keep at least one item
+        items[index].remove();
+        updateRotationOrder();
+    } else {
+        alert('You must keep at least one category in the rotation.');
+    }
+}
+
+function addCategoryToRotation() {
+    const categorySelect = document.getElementById('categoryToAdd');
+    const category = categorySelect.value;
+    const rotationList = document.getElementById('rotationList');
+    const currentCount = rotationList.children.length;
+    
+    const newItem = document.createElement('li');
+    newItem.className = 'rotation-item';
+    newItem.setAttribute('data-category', category);
+    newItem.setAttribute('data-index', currentCount);
+    newItem.setAttribute('draggable', 'true');
+    newItem.innerHTML = `
+        <span class="drag-handle">☰</span>
+        <span class="category-name">${getCategoryDisplayName(category)}</span>
+        <button class="remove-btn" onclick="removeRotationItem(${currentCount})">×</button>
+    `;
+    
+    rotationList.appendChild(newItem);
+    updateRotationOrder();
+}
+
+function updateRotationOrder() {
+    const rotationList = document.getElementById('rotationList');
+    const items = Array.from(rotationList.children);
+    
+    // Update indices
+    items.forEach((item, index) => {
+        item.setAttribute('data-index', index);
+        const removeBtn = item.querySelector('.remove-btn');
+        if (removeBtn) {
+            removeBtn.setAttribute('onclick', `removeRotationItem(${index})`);
+        }
+    });
+    
+    // Update preview
+    const order = items.map(item => item.getAttribute('data-category'));
+    const preview = document.getElementById('rotationPreview');
+    if (preview) {
+        preview.textContent = getRotationPreview(order);
+    }
+}
+
+// Initialize drag and drop for rotation list
+function initRotationDragDrop() {
+    const rotationList = document.getElementById('rotationList');
+    if (!rotationList) return;
+    
+    let draggedItem = null;
+    
+    rotationList.addEventListener('dragstart', (e) => {
+        if (e.target.classList.contains('rotation-item')) {
+            draggedItem = e.target;
+            e.target.classList.add('dragging');
+        }
+    });
+    
+    rotationList.addEventListener('dragend', (e) => {
+        if (e.target.classList.contains('rotation-item')) {
+            e.target.classList.remove('dragging');
+        }
+    });
+    
+    rotationList.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const afterElement = getDragAfterElement(rotationList, e.clientY);
+        if (afterElement == null) {
+            rotationList.appendChild(draggedItem);
+        } else {
+            rotationList.insertBefore(draggedItem, afterElement);
+        }
+    });
+    
+    rotationList.addEventListener('drop', (e) => {
+        e.preventDefault();
+        updateRotationOrder();
+    });
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [...container.querySelectorAll('.rotation-item:not(.dragging)')];
+    
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+async function saveScheduleConfig() {
     const body = document.getElementById('configModalBody');
     const configType = body.getAttribute('data-config-type');
     
@@ -3418,10 +3628,39 @@ function saveScheduleConfig() {
         case 'expiration':
             saveExpirationConfig();
             break;
+        case 'rotation':
+            saveRotationConfig();
+            break;
+    }
+    
+    // Save to backend
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                scheduling: {
+                    replay_delays: scheduleConfig.REPLAY_DELAYS,
+                    additional_delay_per_airing: scheduleConfig.ADDITIONAL_DELAY_PER_AIRING,
+                    content_expiration: scheduleConfig.CONTENT_EXPIRATION,
+                    timeslots: scheduleConfig.TIMESLOTS,
+                    duration_categories: scheduleConfig.DURATION_CATEGORIES,
+                    rotation_order: scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form']
+                }
+            })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            log(`✅ ${configType} configuration saved successfully`);
+        } else {
+            log(`❌ Failed to save configuration: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        log(`❌ Error saving configuration: ${error.message}`, 'error');
     }
     
     closeConfigModal();
-    log(`✅ ${configType} configuration saved successfully`);
 }
 
 function saveDurationConfig() {
@@ -3491,6 +3730,13 @@ function saveReplayConfig() {
         short_form: parseInt(document.getElementById('short_form_replay_delay').value),
         long_form: parseInt(document.getElementById('long_form_replay_delay').value)
     };
+    
+    scheduleConfig.ADDITIONAL_DELAY_PER_AIRING = {
+        id: parseFloat(document.getElementById('id_additional_delay').value),
+        spots: parseFloat(document.getElementById('spots_additional_delay').value),
+        short_form: parseFloat(document.getElementById('short_form_additional_delay').value),
+        long_form: parseFloat(document.getElementById('long_form_additional_delay').value)
+    };
 }
 
 function saveExpirationConfig() {
@@ -3500,6 +3746,15 @@ function saveExpirationConfig() {
         short_form: parseInt(document.getElementById('short_form_expiration').value),
         long_form: parseInt(document.getElementById('long_form_expiration').value)
     };
+}
+
+function saveRotationConfig() {
+    const rotationList = document.getElementById('rotationList');
+    const items = Array.from(rotationList.children);
+    
+    scheduleConfig.ROTATION_ORDER = items.map(item => item.getAttribute('data-category'));
+    
+    log(`✅ Rotation order updated: ${scheduleConfig.ROTATION_ORDER.join(' → ')}`);
 }
 
 // Content Loading and Filtering Functions
@@ -3951,6 +4206,71 @@ async function createWeeklySchedule() {
     }
 }
 
+async function createMonthlySchedule() {
+    const scheduleDate = document.getElementById('scheduleDate').value;
+    
+    if (!scheduleDate) {
+        log('❌ Please select a start date for the monthly schedule', 'error');
+        return;
+    }
+    
+    // Parse the selected date to get year and month
+    const selectedDate = new Date(scheduleDate);
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth() + 1; // JavaScript months are 0-indexed
+    
+    // Calculate the first day of the month
+    const monthStartDate = new Date(year, selectedDate.getMonth(), 1).toISOString().split('T')[0];
+    const monthName = selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    
+    log(`📅 Creating monthly schedule for ${monthName}...`);
+    log(`🔄 Creating schedule for entire month...`);
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/create-monthly-schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                year: year,
+                month: month
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`);
+            log(`📊 Monthly Summary: ${result.total_items} items scheduled`);
+            log(`⏱️ Total Duration: ${result.total_duration_hours.toFixed(1)} hours`);
+            log(`📆 Days Covered: ${result.days_count} days`);
+            log(`🆔 Schedule ID: ${result.schedule_id}`);
+            
+            // Show success notification
+            showNotification(
+                'Monthly Schedule Created',
+                `Successfully created monthly schedule for ${monthName} with ${result.total_items} items`,
+                'success'
+            );
+        } else {
+            log(`❌ Failed to create monthly schedule: ${result.message}`, 'error');
+            
+            // Show error notification
+            showNotification(
+                'Monthly Schedule Creation Failed',
+                result.message,
+                'error'
+            );
+            
+            if (result.error_count) {
+                log(`📊 Failed after ${result.error_count} consecutive errors`, 'error');
+            }
+        }
+        
+    } catch (error) {
+        log(`❌ Error creating monthly schedule: ${error.message}`, 'error');
+    }
+}
+
 async function previewSchedule() {
     const scheduleDate = document.getElementById('scheduleDate').value;
     const timeslot = document.getElementById('scheduleTimeslot').value;
@@ -4218,6 +4538,7 @@ async function viewScheduleDetails(scheduleId, date) {
         const result = await response.json();
         
         if (result.success && result.schedule) {
+            currentSchedule = result.schedule;  // Store the schedule globally
             displayScheduleDetails(result.schedule);
             log(`✅ Loaded schedule details for ${date}`);
         } else {
@@ -4339,18 +4660,52 @@ function exportSchedule() {
     const savedServer = localStorage.getItem('exportServer') || 'target';
     const savedPath = localStorage.getItem('exportPath') || '/mnt/md127/Schedules/Contributors/Jay';
     
+    // Determine if this is a weekly or monthly schedule based on the schedule name
+    let isWeeklySchedule = false;
+    let isMonthlySchedule = false;
+    if (currentSchedule && currentSchedule.schedule_name) {
+        isWeeklySchedule = currentSchedule.schedule_name.toLowerCase().includes('weekly');
+        isMonthlySchedule = currentSchedule.schedule_name.toLowerCase().includes('monthly');
+    }
+    
     document.getElementById('modalExportServer').value = savedServer;
     document.getElementById('modalExportPath').value = savedPath;
     
-    // Generate default filename based on date
+    // Generate default filename based on date and schedule type
     // Parse date components to avoid timezone issues
     const [year, month, day] = viewDate.split('-').map(num => parseInt(num));
-    const scheduleDate = new Date(year, month - 1, day); // month is 0-indexed
-    const dayName = scheduleDate.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-    const dateStr = viewDate.replace(/-/g, '');
-    const defaultFilename = `${dayName}_${dateStr}.sch`;
+    
+    // Format as YYMMDD
+    const yy = year.toString().slice(-2);
+    const mm = month.toString().padStart(2, '0');
+    const dd = day.toString().padStart(2, '0');
+    const dateStr = `${yy}${mm}${dd}`;
+    
+    // Determine schedule type
+    let scheduleType = 'daily';
+    if (isMonthlySchedule) {
+        scheduleType = 'monthly';
+    } else if (isWeeklySchedule) {
+        scheduleType = 'weekly';
+    }
+    
+    const defaultFilename = `${dateStr}_${scheduleType}.sch`;
     
     document.getElementById('modalExportFilename').value = defaultFilename;
+    
+    // Set the export format based on schedule type
+    const exportFormatSelect = document.getElementById('modalExportFormat');
+    if (exportFormatSelect) {
+        if (isMonthlySchedule) {
+            exportFormatSelect.value = 'castus_monthly';
+            log('📋 Detected monthly schedule - setting export format to Castus Monthly');
+        } else if (isWeeklySchedule) {
+            exportFormatSelect.value = 'castus_weekly';
+            log('📋 Detected weekly schedule - setting export format to Castus Weekly');
+        } else {
+            exportFormatSelect.value = 'castus';
+        }
+    }
 }
 
 function closeExportModal() {
@@ -4502,49 +4857,80 @@ function displayScheduleDetails(schedule) {
                 <span class="col-title">Title</span>
                 <span class="col-category">Category</span>
                 <span class="col-duration">Duration</span>
-                <span class="col-last-scheduled">Last Scheduled</span>
+                <span class="col-last-scheduled">Encoded Date</span>
                 <span class="col-actions">Actions</span>
             </div>
     `;
     
     if (schedule.items && schedule.items.length > 0) {
-        // Check if this is a weekly schedule by looking at the schedule name
+        // Check if this is a weekly or monthly schedule by looking at the schedule name
         const isWeeklySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('weekly');
+        const isMonthlySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('monthly');
         let currentDay = -1;
-        let totalDuration = 0; // Track cumulative duration to determine which day we're on
+        let previousStartHour = -1;
         
         schedule.items.forEach((item, index) => {
             const startTime = item.scheduled_start_time || '00:00:00';
             const durationSeconds = item.scheduled_duration_seconds || 0;
             
-            // For weekly schedules, calculate which day this item belongs to
-            if (isWeeklySchedule) {
-                const itemStartSeconds = parseTimeToSeconds(startTime);
-                const dayNumber = Math.floor(totalDuration / (24 * 60 * 60));
+            // Parse the start time to get the hour
+            const timeParts = startTime.split(':');
+            const startHour = parseInt(timeParts[0]);
+            
+            // For weekly or monthly schedules, detect day changes
+            if (isWeeklySchedule || isMonthlySchedule) {
+                let dayNumber = 0;
+                
+                // Detect day change: when hour goes from high (e.g., 23) to low (e.g., 0, 1, 2)
+                // or this is the first item
+                if (index === 0) {
+                    dayNumber = 0;
+                } else if (previousStartHour > 20 && startHour < 4) {
+                    // Crossed midnight (e.g., from 23:xx to 00:xx)
+                    currentDay++;
+                    dayNumber = currentDay;
+                } else if (index > 0 && currentDay === -1) {
+                    // First item might not start at midnight
+                    currentDay = 0;
+                    dayNumber = 0;
+                }
                 
                 // Add day header if we've moved to a new day
-                if (dayNumber !== currentDay && dayNumber < 7) {
-                    currentDay = dayNumber;
+                if ((index === 0) || (previousStartHour > 20 && startHour < 4)) {
+                    if (index === 0) {
+                        currentDay = 0;
+                    }
+                    
                     // Parse air_date properly to avoid timezone issues
                     const airDateStr = schedule.air_date.split('T')[0];
                     const [year, month, day] = airDateStr.split('-').map(num => parseInt(num));
-                    const scheduleDate = new Date(year, month - 1, day);
                     
-                    // Calculate the date for this day of the week
-                    const dayDate = new Date(year, month - 1, day + dayNumber);
+                    // Calculate the date for this day
+                    const dayDate = new Date(year, month - 1, day + currentDay);
                     
-                    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                    const dayName = dayNames[dayDate.getDay()];
-                    const formattedDate = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                    
-                    html += `
-                        <div class="schedule-day-header">
-                            <h5>${dayName} - ${formattedDate}</h5>
-                        </div>
-                    `;
+                    if (isWeeklySchedule) {
+                        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        const dayName = dayNames[dayDate.getDay()];
+                        const formattedDate = dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        
+                        html += `
+                            <div class="schedule-day-header">
+                                <h5>${dayName} - ${formattedDate}</h5>
+                            </div>
+                        `;
+                    } else if (isMonthlySchedule) {
+                        const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'long' });
+                        const formattedDate = dayDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                        
+                        html += `
+                            <div class="schedule-day-header">
+                                <h5>${dayName}, ${formattedDate}</h5>
+                            </div>
+                        `;
+                    }
                 }
                 
-                totalDuration += durationSeconds;
+                previousStartHour = startHour;
             }
             
             // Calculate end time
@@ -4560,16 +4946,14 @@ function displayScheduleDetails(schedule) {
             const title = item.content_title || item.file_name || 'Untitled';
             const categoryLabel = item.duration_category ? item.duration_category.replace('_', ' ').toUpperCase() : '';
             
-            // Format last scheduled date
-            let lastScheduledDisplay = 'Never';
-            if (item.last_scheduled_date) {
-                const lastScheduledDate = new Date(item.last_scheduled_date);
-                const month = (lastScheduledDate.getMonth() + 1).toString().padStart(2, '0');
-                const day = lastScheduledDate.getDate().toString().padStart(2, '0');
-                const year = lastScheduledDate.getFullYear().toString().slice(-2);
-                const hours = lastScheduledDate.getHours().toString().padStart(2, '0');
-                const minutes = lastScheduledDate.getMinutes().toString().padStart(2, '0');
-                lastScheduledDisplay = `${month}/${day}/${year} ${hours}:${minutes}`;
+            // Format encoded date
+            let encodedDateDisplay = 'Unknown';
+            if (item.encoded_date) {
+                const encodedDate = new Date(item.encoded_date);
+                const month = (encodedDate.getMonth() + 1).toString().padStart(2, '0');
+                const day = encodedDate.getDate().toString().padStart(2, '0');
+                const year = encodedDate.getFullYear().toString().slice(-2);
+                encodedDateDisplay = `${month}/${day}/${year}`;
             }
             
             // Check if item is available for scheduling (default to true if not set)
@@ -4586,7 +4970,7 @@ function displayScheduleDetails(schedule) {
                     <span class="col-title" title="${item.file_name}">${title}</span>
                     <span class="col-category">${categoryLabel}</span>
                     <span class="col-duration">${durationTimecode}</span>
-                    <span class="col-last-scheduled">${lastScheduledDisplay}</span>
+                    <span class="col-last-scheduled">${encodedDateDisplay}</span>
                     <span class="col-actions">
                         <button class="button secondary small" onclick="viewScheduleItemDetails(${schedule.id}, ${item.id || item.asset_id}, ${index})" title="View details">
                             <i class="fas fa-info"></i>
@@ -4742,10 +5126,16 @@ async function deleteScheduleItem(scheduleId, itemId, index) {
 
 // View schedule item details
 function viewScheduleItemDetails(scheduleId, itemIdOrAssetId, index) {
+    console.log('viewScheduleItemDetails called:', {scheduleId, itemIdOrAssetId, index});
+    console.log('currentSchedule:', currentSchedule);
+    console.log('currentSchedule.items:', currentSchedule?.items);
+    
     if (!currentSchedule || !currentSchedule.items || !currentSchedule.items[index]) {
         showNotification('Error', 'Schedule item not found', 'error');
         console.error('Schedule item not found at index:', index);
+        console.log('Current schedule:', currentSchedule);
         console.log('Current schedule items:', currentSchedule?.items?.length || 0);
+        console.log('Requested index:', index);
         return;
     }
     
@@ -5966,7 +6356,53 @@ function addToTemplateFromDetails(contentId) {
 // Initialize scheduling when page loads
 document.addEventListener('DOMContentLoaded', function() {
     initializeSchedulingDates();
+    loadSchedulingConfig();
 });
+
+// Load scheduling configuration from backend
+async function loadSchedulingConfig() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/config');
+        const config = await response.json();
+        
+        if (config.scheduling) {
+            // Load replay delays
+            if (config.scheduling.replay_delays) {
+                scheduleConfig.REPLAY_DELAYS = config.scheduling.replay_delays;
+                // Update UI if config modal is open
+                if (document.getElementById('id_replay_delay')) {
+                    document.getElementById('id_replay_delay').value = config.scheduling.replay_delays.id || 6;
+                    document.getElementById('spots_replay_delay').value = config.scheduling.replay_delays.spots || 12;
+                    document.getElementById('short_form_replay_delay').value = config.scheduling.replay_delays.short_form || 24;
+                    document.getElementById('long_form_replay_delay').value = config.scheduling.replay_delays.long_form || 48;
+                }
+            }
+            
+            // Load additional delay per airing
+            if (config.scheduling.additional_delay_per_airing) {
+                scheduleConfig.ADDITIONAL_DELAY_PER_AIRING = config.scheduling.additional_delay_per_airing;
+            }
+            
+            // Load rotation order
+            if (config.scheduling.rotation_order) {
+                scheduleConfig.ROTATION_ORDER = config.scheduling.rotation_order;
+            }
+            
+            // Load other scheduling settings
+            if (config.scheduling.content_expiration) {
+                scheduleConfig.CONTENT_EXPIRATION = config.scheduling.content_expiration;
+            }
+            if (config.scheduling.timeslots) {
+                scheduleConfig.TIMESLOTS = config.scheduling.timeslots;
+            }
+            if (config.scheduling.duration_categories) {
+                scheduleConfig.DURATION_CATEGORIES = config.scheduling.duration_categories;
+            }
+        }
+    } catch (error) {
+        log(`Failed to load scheduling configuration: ${error.message}`, 'error');
+    }
+}
 
 
 // Template Editor Functions

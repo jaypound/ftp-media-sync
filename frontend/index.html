@@ -516,6 +516,9 @@
                         <button class="button secondary" onclick="showScheduleConfig('expiration')">
                             <i class="fas fa-hourglass-end"></i> Content Expiration
                         </button>
+                        <button class="button secondary" onclick="showScheduleConfig('rotation')">
+                            <i class="fas fa-sync-alt"></i> Category Rotation
+                        </button>
                         </div>
                     </div>
                 </div>
@@ -536,6 +539,9 @@
                             <button class="button success" onclick="createWeeklySchedule()">
                                 <i class="fas fa-calendar-week"></i> Create Weekly Schedule
                             </button>
+                            <button class="button success" onclick="createMonthlySchedule()">
+                                <i class="fas fa-calendar-alt"></i> Create Monthly Schedule
+                            </button>
                         </div>
                         </div>
                     </div>
@@ -551,9 +557,6 @@
                             <input type="date" id="viewScheduleDate" value="">
                         </div>
                         <div class="schedule-buttons">
-                            <button class="button primary" onclick="viewDailySchedule()">
-                                <i class="fas fa-calendar-day"></i> View Schedule
-                            </button>
                             <button class="button secondary" onclick="listAllSchedules()">
                                 <i class="fas fa-list"></i> List All Schedules
                             </button>
@@ -661,6 +664,7 @@
                             <select id="modalExportFormat" class="form-control">
                                 <option value="castus">Castus Daily Schedule</option>
                                 <option value="castus_weekly">Castus Weekly Schedule</option>
+                                <option value="castus_monthly">Castus Monthly Schedule</option>
                             </select>
                         </div>
                     </div>
