@@ -91,6 +91,10 @@ def save_config():
         
         if 'scheduling' in data:
             config_manager.update_scheduling_settings(data['scheduling'])
+            
+            # Update scheduler rotation order if provided
+            if 'rotation_order' in data['scheduling']:
+                scheduler_postgres.update_rotation_order(data['scheduling']['rotation_order'])
         
         return jsonify({'success': True, 'message': 'Configuration saved'})
     except Exception as e:
@@ -750,10 +754,10 @@ def delete_all_schedules():
             cursor.execute("DELETE FROM schedules")
             schedules_deleted = cursor.rowcount
             
-            # Reset all scheduling metadata
+            # Reset all scheduling metadata to use encoded_date as last_scheduled_date
             cursor.execute("""
-                UPDATE scheduling_metadata 
-                SET last_scheduled_date = NULL, 
+                UPDATE scheduling_metadata sm
+                SET last_scheduled_date = i.encoded_date, 
                     total_airings = 0,
                     last_scheduled_in_overnight = NULL,
                     last_scheduled_in_early_morning = NULL,
@@ -767,6 +771,8 @@ def delete_all_schedules():
                     replay_count_for_afternoon = 0,
                     replay_count_for_prime_time = 0,
                     replay_count_for_evening = 0
+                FROM instances i
+                WHERE sm.asset_id = i.asset_id AND i.is_primary = true
             """)
             metadata_reset = cursor.rowcount
             
@@ -1252,6 +1258,38 @@ def create_weekly_schedule():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+
+@app.route('/api/create-monthly-schedule', methods=['POST'])
+def create_monthly_schedule():
+    """Create a monthly schedule"""
+    logger.info("=== CREATE MONTHLY SCHEDULE REQUEST ===")
+    try:
+        data = request.json
+        year = data.get('year')
+        month = data.get('month')
+        
+        logger.info(f"Creating monthly schedule for: {year}-{month:02d}")
+        
+        if not year or not month:
+            return jsonify({
+                'success': False,
+                'message': 'Year and month are required'
+            })
+        
+        # Get max errors from config
+        scheduling_config = config_manager.get_scheduling_settings()
+        max_errors = scheduling_config.get('max_consecutive_errors', 100)
+        
+        # Create monthly schedule using PostgreSQL scheduler
+        result = scheduler_postgres.create_monthly_schedule(year, month, max_errors)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        error_msg = f"Create monthly schedule error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
 @app.route('/api/export-schedule', methods=['POST'])
 def export_schedule():
     """Export a schedule to FTP server in Castus format"""
@@ -1294,9 +1332,14 @@ def export_schedule():
             logger.debug(f"First item keys: {list(items[0].keys())}")
         
         # Generate Castus format schedule
-        if format_type == 'castus' or format_type == 'castus_weekly':
-            # Determine if it's a daily or weekly schedule
-            export_format = 'weekly' if format_type == 'castus_weekly' else 'daily'
+        if format_type == 'castus' or format_type == 'castus_weekly' or format_type == 'castus_monthly':
+            # Determine export format
+            if format_type == 'castus_weekly':
+                export_format = 'weekly'
+            elif format_type == 'castus_monthly':
+                export_format = 'monthly'
+            else:
+                export_format = 'daily'
             schedule_content = generate_castus_schedule(schedule, items, date, export_format)
             
             # Use provided filename or generate default
@@ -1363,7 +1406,21 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
     day_of_week = schedule_date.weekday()  # 0=Monday, 6=Sunday
     day_name = schedule_date.strftime('%a').lower()  # mon, tue, wed, etc.
     
-    if format_type == 'weekly':
+    if format_type == 'monthly':
+        # Monthly format header
+        lines.append("*monthly")
+        lines.append("defaults, day of the month{")
+        lines.append("}")
+        lines.append("year = ")  # Empty as per sample
+        lines.append(f"month = {schedule_date.month}")
+        lines.append(f"day = {schedule_date.day}")
+        lines.append("time slot length = 30")
+        lines.append("scrolltime = 12:00 am")
+        lines.append("filter script = ")
+        lines.append("global default=")
+        lines.append("text encoding = UTF-8")
+        lines.append("schedule format version = 5.0.0.4 2021/01/15")
+    elif format_type == 'weekly':
         # Weekly format header
         lines.append("defaults, day of the week{")
         lines.append("}")
@@ -1435,7 +1492,22 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         whole_seconds = int(duration_seconds)
         milliseconds = int((duration_seconds - whole_seconds) * 1000)
         
-        if format_type == 'weekly':
+        if format_type == 'monthly':
+            # Monthly format times use "day N" prefix
+            day_number = schedule_date.day
+            
+            # Format times with milliseconds
+            start_time_formatted = f"day {day_number} " + start_dt.strftime("%I:%M:%S").lstrip("0")
+            if start_dt.microsecond > 0:
+                start_time_formatted += f".{start_dt.microsecond // 1000:03d}"
+            start_time_formatted += " " + start_dt.strftime("%p").lower()
+            
+            end_time_formatted = f"day {day_number} " + end_dt.strftime("%I:%M:%S").lstrip("0") 
+            if milliseconds > 0:
+                end_time_formatted += f".{milliseconds:03d}"
+            end_time_formatted += " " + end_dt.strftime("%p").lower()
+            
+        elif format_type == 'weekly':
             # Weekly format times include day abbreviation
             # For weekly schedules, we need to track cumulative time to determine day boundaries
             # but use exact start times from previous items to avoid precision issues
