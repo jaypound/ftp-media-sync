@@ -542,9 +542,6 @@
                             <button class="button success" onclick="createMonthlySchedule()">
                                 <i class="fas fa-calendar-alt"></i> Create Monthly Schedule
                             </button>
-                            <button class="button primary" onclick="console.log('Button clicked!'); generateSimplePlaylist(event)">
-                                <i class="fas fa-list"></i> Create Simple Playlist
-                            </button>
                         </div>
                         </div>
                     </div>
@@ -565,9 +562,6 @@
                             </button>
                             <button class="button success" onclick="showLoadScheduleFromFTPModal()">
                                 <i class="fas fa-file-import"></i> Load from FTP
-                            </button>
-                            <button class="button primary" onclick="listAllPlaylists()">
-                                <i class="fas fa-music"></i> List All Playlists
                             </button>
                             <button class="button warning" onclick="deleteSchedule()">
                                 <i class="fas fa-trash"></i> Delete Schedule
@@ -913,139 +907,7 @@
         </div>
     </div>
 
-    <!-- Simple Playlist Export Modal -->
-    <div id="simplePlaylistModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-list"></i> Create Simple Playlist</h3>
-                <button class="modal-close" onclick="closeSimplePlaylistModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="playlistSourceServer">Source Server</label>
-                    <select id="playlistSourceServer" class="form-control">
-                        <option value="source">Source Server</option>
-                        <option value="target">Target Server</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="playlistSourcePath">Source Path</label>
-                    <input type="text" id="playlistSourcePath" class="form-control" 
-                           value="/mnt/main/ATL26 On-Air Content/FILL/GLOBAL FILL" 
-                           placeholder="Enter source path for files">
-                </div>
-                <div class="form-group">
-                    <label for="playlistExportPath">Export Path</label>
-                    <input type="text" id="playlistExportPath" class="form-control" 
-                           value="/mnt/main/Playlists" 
-                           placeholder="Enter export path">
-                </div>
-                <div class="form-group">
-                    <label for="playlistFilename">Filename</label>
-                    <input type="text" id="playlistFilename" class="form-control" 
-                           value="simple playlist" 
-                           placeholder="Enter playlist filename">
-                </div>
-                <div class="form-group">
-                    <label for="playlistItemCount">Number of Items</label>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <select id="playlistItemCount" class="form-control" style="flex: 1;">
-                            <option value="all">All Items</option>
-                            <option value="10">10 Items</option>
-                            <option value="25">25 Items</option>
-                            <option value="50">50 Items</option>
-                            <option value="100">100 Items</option>
-                            <option value="custom">Custom</option>
-                        </select>
-                        <input type="number" id="playlistCustomCount" class="form-control" 
-                               style="flex: 1; display: none;" min="1" placeholder="Enter count">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="playlistShuffle"> 
-                        Shuffle items randomly
-                    </label>
-                </div>
-                <div id="playlistPreview" style="margin-top: 20px; display: none;">
-                    <h4>Preview</h4>
-                    <div id="playlistPreviewContent" style="background: #f5f5f5; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto;">
-                        <!-- Preview content will be shown here -->
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="button secondary" onclick="previewPlaylistFiles()">
-                    <i class="fas fa-eye"></i> Preview Files
-                </button>
-                <button class="button primary" onclick="confirmCreatePlaylist()">
-                    <i class="fas fa-check"></i> Create Playlist
-                </button>
-                <button class="button secondary" onclick="closeSimplePlaylistModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
 
-    <!-- Playlist Export Modal -->
-    <div id="playlistExportModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-download"></i> Export Playlist</h3>
-                <button class="modal-close" onclick="closePlaylistExportModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="exportPlaylistServer">Export to Server</label>
-                    <select id="exportPlaylistServer" class="form-control">
-                        <option value="source">Source Server</option>
-                        <option value="target" selected>Target Server</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="exportPlaylistPath">Export Path</label>
-                    <input type="text" id="exportPlaylistPath" class="form-control" 
-                           value="/mnt/main/Playlists" 
-                           placeholder="Enter export path">
-                </div>
-                <div class="form-group">
-                    <label for="exportPlaylistFilename">Filename</label>
-                    <input type="text" id="exportPlaylistFilename" class="form-control" 
-                           value="" 
-                           placeholder="Enter filename (will be auto-filled)">
-                </div>
-                <div class="form-group">
-                    <label for="exportPlaylistItemCount">Number of Items</label>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <select id="exportPlaylistItemCount" class="form-control" style="flex: 1;">
-                            <option value="all">All Items</option>
-                            <option value="10">10 Items</option>
-                            <option value="25">25 Items</option>
-                            <option value="50">50 Items</option>
-                            <option value="100">100 Items</option>
-                            <option value="custom">Custom</option>
-                        </select>
-                        <input type="number" id="exportPlaylistCustomCount" class="form-control" 
-                               style="flex: 1; display: none;" min="1" placeholder="Enter count">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="exportPlaylistShuffle"> 
-                        Shuffle items randomly
-                    </label>
-                </div>
-                <div id="exportPlaylistInfo" style="margin-top: 20px; padding: 10px; background: #f0f8ff; border-radius: 4px;">
-                    <!-- Playlist info will be shown here -->
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="button primary" onclick="confirmExportPlaylist()">
-                    <i class="fas fa-download"></i> Export Playlist
-                </button>
-                <button class="button secondary" onclick="closePlaylistExportModal()">Cancel</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Notification Container -->
     <div id="notificationContainer" class="notification-container"></div>
