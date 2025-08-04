@@ -245,6 +245,7 @@ class FileAnalyzer:
         try:
             file_name = file_info.get('name', '')
             file_path = file_info.get('path', file_name)
+            folder = file_info.get('folder', 'on-air')  # Get folder type
             
             # Create temporary file path with safe filename
             # Keep original extension but create shorter base name to avoid path length issues
@@ -268,16 +269,43 @@ class FileAnalyzer:
             logger.info(f"File path characters: {[ord(c) for c in file_path if ord(c) > 127]}")
             logger.info(f"File name length: {len(file_name)} characters")
             
+            # Check if we need a different FTP connection for Recordings folder
+            actual_ftp_manager = ftp_manager
+            if folder == 'recordings':
+                logger.info(f"File is from Recordings folder, creating specialized FTP connection")
+                # Create a new FTP manager with Recordings path
+                from ftp_manager import FTPManager
+                from config_manager import ConfigManager
+                
+                config_mgr = ConfigManager()
+                server_config = config_mgr.get_all_config()['servers']['source'].copy()
+                server_config['path'] = '/mnt/main/Recordings'
+                
+                recordings_ftp = FTPManager(server_config)
+                if recordings_ftp.connect():
+                    actual_ftp_manager = recordings_ftp
+                    logger.info("Connected to FTP with Recordings path")
+                else:
+                    logger.error("Failed to connect to FTP with Recordings path")
+                    return None
+            
             # Download file using FTP manager with retry logic
             max_retries = 3
             for attempt in range(max_retries):
                 logger.info(f"Download attempt {attempt + 1}/{max_retries} for {file_name}")
-                success = ftp_manager.download_file(file_path, temp_file_path)
+                success = actual_ftp_manager.download_file(file_path, temp_file_path)
                 
                 if success and os.path.exists(temp_file_path):
                     file_size = os.path.getsize(temp_file_path)
                     if file_size > 0:
                         logger.info(f"Successfully downloaded {file_name} ({file_size} bytes)")
+                        # Clean up recordings FTP connection if we created one
+                        if folder == 'recordings' and actual_ftp_manager != ftp_manager:
+                            try:
+                                actual_ftp_manager.disconnect()
+                                logger.info("Disconnected Recordings FTP connection")
+                            except:
+                                pass
                         return temp_file_path
                     else:
                         logger.warning(f"Downloaded file is empty: {file_name}")
@@ -293,10 +321,25 @@ class FileAnalyzer:
                     logger.error(f"Failed to download {file_name} after {max_retries} attempts")
                     logger.error(f"FTP success: {success}, File exists: {os.path.exists(temp_file_path)}")
             
+            # Clean up recordings FTP connection if we created one
+            if folder == 'recordings' and actual_ftp_manager != ftp_manager:
+                try:
+                    actual_ftp_manager.disconnect()
+                    logger.info("Disconnected Recordings FTP connection")
+                except:
+                    pass
+            
             return None
                 
         except Exception as e:
             logger.error(f"Error downloading file: {str(e)}")
+            # Clean up recordings FTP connection if we created one
+            if 'folder' in locals() and folder == 'recordings' and 'actual_ftp_manager' in locals() and actual_ftp_manager != ftp_manager:
+                try:
+                    actual_ftp_manager.disconnect()
+                    logger.info("Disconnected Recordings FTP connection after error")
+                except:
+                    pass
             return None
     
     def analyze_batch(self, file_list: List[Dict[str, Any]], ftp_manager, ai_config: Dict[str, Any] = None, force_reanalysis: bool = False) -> List[Dict[str, Any]]:

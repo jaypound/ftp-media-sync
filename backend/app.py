@@ -215,7 +215,7 @@ def sync_files():
     try:
         data = request.json
         sync_queue = data.get('sync_queue', [])
-        dry_run = data.get('dry_run', True)
+        dry_run = data.get('dry_run', False)
         keep_temp_files = data.get('keep_temp_files', False)
         
         logger.info(f"Sync queue length: {len(sync_queue)}, Dry run: {dry_run}, Keep temp files: {keep_temp_files}")
@@ -233,13 +233,17 @@ def sync_files():
         for item in sync_queue:
             file_info = item['file']
             action = item['type']
+            direction = item.get('direction', 'source_to_target')  # Default to source->target
+            folder = file_info.get('folder', 'on-air')  # Get folder type
             filename = file_info['name']
             relative_path = file_info.get('path', filename)
             
             logger.info(f"Processing file: {filename}")
             logger.info(f"  Relative path: {relative_path}")
             logger.info(f"  Full path: {file_info.get('full_path', 'Not set')}")
+            logger.info(f"  Folder: {folder}")
             logger.info(f"  Action: {action}")
+            logger.info(f"  Direction: {direction}")
             logger.info(f"  Dry run: {dry_run}")
             
             try:
@@ -248,7 +252,9 @@ def sync_files():
                         'file': filename,
                         'action': action,
                         'status': 'would_sync',
-                        'size': file_info['size']
+                        'size': file_info['size'],
+                        'direction': direction,
+                        'id': item.get('id', f"{filename}_{file_info['size']}")
                     })
                     logger.info(f"  Would sync {filename}")
                 else:
@@ -256,12 +262,55 @@ def sync_files():
                     
                     # Perform actual sync
                     try:
+                        # For recordings folder, we need to use different base paths
+                        if folder == 'recordings':
+                            logger.info(f"  Using Recordings folder paths")
+                            # Create temporary FTP managers with Recordings paths
+                            from ftp_manager import FTPManager
+                            
+                            source_recordings_config = config_manager.get_all_config()['servers']['source'].copy()
+                            source_recordings_config['path'] = '/mnt/main/Recordings'
+                            
+                            target_recordings_config = config_manager.get_all_config()['servers']['target'].copy()
+                            target_recordings_config['path'] = '/mnt/main/Recordings'
+                            
+                            source_recordings_ftp = FTPManager(source_recordings_config)
+                            target_recordings_ftp = FTPManager(target_recordings_config)
+                            
+                            if not source_recordings_ftp.connect() or not target_recordings_ftp.connect():
+                                raise Exception("Failed to connect with Recordings paths")
+                            
+                            # Use recordings-specific FTP connections
+                            if direction == 'target_to_source':
+                                src_ftp = target_recordings_ftp
+                                dst_ftp = source_recordings_ftp
+                                logger.info(f"  Direction: target -> source (Recordings)")
+                            else:
+                                src_ftp = source_recordings_ftp
+                                dst_ftp = target_recordings_ftp
+                                logger.info(f"  Direction: source -> target (Recordings)")
+                        else:
+                            # Use regular FTP connections for On-Air Content
+                            if direction == 'target_to_source':
+                                src_ftp = target_ftp
+                                dst_ftp = source_ftp
+                                logger.info(f"  Direction: target -> source")
+                            else:
+                                src_ftp = source_ftp
+                                dst_ftp = target_ftp
+                                logger.info(f"  Direction: source -> target")
+                        
                         if action == 'copy':
                             logger.info(f"  Copying file: {filename}")
-                            success = source_ftp.copy_file_to(file_info, target_ftp, keep_temp=keep_temp_files)
+                            success = src_ftp.copy_file_to(file_info, dst_ftp, keep_temp=keep_temp_files)
                         else:  # update
                             logger.info(f"  Updating file: {filename}")
-                            success = source_ftp.update_file_to(file_info, target_ftp, keep_temp=keep_temp_files)
+                            success = src_ftp.update_file_to(file_info, dst_ftp, keep_temp=keep_temp_files)
+                        
+                        # Disconnect recordings FTP if used
+                        if folder == 'recordings':
+                            source_recordings_ftp.disconnect()
+                            target_recordings_ftp.disconnect()
                         
                         logger.info(f"  Sync result for {filename}: {success}")
                         
@@ -270,7 +319,9 @@ def sync_files():
                                 'file': filename,
                                 'action': action,
                                 'status': 'success',
-                                'size': file_info['size']
+                                'size': file_info['size'],
+                                'direction': direction,
+                                'id': item.get('id', f"{filename}_{file_info['size']}")
                             })
                             logger.info(f"  ✅ Successfully synced {filename}")
                         else:
@@ -279,7 +330,9 @@ def sync_files():
                                 'action': action,
                                 'status': 'failed',
                                 'error': 'File transfer failed - check FTP connection and permissions',
-                                'details': f'Failed to {action} {relative_path}'
+                                'details': f'Failed to {action} {relative_path}',
+                                'direction': direction,
+                                'id': item.get('id', f"{filename}_{file_info['size']}")
                             })
                             logger.error(f"  ❌ Failed to sync {filename}")
                             
@@ -292,7 +345,9 @@ def sync_files():
                             'action': action,
                             'status': 'failed',
                             'error': error_msg,
-                            'details': f'Exception during {action} of {relative_path}'
+                            'details': f'Exception during {action} of {relative_path}',
+                            'direction': direction,
+                            'id': item.get('id', f"{filename}_{file_info['size']}")
                         })
                     
             except Exception as item_error:
@@ -304,7 +359,9 @@ def sync_files():
                     'action': action,
                     'status': 'error',
                     'error': error_msg,
-                    'details': f'Error processing sync item for {relative_path}'
+                    'details': f'Error processing sync item for {relative_path}',
+                    'direction': direction,
+                    'id': item.get('id', f"{filename}_{file_info['size']}")
                 })
         
         logger.info(f"Sync completed. Results: {len(results)} items processed")
@@ -359,7 +416,7 @@ def delete_files():
         data = request.json
         files = data.get('files', [])
         server_type = data.get('server_type', 'target')
-        dry_run = data.get('dry_run', True)
+        dry_run = data.get('dry_run', False)
         
         logger.info(f"Deleting {len(files)} files from {server_type} server (dry_run: {dry_run})")
         

@@ -96,10 +96,54 @@
                 </div>
             </div>
 
+            <!-- Scanning Configuration Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-folder-open"></i> Scanning Configuration</h3>
+                </div>
+                <div class="scanning-config">
+                    <p class="info-text">Select which folders to include when scanning:</p>
+                    
+                    <div class="folder-selection">
+                        <h4>Available Folders:</h4>
+                        <div class="folder-checkboxes">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="scanOnAirContent" checked>
+                                <label for="scanOnAirContent">
+                                    <strong>On-Air Content</strong>
+                                    <span class="folder-path">/mnt/main/ATL26 On-Air Content</span>
+                                    <span class="sync-mode">→ One-way sync</span>
+                                </label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="scanRecordings" checked>
+                                <label for="scanRecordings">
+                                    <strong>Recordings</strong>
+                                    <span class="folder-path">/mnt/main/Recordings</span>
+                                    <span class="sync-mode">↔ Bidirectional sync</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="scan-actions">
+                        <button class="button primary" onclick="scanSelectedFolders()">
+                            <i class="fas fa-search"></i> Scan Selected Folders
+                        </button>
+                        <button class="button secondary" onclick="selectAllFolders()">
+                            <i class="fas fa-check-square"></i> Select All
+                        </button>
+                        <button class="button secondary" onclick="deselectAllFolders()">
+                            <i class="fas fa-square"></i> Deselect All
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <h3><i class="fas fa-search"></i> File Analysis</h3>
                 <div class="action-buttons">
-                    <button class="button primary" onclick="scanFiles()">
+                    <button class="button primary" onclick="scanFiles()" style="display: none;">
                         <i class="fas fa-search"></i> Scan Files
                     </button>
                     <button class="button" onclick="compareFiles()" disabled>
@@ -237,9 +281,13 @@
                         <label for="sourcePass">Password</label>
                         <input type="password" id="sourcePass" placeholder="password">
                     </div>
-                    <div class="form-group">
-                        <label for="sourcePath">Path</label>
-                        <input type="text" id="sourcePath" placeholder="/media/videos" value="/media/videos">
+                    <div class="form-group" style="display: none;">
+                        <label for="sourcePathSelect">Path</label>
+                        <select id="sourcePathSelect" onchange="updateSourcePath()">
+                            <option value="/mnt/main/ATL26 On-Air Content">On-Air Content</option>
+                            <option value="/mnt/main/Recordings">Recordings</option>
+                        </select>
+                        <input type="text" id="sourcePath" placeholder="/media/videos" value="/mnt/main/ATL26 On-Air Content" style="margin-top: 5px;">
                     </div>
                 </div>
 
@@ -268,9 +316,13 @@
                         <label for="targetPass">Password</label>
                         <input type="password" id="targetPass" placeholder="password">
                     </div>
-                    <div class="form-group">
-                        <label for="targetPath">Path</label>
-                        <input type="text" id="targetPath" placeholder="/media/videos" value="/media/videos">
+                    <div class="form-group" style="display: none;">
+                        <label for="targetPathSelect">Path</label>
+                        <select id="targetPathSelect" onchange="updateTargetPath()">
+                            <option value="/mnt/main/ATL26 On-Air Content">On-Air Content</option>
+                            <option value="/mnt/main/Recordings">Recordings</option>
+                        </select>
+                        <input type="text" id="targetPath" placeholder="/media/videos" value="/mnt/main/ATL26 On-Air Content" style="margin-top: 5px;">
                     </div>
                 </div>
             </div>
@@ -314,7 +366,7 @@
                         <label for="overwriteExisting">Overwrite existing files with size differences</label>
                     </div>
                     <div class="checkbox-group">
-                        <input type="checkbox" id="dryRun" checked>
+                        <input type="checkbox" id="dryRun">
                         <label for="dryRun">Dry run (preview changes without actual sync)</label>
                     </div>
                     <div class="checkbox-group">

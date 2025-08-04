@@ -38,7 +38,7 @@ class ConfigManager:
                 "max_file_size_gb": 50,
                 "include_subdirs": True,
                 "overwrite_existing": False,
-                "dry_run_default": True,
+                "dry_run_default": False,
                 "connection_timeout": 30,
                 "transfer_timeout": 300
             },
@@ -173,7 +173,7 @@ class ConfigManager:
                 "max_file_size_gb": 100,
                 "include_subdirs": True,
                 "overwrite_existing": False,
-                "dry_run_default": True,
+                "dry_run_default": False,
                 "connection_timeout": 30,
                 "transfer_timeout": 600
             },

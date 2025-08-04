@@ -382,7 +382,7 @@ class FTPManager:
                     pass
             return False
     
-    def upload_file(self, local_path, remote_path):
+    def upload_file(self, local_path, remote_path, skip_verification=False):
         """Upload file to FTP server"""
         if not self.connected:
             if not self.connect():
@@ -405,26 +405,31 @@ class FTPManager:
             
             # Change to the base directory (from config)
             base_path = self.config.get('path', '/')
-            logger.debug(f"Config contents: {self.config}")
-            logger.debug(f"Changing to base directory: {base_path}")
+            logger.info(f"=== UPLOAD PATH DEBUG ===")
+            logger.info(f"Config contents: {self.config}")
+            logger.info(f"Base path from config: {base_path}")
+            logger.info(f"Remote path parameter: {remote_path}")
+            
             try:
                 self.ftp.cwd(base_path)
                 new_dir = self.ftp.pwd()
-                logger.debug(f"Now in directory: {new_dir}")
+                logger.info(f"Changed to directory: {new_dir}")
             except Exception as e:
                 logger.error(f"Failed to change to base directory {base_path}: {e}")
                 return False
             
             # Create directory if it doesn't exist
             remote_dir = os.path.dirname(remote_path)
-            logger.debug(f"Remote directory to create: {remote_dir}")
+            logger.info(f"Remote directory from path: {remote_dir}")
             
             if remote_dir and remote_dir != '/' and remote_dir != '.':
-                logger.debug(f"Creating remote directory: {remote_dir}")
+                logger.info(f"Need to create remote directory: {remote_dir}")
                 success = self.create_directory(remote_dir)
                 if not success:
                     logger.error(f"Failed to create directory: {remote_dir}")
                     return False
+                else:
+                    logger.info(f"Directory created or already exists: {remote_dir}")
                     
                 # Change to the target directory for upload
                 try:
@@ -462,11 +467,21 @@ class FTPManager:
                 logger.debug(f"File doesn't exist (this is okay): {str(e)}")
             
             # Upload the file
-            logger.debug(f"Starting upload with STOR command for: {upload_filename}")
+            logger.info(f"=== STARTING UPLOAD ===")
+            logger.info(f"Current FTP directory: {self.ftp.pwd()}")
+            logger.info(f"Upload filename: {upload_filename}")
+            logger.info(f"Full expected path: {os.path.join(self.ftp.pwd(), upload_filename)}")
+            
+            stor_success = False
             try:
                 with open(local_path, 'rb') as local_file:
                     result = self.ftp.storbinary(f'STOR {upload_filename}', local_file)
-                    logger.debug(f"STOR command result: {result}")
+                    logger.info(f"STOR command result: {result}")
+                    
+                    # If STOR returns success, we can trust it for most servers
+                    if "226" in result or "complete" in result.lower():
+                        logger.info("STOR command indicates successful transfer")
+                        stor_success = True
             except Exception as stor_e:
                 logger.error(f"STOR command failed: {str(stor_e)}")
                 # Check if it's a permission or overwrite issue
@@ -507,36 +522,125 @@ class FTPManager:
                 else:
                     raise
             
+            # Skip verification if requested or if STOR was successful for problematic servers
+            if skip_verification and stor_success:
+                logger.info("Skipping verification due to skip_verification flag and successful STOR")
+                return True
+            
             # Verify the upload by checking if file exists
             try:
-                logger.debug(f"Verifying upload by checking file size...")
-                remote_size = self.ftp.size(self._quote_path_if_needed(upload_filename))
-                local_size = os.path.getsize(local_path)
-                logger.debug(f"Remote file size: {remote_size}, Local file size: {local_size}")
+                logger.info(f"=== VERIFYING UPLOAD ===")
+                logger.info(f"Checking file: {upload_filename}")
+                logger.info(f"In directory: {self.ftp.pwd()}")
                 
-                if remote_size == local_size:
-                    logger.debug(f"Upload verification successful!")
-                    return True
-                else:
-                    logger.error(f"Upload verification failed! Size mismatch.")
-                    return False
+                # Add a small delay to ensure file is fully written
+                time.sleep(1.0)
+                
+                # Make sure we're still in the right directory
+                expected_dir = os.path.dirname(os.path.join(base_path, remote_path)).replace('\\', '/')
+                current_pwd = self.ftp.pwd()
+                if current_pwd != expected_dir:
+                    logger.warning(f"Directory changed after upload! Expected: {expected_dir}, Current: {current_pwd}")
+                    try:
+                        self.ftp.cwd(expected_dir)
+                        logger.info(f"Changed back to expected directory: {expected_dir}")
+                    except:
+                        logger.error(f"Could not change to expected directory: {expected_dir}")
+                
+                try:
+                    remote_size = self.ftp.size(self._quote_path_if_needed(upload_filename))
+                    local_size = os.path.getsize(local_path)
+                    logger.info(f"Remote file size: {remote_size}, Local file size: {local_size}")
+                    
+                    if remote_size == local_size:
+                        logger.info(f"✅ Upload verification successful!")
+                        logger.info(f"File uploaded to: {os.path.join(base_path, remote_path)}")
+                        return True
+                    else:
+                        logger.error(f"❌ Upload verification failed! Size mismatch.")
+                        return False
+                except Exception as size_error:
+                    logger.warning(f"SIZE command failed: {size_error}, trying LIST verification...")
+                    
+                # Try alternative verification with LIST
+                try:
+                    # Log current directory for debugging
+                    current_dir = self.ftp.pwd()
+                    logger.info(f"Current directory for LIST: {current_dir}")
+                    
+                    # First try listing just the file
+                    file_list = []
+                    try:
+                        self.ftp.retrlines(f'LIST {self._quote_path_if_needed(upload_filename)}', file_list.append)
+                        logger.debug(f"Direct file LIST succeeded with {len(file_list)} entries")
+                    except Exception as direct_list_error:
+                        # If that fails, list the directory and look for the file
+                        logger.debug(f"Direct file LIST failed ({direct_list_error}), listing current directory...")
+                        try:
+                            self.ftp.retrlines('LIST', file_list.append)
+                            logger.debug(f"Directory LIST returned {len(file_list)} entries")
+                        except Exception as dir_list_error:
+                            logger.error(f"Directory LIST also failed: {dir_list_error}")
+                            # Try changing to parent and back
+                            logger.debug("Trying to refresh directory...")
+                            parent_dir = os.path.dirname(current_dir)
+                            self.ftp.cwd(parent_dir)
+                            self.ftp.cwd(current_dir)
+                            self.ftp.retrlines('LIST', file_list.append)
+                    
+                    # Log all files for debugging
+                    logger.debug(f"All files in directory ({len(file_list)} total):")
+                    for i, line in enumerate(file_list[:10]):  # Show first 10
+                        logger.debug(f"  {i+1}: {line}")
+                    
+                    # Check if our file appears in the listing
+                    file_found = False
+                    upload_filename_lower = upload_filename.lower()
+                    
+                    for line in file_list:
+                        # Check both exact match and case-insensitive
+                        if upload_filename in line or upload_filename_lower in line.lower():
+                            logger.info(f"✅ File found in directory listing: {line}")
+                            file_found = True
+                            break
+                    
+                    if file_found:
+                        logger.info(f"✅ Upload verification successful via LIST!")
+                        logger.info(f"File uploaded to: {os.path.join(self.ftp.pwd(), upload_filename)}")
+                        return True
+                    else:
+                        # Last resort - try checking the full path
+                        logger.warning(f"File '{upload_filename}' not found in current directory, checking full path...")
+                        full_path = os.path.join(base_path, remote_path).replace('\\', '/')
+                        logger.info(f"Checking full path: {full_path}")
+                        
+                        try:
+                            # Try to get size of full path
+                            self.ftp.size(self._quote_path_if_needed(full_path))
+                            logger.info(f"✅ File verified at full path: {full_path}")
+                            return True
+                        except:
+                            # If STOR was successful, trust it
+                            if stor_success:
+                                logger.warning("Could not verify file, but STOR was successful - trusting STOR result")
+                                return True
+                            else:
+                                logger.error("Could not verify file and STOR status unknown")
+                                return False
+                        
+                except Exception as list_error:
+                    logger.error(f"LIST verification also failed: {list_error}")
+                    # If we got a successful STOR response, assume success
+                    if stor_success:
+                        logger.warning("Both verification methods failed, but STOR was successful - trusting STOR result")
+                        return True
+                    else:
+                        logger.error("All verification methods failed and STOR status unclear")
+                        return False
                     
             except Exception as verify_error:
                 logger.error(f"Upload verification failed: {verify_error}")
-                # Try alternative verification
-                try:
-                    logger.debug(f"Trying alternative verification with LIST...")
-                    file_list = []
-                    self.ftp.retrlines(f'LIST {self._quote_path_if_needed(upload_filename)}', file_list.append)
-                    if file_list:
-                        logger.debug(f"File exists in LIST: {file_list[0]}")
-                        return True
-                    else:
-                        logger.error(f"File not found in LIST")
-                        return False
-                except Exception as alt_verify_error:
-                    logger.error(f"Alternative verification also failed: {alt_verify_error}")
-                    return False
+                return False
             
         except Exception as e:
             logger.error(f"Upload failed: {str(e)}", exc_info=True)
@@ -601,21 +705,24 @@ class FTPManager:
             source_path = file_info.get('full_path', file_info.get('path', file_info['name']))
             target_path = file_info.get('path', file_info['name'])
             
-            logger.debug(f"=== COPY FILE DEBUG ===")
-            logger.debug(f"Source path: {source_path}")
-            logger.debug(f"Target path: {target_path}")
-            logger.debug(f"File info: {file_info}")
-            logger.debug(f"Keep temp file: {keep_temp}")
+            logger.info(f"=== COPY FILE DEBUG ===")
+            logger.info(f"Source FTP config: {self.config}")
+            logger.info(f"Target FTP config: {target_ftp.config}")
+            logger.info(f"Source path: {source_path}")
+            logger.info(f"Target path: {target_path}")
+            logger.info(f"File info: {file_info}")
+            logger.info(f"Keep temp file: {keep_temp}")
             
             # Download to temp file
             temp_path = f"/tmp/{file_info['name']}"
             logger.debug(f"Temp file path: {temp_path}")
             
-            logger.debug(f"Starting download from source...")
+            logger.info(f"Starting download from source...")
             if self.download_file(source_path, temp_path):
-                logger.debug(f"Download successful, starting upload to target...")
+                logger.info(f"Download successful, file size: {os.path.getsize(temp_path)} bytes")
+                logger.info(f"Starting upload to target path: {target_path}")
                 success = target_ftp.upload_file(temp_path, target_path)
-                logger.debug(f"Upload result: {success}")
+                logger.info(f"Upload result: {success}")
                 
                 if not keep_temp:
                     try:

@@ -3,6 +3,7 @@ import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.extensions import register_adapter, AsIs
 import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -340,6 +341,20 @@ class PostgreSQLDatabaseManager:
                 analysis_data.get('file_name', ''),
                 analysis_data.get('content_type')
             )
+            logger.info(f"Classified content_type: '{content_type}'")
+            
+            # Check actual enum values in database
+            enum_values = self.check_enum_values()
+            if enum_values and 'content_type' in enum_values:
+                self._content_type_enum_values = enum_values.get('content_type', [])
+                logger.info(f"Available content_type values in DB: {self._content_type_enum_values}")
+                
+                # Re-classify with actual enum values
+                content_type = self._classify_content_type(
+                    analysis_data.get('file_name', ''),
+                    analysis_data.get('content_type')
+                )
+                logger.info(f"Re-classified content_type with DB values: '{content_type}'")
             
             asset_data = {
                 'content_type': content_type,
@@ -366,12 +381,34 @@ class PostgreSQLDatabaseManager:
                 asset_id = existing['id']
                 asset_data['updated_at'] = datetime.utcnow()
                 
-                update_fields = ', '.join([f"{k} = %({k})s" for k in asset_data.keys()])
+                # Build update query with proper enum handling
+                from psycopg2.extensions import AsIs
+                
+                # Create update data with enum handling
+                update_data = asset_data.copy()
+                update_data['id'] = asset_id
+                
+                # Handle enum fields specially
+                update_parts = []
+                for k in asset_data.keys():
+                    if k == 'content_type':
+                        update_data[f"{k}_enum"] = AsIs(f"'{asset_data[k]}'::content_type")
+                        update_parts.append(f"{k} = %({k}_enum)s")
+                    elif k == 'duration_category':
+                        update_data[f"{k}_enum"] = AsIs(f"'{asset_data[k]}'::duration_category")
+                        update_parts.append(f"{k} = %({k}_enum)s")
+                    elif k == 'shelf_life_score':
+                        update_data[f"{k}_enum"] = AsIs(f"'{asset_data[k]}'::shelf_life_rating")
+                        update_parts.append(f"{k} = %({k}_enum)s")
+                    else:
+                        update_parts.append(f"{k} = %({k})s")
+                
+                update_fields = ', '.join(update_parts)
                 cursor.execute(f"""
                     UPDATE assets 
                     SET {update_fields}
                     WHERE id = %(id)s
-                """, {**asset_data, 'id': asset_id})
+                """, update_data)
                 
                 logger.info(f"Updated analysis for {analysis_data['file_name']}")
             else:
@@ -380,7 +417,28 @@ class PostgreSQLDatabaseManager:
                 asset_data['created_at'] = datetime.utcnow()
                 asset_data['updated_at'] = datetime.utcnow()
                 
-                cursor.execute("""
+                # Convert enum values to ensure they're properly formatted
+                asset_data_with_enums = asset_data.copy()
+                # Clean and validate enum values
+                asset_data_with_enums['content_type'] = (asset_data['content_type'] or 'other').strip().lower()
+                asset_data_with_enums['duration_category'] = (asset_data['duration_category'] or 'short').strip().lower()
+                asset_data_with_enums['shelf_life_score'] = (asset_data['shelf_life_score'] or 'medium').strip().lower()
+                
+                # Log the values we're about to insert
+                logger.info(f"Inserting asset with enums - content_type: '{asset_data_with_enums['content_type']}', "
+                           f"duration_category: '{asset_data_with_enums['duration_category']}', "
+                           f"shelf_life_score: '{asset_data_with_enums['shelf_life_score']}'")
+                
+                # Use psycopg2.extensions.AsIs to prevent quoting of enum values
+                from psycopg2.extensions import AsIs
+                
+                # Wrap enum values with AsIs to prevent quoting
+                asset_data_final = asset_data_with_enums.copy()
+                asset_data_final['content_type_enum'] = AsIs(f"'{asset_data_with_enums['content_type']}'::content_type")
+                asset_data_final['duration_category_enum'] = AsIs(f"'{asset_data_with_enums['duration_category']}'::duration_category")
+                asset_data_final['shelf_life_score_enum'] = AsIs(f"'{asset_data_with_enums['shelf_life_score']}'::shelf_life_rating")
+                
+                query = """
                     INSERT INTO assets (
                         guid, content_type, content_title, language,
                         transcript, summary, duration_seconds, duration_category,
@@ -388,13 +446,26 @@ class PostgreSQLDatabaseManager:
                         shelf_life_reasons, analysis_completed, ai_analysis_enabled,
                         created_at, updated_at
                     ) VALUES (
-                        %(guid)s::uuid, %(content_type)s, %(content_title)s, %(language)s,
-                        %(transcript)s, %(summary)s, %(duration_seconds)s, %(duration_category)s,
-                        %(engagement_score)s, %(engagement_score_reasons)s, %(shelf_life_score)s,
-                        %(shelf_life_reasons)s, %(analysis_completed)s, %(ai_analysis_enabled)s,
-                        %(created_at)s, %(updated_at)s
+                        %(guid)s::uuid, 
+                        %(content_type_enum)s, 
+                        %(content_title)s, 
+                        %(language)s,
+                        %(transcript)s, 
+                        %(summary)s, 
+                        %(duration_seconds)s, 
+                        %(duration_category_enum)s,
+                        %(engagement_score)s, 
+                        %(engagement_score_reasons)s, 
+                        %(shelf_life_score_enum)s,
+                        %(shelf_life_reasons)s, 
+                        %(analysis_completed)s, 
+                        %(ai_analysis_enabled)s,
+                        %(created_at)s, 
+                        %(updated_at)s
                     ) RETURNING id
-                """, asset_data)
+                """
+                
+                cursor.execute(query, asset_data_final)
                 
                 asset_id = cursor.fetchone()['id']
                 
@@ -578,30 +649,76 @@ class PostgreSQLDatabaseManager:
     
     # Helper methods
     def _classify_content_type(self, filename: str, content_type: str = None) -> str:
-        """Classify content type based on filename and existing content_type"""
+        """Classify content type based on filename and existing content_type
+        
+        Content type abbreviations:
+        - an: announcement
+        - bmp: bump (short promo)
+        - imow: inside moving atlanta weekly
+        - im: inside atlanta
+        - ia: interstitial announcement
+        - lm: legislative minute
+        - mtg: meeting
+        - maf: moving atlanta forward
+        - pkg: package
+        - pmo: promo
+        - psa: public service announcement
+        - szl: sizzle reel
+        - spp: special projects
+        - other: other/uncategorized
+        """
+        # Check if we have the actual enum values from DB
+        if hasattr(self, '_content_type_enum_values'):
+            valid_values = self._content_type_enum_values
+        else:
+            # Default expected values from schema
+            valid_values = ['an', 'bmp', 'imow', 'im', 'ia', 'lm', 'mtg', 'maf', 'pkg', 'pmo', 'psa', 'szl', 'spp', 'other']
+        
         if content_type:
             type_map = {
                 'PSA': 'psa',
                 'PKG': 'pkg',
                 'IA': 'ia',
                 'MTG': 'mtg',
-                'MEETING': 'meeting'
+                'MEETING': 'mtg',
+                'AN': 'an',
+                'ANNOUNCEMENT': 'an',
+                'BMP': 'bmp',
+                'BUMP': 'bmp',
+                'PROMO': 'pmo',
+                'PMO': 'pmo'
             }
             mapped = type_map.get(content_type.upper())
-            if mapped:
+            if mapped and mapped in valid_values:
                 return mapped
         
         filename_lower = filename.lower()
         if 'psa' in filename_lower:
             return 'psa'
-        elif 'meeting' in filename_lower or 'council' in filename_lower or 'mtg' in filename_lower:
-            return 'meeting'
+        elif 'meeting' in filename_lower or 'council' in filename_lower or 'committee' in filename_lower:
+            return 'mtg'
         elif 'announcement' in filename_lower:
-            return 'announcement'
-        elif 'pkg' in filename_lower:
+            return 'an'
+        elif 'pkg' in filename_lower or 'package' in filename_lower:
             return 'pkg'
-        elif '_ia_' in filename_lower:
+        elif '_ia_' in filename_lower or 'interstitial' in filename_lower:
             return 'ia'
+        elif 'legislative minute' in filename_lower:
+            return 'lm'
+        elif 'moving atlanta forward' in filename_lower:
+            return 'maf'
+        elif 'inside atlanta' in filename_lower and 'weekly' not in filename_lower:
+            return 'im'
+        elif 'inside moving atlanta weekly' in filename_lower:
+            return 'imow'
+        elif 'bump' in filename_lower or 'bmp' in filename_lower:
+            return 'bmp'
+        elif 'promo' in filename_lower:
+            return 'pmo'
+        elif 'sizzle' in filename_lower:
+            return 'szl'
+        elif 'special project' in filename_lower:
+            return 'spp'
         else:
             return 'other'
     
@@ -761,6 +878,40 @@ class PostgreSQLDatabaseManager:
                 priority_score = EXCLUDED.priority_score,
                 optimal_timeslots = EXCLUDED.optimal_timeslots
         """, sched_meta)
+    
+    def check_enum_values(self) -> Dict[str, List[str]]:
+        """Check actual enum values in database"""
+        if not self.connected:
+            return {}
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Query to get enum values
+            cursor.execute("""
+                SELECT 
+                    t.typname AS enum_name,
+                    array_agg(e.enumlabel ORDER BY e.enumsortorder) AS enum_values
+                FROM pg_type t
+                JOIN pg_enum e ON t.oid = e.enumtypid
+                WHERE t.typname IN ('content_type', 'duration_category', 'shelf_life_rating')
+                GROUP BY t.typname
+            """)
+            
+            results = {}
+            for row in cursor.fetchall():
+                results[row['enum_name']] = row['enum_values']
+            
+            logger.info(f"Database enum values: {results}")
+            cursor.close()
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error checking enum values: {str(e)}")
+            return {}
+        finally:
+            self._put_connection(conn)
     
     def get_analyzed_content_for_scheduling(self, content_type: str = '', duration_category: str = '', search: str = '') -> List[Dict[str, Any]]:
         """Get analyzed content for scheduling with filters"""

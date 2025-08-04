@@ -17,12 +17,13 @@ class FileScanner:
         base_path = path.rstrip('/')
         files = []
         
-        logger.debug(f"Starting scan of: {path} (base: {base_path})")
+        logger.info(f"Starting scan of: {path} (base: {base_path})")
+        logger.info(f"Filters: include_subdirs={filters.get('include_subdirs', True)}, extensions={filters.get('extensions', [])}")
         
         try:
             # Get files from current directory
             current_files = self.ftp_manager.list_files(path)
-            logger.debug(f"Found {len(current_files)} files in {path}")
+            logger.info(f"Found {len(current_files)} files in root directory: {path}")
             
             for file_info in current_files:
                 if self._should_include_file(file_info, filters):
@@ -36,9 +37,13 @@ class FileScanner:
                 logger.debug(f"Found subdirectories in {path}: {subdirs}")
                 for subdir in subdirs:
                     subdir_path = os.path.join(path, subdir).replace('\\', '/')
-                    logger.debug(f"Recursively scanning: {subdir_path}")
-                    subdir_files = self._scan_directory_recursive(subdir_path, base_path, filters)
-                    files.extend(subdir_files)
+                    logger.info(f"Recursively scanning subdirectory: {subdir_path}")
+                    try:
+                        subdir_files = self._scan_directory_recursive(subdir_path, base_path, filters)
+                        logger.info(f"Found {len(subdir_files)} files in subdirectory: {subdir_path}")
+                        files.extend(subdir_files)
+                    except Exception as e:
+                        logger.error(f"Error scanning subdirectory {subdir_path}: {str(e)}")
             
             logger.debug(f"Total files found in scan: {len(files)}")
             return files
@@ -56,13 +61,21 @@ class FileScanner:
         try:
             # Get files from current directory
             current_files = self.ftp_manager.list_files(current_path)
-            logger.debug(f"Found {len(current_files)} files in {current_path}")
+            logger.info(f"Found {len(current_files)} total files in {current_path}")
             
+            # Log sample files for debugging
+            if current_files:
+                logger.info(f"Sample files in {current_path}: {[f['name'] for f in current_files[:3]]}")
+            
+            included_count = 0
             for file_info in current_files:
                 if self._should_include_file(file_info, filters):
                     # Add relative path information
                     file_info = self._add_relative_path(file_info, current_path, base_path)
                     files.append(file_info)
+                    included_count += 1
+            
+            logger.info(f"Included {included_count} files from {current_path} after filtering")
             
             # Continue recursively scanning subdirectories
             subdirs = self._get_subdirectories(current_path)
@@ -109,20 +122,28 @@ class FileScanner:
     
     def _should_include_file(self, file_info, filters):
         """Check if file should be included based on filters"""
+        filename = file_info['name']
+        
         # File extension filter
         extensions = filters.get('extensions', [])
         if extensions:
-            file_ext = os.path.splitext(file_info['name'])[1].lower().lstrip('.')
+            file_ext = os.path.splitext(filename)[1].lower().lstrip('.')
             if file_ext not in [ext.lower() for ext in extensions]:
+                logger.debug(f"Excluding {filename} - extension '{file_ext}' not in {extensions}")
                 return False
         
         # File size filters
         min_size = filters.get('min_size', 0)
         max_size = filters.get('max_size', float('inf'))
         
-        if file_info['size'] < min_size or file_info['size'] > max_size:
+        if file_info['size'] < min_size:
+            logger.debug(f"Excluding {filename} - size {file_info['size']} < min {min_size}")
+            return False
+        if file_info['size'] > max_size:
+            logger.debug(f"Excluding {filename} - size {file_info['size']} > max {max_size}")
             return False
         
+        logger.debug(f"Including {filename} - passed all filters")
         return True
     
     def _get_subdirectories(self, path):
@@ -138,6 +159,8 @@ class FileScanner:
             file_list = []
             self.ftp_manager.ftp.retrlines('LIST', file_list.append)
             
+            logger.debug(f"Getting subdirectories for {path}, found {len(file_list)} entries")
+            
             for line in file_list:
                 parts = line.split()
                 if len(parts) >= 9:
@@ -147,7 +170,9 @@ class FileScanner:
                     # Directory starts with 'd'
                     if permissions.startswith('d') and name not in ['.', '..']:
                         subdirs.append(name)
+                        logger.debug(f"Found subdirectory: {name}")
             
+            logger.info(f"Found {len(subdirs)} subdirectories in {path}: {subdirs}")
             return subdirs
             
         except Exception as e:
