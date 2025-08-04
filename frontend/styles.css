@@ -2514,3 +2514,82 @@ small {
 .replay-config-note li {
     margin: 5px 0;
 }
+
+/* Scanning Configuration Panel */
+.scanning-config {
+    padding: 1rem 1.5rem;
+}
+
+.scanning-config .info-text {
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.folder-selection {
+    margin-bottom: 1.5rem;
+}
+
+.folder-selection h4 {
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.folder-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.folder-checkboxes .checkbox-group {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.folder-checkboxes .checkbox-group input[type="checkbox"] {
+    margin-right: 0.75rem;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+}
+
+.folder-checkboxes .checkbox-group label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    flex: 1;
+    gap: 1rem;
+}
+
+.folder-checkboxes .checkbox-group label strong {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    min-width: 150px;
+}
+
+.folder-checkboxes .folder-path {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-family: 'Fira Code', 'Consolas', monospace;
+    flex: 1;
+}
+
+.folder-checkboxes .sync-mode {
+    font-size: 0.875rem;
+    color: var(--primary-color);
+    font-style: italic;
+    white-space: nowrap;
+}
+
+.scan-actions {
+    display: flex;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.scan-actions .button {
+    flex: 0 0 auto;
+}

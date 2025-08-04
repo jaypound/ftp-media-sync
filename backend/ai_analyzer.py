@@ -34,11 +34,24 @@ class AIAnalyzer:
             if self.api_provider == "openai":
                 # For OpenAI client initialization (v1.97.0+)
                 try:
+                    # Try new client initialization first
                     if self.api_key:
                         self.client = openai.OpenAI(api_key=self.api_key)
                     else:
                         self.client = openai.OpenAI()
                     logger.info(f"OpenAI client setup successful with model: {self.model}")
+                except TypeError as te:
+                    # Handle older OpenAI library version or parameter issues
+                    logger.warning(f"OpenAI client initialization failed with TypeError: {te}")
+                    try:
+                        # Fallback: set API key directly
+                        if self.api_key:
+                            openai.api_key = self.api_key
+                        self.client = None  # Use module-level functions
+                        logger.info("Using OpenAI module-level API (legacy mode)")
+                    except Exception as fallback_error:
+                        logger.error(f"OpenAI fallback setup also failed: {fallback_error}")
+                        self.client = None
                 except Exception as openai_error:
                     logger.error(f"OpenAI client setup failed: {openai_error}")
                     self.client = None
@@ -112,17 +125,31 @@ Transcript:
             prompt = self.create_analysis_prompt(chunk)
             logger.debug(f"Sending prompt to OpenAI (length: {len(prompt)} chars)")
             
-            # Use the modern OpenAI client (v1.97.0+)
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert content analyst. Provide detailed analysis in valid JSON format only."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1000
-            )
-            content = response.choices[0].message.content.strip()
+            if self.client:
+                # Use the modern OpenAI client (v1.97.0+)
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert content analyst. Provide detailed analysis in valid JSON format only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+                content = response.choices[0].message.content.strip()
+            else:
+                # Use legacy module-level API
+                logger.info("Using legacy OpenAI API")
+                response = openai.ChatCompletion.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert content analyst. Provide detailed analysis in valid JSON format only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+                content = response['choices'][0]['message']['content'].strip()
             
             logger.info(f"OpenAI response received (length: {len(content)} chars)")
             logger.debug(f"OpenAI response: {content}")

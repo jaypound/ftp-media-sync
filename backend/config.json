@@ -6,7 +6,19 @@
             "port": 21,
             "user": "root",
             "password": "Atl#C1a26",
-            "path": "/mnt/main/ATL26 On-Air Content"
+            "path": "/mnt/main/ATL26 On-Air Content",
+            "paths": [
+                {
+                    "path": "/mnt/main/ATL26 On-Air Content",
+                    "label": "On-Air Content",
+                    "sync_direction": "source_to_target"
+                },
+                {
+                    "path": "/mnt/main/Recordings",
+                    "label": "Recordings",
+                    "sync_direction": "bidirectional"
+                }
+            ]
         },
         "target": {
             "name": "Target Server",
@@ -14,7 +26,19 @@
             "port": 21,
             "user": "root",
             "password": "Atl#C1a26",
-            "path": "/mnt/main/ATL26 On-Air Content"
+            "path": "/mnt/main/ATL26 On-Air Content",
+            "paths": [
+                {
+                    "path": "/mnt/main/ATL26 On-Air Content",
+                    "label": "On-Air Content",
+                    "sync_direction": "source_to_target"
+                },
+                {
+                    "path": "/mnt/main/Recordings",
+                    "label": "Recordings",
+                    "sync_direction": "bidirectional"
+                }
+            ]
         }
     },
     "sync_settings": {
@@ -27,11 +51,11 @@
             "m4v",
             "flv"
         ],
-        "min_file_size_mb": 10,
+        "min_file_size_mb": 1,
         "max_file_size_gb": 100,
         "include_subdirs": true,
         "overwrite_existing": false,
-        "dry_run_default": true,
+        "dry_run_default": false,
         "connection_timeout": 30,
         "transfer_timeout": 600
     },

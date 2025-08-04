@@ -8,6 +8,7 @@ let targetOnlyFiles = []; // Files that exist on target but not on source
 let deleteQueue = []; // Files queued for deletion
 let analysisQueue = []; // Files queued for analysis
 let analysisResults = []; // Store analysis results
+let currentSyncDirection = 'source_to_target'; // Track current sync direction
 
 // Analysis monitoring variables
 let analysisStartTime = null;
@@ -206,6 +207,28 @@ async function compareFiles() {
         sourceFileMap.set(relativePath, file);
     });
     
+    // Debug: Log sample paths from both servers
+    log(`Debug: Sample source paths: ${Array.from(sourceFileMap.keys()).slice(0, 5).join(', ')}`);
+    log(`Debug: Sample target paths: ${Array.from(targetFileMap.keys()).slice(0, 5).join(', ')}`);
+    
+    // Log recordings files specifically
+    const sourceRecordings = sourceFiles.filter(f => f.folder === 'recordings');
+    const targetRecordings = targetFiles.filter(f => f.folder === 'recordings');
+    log(`Debug: Source recordings count: ${sourceRecordings.length}`);
+    log(`Debug: Target recordings count: ${targetRecordings.length}`);
+    
+    // Log recording paths specifically
+    if (targetRecordings.length > 0) {
+        log(`Debug: Target recording paths:`);
+        targetRecordings.forEach((file, index) => {
+            const path = file.path || file.name;
+            log(`  ${index + 1}. ${path}`);
+        });
+    }
+    
+    // Check if we're in bidirectional mode (Recordings folder) - now we check the file's folder property
+    const hasBidirectionalFiles = sourceFiles.some(f => f.isBidirectional) || targetFiles.some(f => f.isBidirectional);
+    
     // Process source files (existing logic)
     sourceFiles.forEach(sourceFile => {
         const sourceRelativePath = sourceFile.path || sourceFile.name;
@@ -219,17 +242,18 @@ async function compareFiles() {
             targetFile: targetFile,
             fileId: fileId,
             relativePath: sourceRelativePath,
-            status: 'identical' // default
+            status: 'identical', // default
+            direction: 'source_to_target'
         };
         
         if (!targetFile) {
             // File missing on target
             comparisonResult.status = 'missing';
-            availableFiles.push({ type: 'copy', file: sourceFile, id: fileId });
+            availableFiles.push({ type: 'copy', file: sourceFile, id: fileId, direction: 'source_to_target' });
         } else if (sourceFile.size !== targetFile.size) {
             // File size different
             comparisonResult.status = 'different';
-            availableFiles.push({ type: 'update', file: sourceFile, id: fileId });
+            availableFiles.push({ type: 'update', file: sourceFile, id: fileId, direction: 'source_to_target' });
         } else {
             // File identical
             comparisonResult.status = 'identical';
@@ -245,6 +269,7 @@ async function compareFiles() {
         
         if (!sourceFile) {
             // File exists on target but not on source
+            log(`Target-only file found: ${targetRelativePath} (folder: ${targetFile.folder || 'unknown'})`);
             const fileId = btoa(targetRelativePath + '_target_only').replace(/[^a-zA-Z0-9]/g, '');
             
             const targetOnlyResult = {
@@ -252,10 +277,22 @@ async function compareFiles() {
                 sourceFile: null,
                 fileId: fileId,
                 relativePath: targetRelativePath,
-                status: 'target_only'
+                status: 'target_only',
+                direction: 'target_to_source'
             };
             
             targetOnlyFiles.push(targetOnlyResult);
+            
+            // In bidirectional mode (for recordings), add target-only files as copyable from target to source
+            if (targetFile.isBidirectional) {
+                availableFiles.push({ 
+                    type: 'copy', 
+                    file: targetFile, 
+                    id: fileId, 
+                    direction: 'target_to_source',
+                    isTargetOnly: true 
+                });
+            }
         }
     });
     
@@ -266,6 +303,14 @@ async function compareFiles() {
     renderComparisonResults();
     
     log(`Comparison complete. Found ${availableFiles.length} files that can be synced, ${targetOnlyFiles.length} target-only files`, 'success');
+    
+    // Debug: Log all target-only files
+    if (targetOnlyFiles.length > 0) {
+        log(`Debug: All ${targetOnlyFiles.length} target-only files:`);
+        targetOnlyFiles.forEach((file, index) => {
+            log(`  ${index + 1}. ${file.relativePath} (folder: ${file.targetFile.folder || 'unknown'}, bidirectional: ${file.targetFile.isBidirectional || false})`);
+        });
+    }
     
     // Debug: Log available files for sync
     if (availableFiles.length > 0) {
@@ -299,6 +344,8 @@ function renderComparisonResults() {
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item target-only';
             
+            const isBidirectional = result.targetFile.isBidirectional;
+            
             fileItem.innerHTML = `
                 <div class="file-info">
                     <div class="file-name">${result.targetFile.name}</div>
@@ -306,6 +353,11 @@ function renderComparisonResults() {
                     <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                 </div>
                 <div class="file-actions">
+                    ${isBidirectional ? `
+                        <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
+                            <i class="fas fa-arrow-left"></i> Copy to Source
+                        </button>
+                    ` : ''}
                     <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
                         <i class="fas fa-trash"></i> Delete
                     </button>
@@ -365,6 +417,8 @@ function renderComparisonResults() {
                 const fileItem = document.createElement('div');
                 fileItem.className = 'file-item target-only';
                 
+                const isBidirectional = result.targetFile.isBidirectional;
+                
                 fileItem.innerHTML = `
                     <div class="file-info">
                         <div class="file-name">${result.targetFile.name}</div>
@@ -372,6 +426,11 @@ function renderComparisonResults() {
                         <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                     </div>
                     <div class="file-actions">
+                        ${isBidirectional ? `
+                            <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
+                                <i class="fas fa-arrow-left"></i> Copy to Source
+                            </button>
+                        ` : ''}
                         <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
                             <i class="fas fa-trash"></i> Delete
                         </button>
@@ -981,6 +1040,13 @@ async function processResultsWithProgress(results) {
         } else if (item.status === 'success') {
             log(`✅ ${item.action === 'copy' ? 'Copied' : 'Updated'} ${item.file}`, 'success');
             syncStats.processed++;
+            
+            // Remove successfully synced file from target-only list if it was a target-to-source sync
+            if (item.direction === 'target_to_source') {
+                const fileId = item.id || `${item.file}_${item.size}`;
+                targetOnlyFiles = targetOnlyFiles.filter(f => f.fileId !== fileId);
+                log(`Debug: Removed ${item.file} from target-only list (${targetOnlyFiles.length} remaining)`);
+            }
         } else {
             // Enhanced error logging
             const errorMsg = item.error || item.message || 'No error details provided by server';
@@ -1233,7 +1299,7 @@ function populateFormFromConfig(config) {
         document.getElementById('maxFileSize').value = sync.max_file_size_gb || 50;
         document.getElementById('includeSubdirs').checked = sync.include_subdirs !== false;
         document.getElementById('overwriteExisting').checked = sync.overwrite_existing === true;
-        document.getElementById('dryRun').checked = sync.dry_run_default !== false;
+        document.getElementById('dryRun').checked = sync.dry_run_default === true;
     }
     
     // Store scheduling/export settings in localStorage for modal use
@@ -1298,7 +1364,7 @@ function resetForm() {
     document.getElementById('maxFileSize').value = '50';
     document.getElementById('includeSubdirs').checked = true;
     document.getElementById('overwriteExisting').checked = false;
-    document.getElementById('dryRun').checked = true;
+    document.getElementById('dryRun').checked = false;
     
     log('Form reset to defaults', 'success');
 }
@@ -1580,6 +1646,9 @@ async function startSync() {
             // Clear the sync queue after successful sync
             if (!dryRun && syncStats.errors === 0) {
                 clearSyncQueue();
+                // Update the comparison display to reflect removed files
+                updateComparisonSummary();
+                renderComparisonResults();
             }
         } else {
             log(`Sync failed: ${result.message || 'Unknown error'}`, 'error');
@@ -7581,4 +7650,194 @@ async function exportTemplate() {
     
     // Update the export button onclick
     document.querySelector('#exportModal .button.primary').setAttribute('onclick', 'confirmExportTemplate()');
+}
+
+// Path selection functions
+function updateSourcePath() {
+    const select = document.getElementById('sourcePathSelect');
+    const input = document.getElementById('sourcePath');
+    input.value = select.value;
+    
+    // Update sync direction based on selected path
+    if (select.value === '/mnt/main/Recordings' || select.value === '/mnt/md127/Recordings') {
+        currentSyncDirection = 'bidirectional';
+    } else {
+        currentSyncDirection = 'source_to_target';
+    }
+}
+
+function updateTargetPath() {
+    const select = document.getElementById('targetPathSelect');
+    const input = document.getElementById('targetPath');
+    input.value = select.value;
+}
+
+// Scanning configuration functions
+function selectAllFolders() {
+    document.getElementById('scanOnAirContent').checked = true;
+    document.getElementById('scanRecordings').checked = true;
+}
+
+function deselectAllFolders() {
+    document.getElementById('scanOnAirContent').checked = false;
+    document.getElementById('scanRecordings').checked = false;
+}
+
+async function scanSelectedFolders() {
+    // Check which folders are selected
+    const scanOnAir = document.getElementById('scanOnAirContent').checked;
+    const scanRecordings = document.getElementById('scanRecordings').checked;
+    
+    if (!scanOnAir && !scanRecordings) {
+        log('Please select at least one folder to scan', 'error');
+        return;
+    }
+    
+    // Clear previous results
+    sourceFiles = [];
+    targetFiles = [];
+    
+    if (isScanning) return;
+    isScanning = true;
+    
+    clearLog();
+    log('Starting scan of selected folders...');
+    
+    try {
+        // Get file filters
+        const filterInput = document.getElementById('fileFilter').value;
+        const extensions = filterInput ? filterInput.split(',').map(ext => ext.trim()) : [];
+        const minSize = parseInt(document.getElementById('minFileSize').value) * 1024 * 1024;
+        const maxSize = parseInt(document.getElementById('maxFileSize').value) * 1024 * 1024 * 1024;
+        const includeSubdirs = document.getElementById('includeSubdirs').checked;
+        
+        const filters = {
+            extensions: extensions,
+            min_size: minSize,
+            max_size: maxSize,
+            include_subdirs: includeSubdirs
+        };
+        
+        // Scan On-Air Content folder if selected
+        if (scanOnAir) {
+            log('Scanning On-Air Content folder...');
+            
+            // Scan source
+            const sourceResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    server_type: 'source',
+                    path: '/mnt/main/ATL26 On-Air Content',
+                    filters: filters
+                })
+            });
+            
+            const sourceResult = await sourceResponse.json();
+            if (!sourceResult.success) {
+                throw new Error(sourceResult.message);
+            }
+            
+            const onAirSourceFiles = sourceResult.files;
+            log(`Found ${onAirSourceFiles.length} files in On-Air Content (source)`);
+            
+            // Scan target
+            const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    server_type: 'target',
+                    path: '/mnt/main/ATL26 On-Air Content',
+                    filters: filters
+                })
+            });
+            
+            const targetResult = await targetResponse.json();
+            if (!targetResult.success) {
+                throw new Error(targetResult.message);
+            }
+            
+            const onAirTargetFiles = targetResult.files;
+            log(`Found ${onAirTargetFiles.length} files in On-Air Content (target)`);
+            
+            // Add to main arrays with folder info
+            onAirSourceFiles.forEach(file => {
+                file.folder = 'on-air';
+                sourceFiles.push(file);
+            });
+            onAirTargetFiles.forEach(file => {
+                file.folder = 'on-air';
+                targetFiles.push(file);
+            });
+        }
+        
+        // Scan Recordings folder if selected
+        if (scanRecordings) {
+            log('Scanning Recordings folder...');
+            
+            // Scan source
+            const sourceResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    server_type: 'source',
+                    path: '/mnt/main/Recordings',
+                    filters: filters
+                })
+            });
+            
+            const sourceResult = await sourceResponse.json();
+            if (!sourceResult.success) {
+                throw new Error(sourceResult.message);
+            }
+            
+            const recordingsSourceFiles = sourceResult.files;
+            log(`Found ${recordingsSourceFiles.length} files in Recordings (source)`);
+            
+            // Scan target
+            const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    server_type: 'target',
+                    path: '/mnt/main/Recordings',
+                    filters: filters
+                })
+            });
+            
+            const targetResult = await targetResponse.json();
+            if (!targetResult.success) {
+                throw new Error(targetResult.message);
+            }
+            
+            const recordingsTargetFiles = targetResult.files;
+            log(`Found ${recordingsTargetFiles.length} files in Recordings (target)`);
+            
+            // Add to main arrays with folder info
+            recordingsSourceFiles.forEach(file => {
+                file.folder = 'recordings';
+                file.isBidirectional = true;
+                sourceFiles.push(file);
+            });
+            recordingsTargetFiles.forEach(file => {
+                file.folder = 'recordings';
+                file.isBidirectional = true;
+                targetFiles.push(file);
+            });
+        }
+        
+        log(`Total files found: ${sourceFiles.length} source, ${targetFiles.length} target`);
+        
+        // Display scanned files
+        displayScannedFiles();
+        
+        // Enable compare button
+        document.querySelector('button[onclick="compareFiles()"]').disabled = false;
+        document.getElementById('analyzeFilesBtn').disabled = false;
+        
+    } catch (error) {
+        log(`Error during file scan: ${error.message}`, 'error');
+    }
+    
+    isScanning = false;
 }
