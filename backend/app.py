@@ -45,7 +45,7 @@ app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
         "origins": ["http://127.0.0.1:8000", "http://localhost:8000"],
-        "methods": ["GET", "POST", "OPTIONS"],
+        "methods": ["GET", "POST", "OPTIONS", "DELETE", "PUT", "PATCH"],
         "allow_headers": ["Content-Type"]
     }
 })
@@ -1290,6 +1290,695 @@ def create_monthly_schedule():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/generate-simple-playlist', methods=['POST'])
+def generate_simple_playlist():
+    """Generate a simple playlist from specified folder"""
+    logger.info("=== GENERATE SIMPLE PLAYLIST REQUEST ===")
+    logger.debug("DEBUG: Endpoint hit - generate_simple_playlist")
+    try:
+        data = request.json
+        logger.debug(f"DEBUG: Request data: {data}")
+        
+        # Get parameters from request
+        server = data.get('server', 'source')
+        source_path = data.get('source_path', '/mnt/main/ATL26 On-Air Content/FILL/GLOBAL FILL')
+        export_path = data.get('export_path', '/mnt/main/Playlists')
+        filename = data.get('filename', 'simple playlist')
+        item_count = data.get('item_count', None)  # None means all items
+        shuffle = data.get('shuffle', False)
+        
+        # Add .ply extension if not present
+        if not filename.endswith('.ply'):
+            filename = filename + '.ply'
+        
+        logger.debug(f"DEBUG: Server: {server}, Source: {source_path}, Export: {export_path}, Filename: {filename}")
+        logger.debug(f"DEBUG: Item count: {item_count}, Shuffle: {shuffle}")
+        
+        # Get the appropriate FTP server
+        if server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{server.capitalize()} server not connected. Please connect to FTP servers first.'
+            })
+        
+        source_ftp = ftp_managers[server]
+        
+        # List files in the specified directory
+        try:
+            files = []
+            
+            try:
+                logger.info(f"Listing files from: {source_path}")
+                ftp_files = source_ftp.list_files(source_path)
+                
+                if ftp_files:
+                    files = [(os.path.join(source_path, f['name']), f['name']) 
+                            for f in ftp_files if f['name'].endswith(('.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv'))]
+                    logger.info(f"Found {len(files)} video files in {source_path}")
+                else:
+                    logger.warning(f"No files found in {source_path}")
+                    
+            except Exception as e:
+                logger.error(f"Error accessing path {source_path}: {str(e)}")
+                return jsonify({
+                    'success': False,
+                    'message': f'Error accessing path: {str(e)}'
+                })
+            
+            if not files:
+                return jsonify({
+                    'success': False,
+                    'message': f'No video files found in {source_path}. Please check that the folder exists and contains video files.'
+                })
+            
+            # Apply shuffle if requested
+            if shuffle:
+                import random
+                random.shuffle(files)
+                logger.info("Files shuffled randomly")
+            
+            # Apply item count limit if specified
+            original_count = len(files)
+            if item_count and item_count < len(files):
+                files = files[:item_count]
+                logger.info(f"Limited playlist to {item_count} items (from {original_count})")
+            
+            # Log first few files for debugging
+            if files:
+                logger.debug(f"First 5 files: {files[:5]}")
+            
+            # Generate playlist content
+            playlist_content = generate_simple_playlist_content(files)
+            
+            # Log playlist content length for debugging
+            logger.debug(f"Generated playlist content length: {len(playlist_content)} characters")
+            
+            # Write to the specified FTP server
+            if server not in ftp_managers:
+                return jsonify({
+                    'success': False,
+                    'message': f'{server.capitalize()} server not connected'
+                })
+            
+            ftp_manager = ftp_managers[server]
+            
+            # Create full file path
+            full_path = os.path.join(export_path, filename)
+            
+            # Create a temporary file
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+                temp_file.write(playlist_content)
+                temp_file_path = temp_file.name
+            
+            try:
+                # Upload to FTP
+                ftp_manager.upload_file(temp_file_path, full_path)
+                
+                # Clean up temp file
+                os.unlink(temp_file_path)
+                
+                logger.info(f"Successfully generated playlist with {len(files)} files at {full_path}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Playlist created and exported to {full_path}',
+                    'file_count': len(files)
+                })
+                
+            except Exception as upload_error:
+                # Clean up temp file on error
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+                raise upload_error
+                
+        except Exception as ftp_error:
+            logger.error(f"FTP error: {str(ftp_error)}")
+            return jsonify({
+                'success': False,
+                'message': f'Error accessing FTP server: {str(ftp_error)}'
+            })
+            
+    except Exception as e:
+        error_msg = f"Generate playlist error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/preview-playlist-files', methods=['POST'])
+def preview_playlist_files():
+    """Preview files that would be included in a playlist"""
+    logger.info("=== PREVIEW PLAYLIST FILES REQUEST ===")
+    try:
+        data = request.json
+        server = data.get('server', 'source')
+        path = data.get('path', '')
+        
+        if not path:
+            return jsonify({
+                'success': False,
+                'message': 'Path is required'
+            })
+        
+        # Get the appropriate FTP server
+        if server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{server.capitalize()} server not connected'
+            })
+        
+        ftp = ftp_managers[server]
+        
+        try:
+            # List files in the directory
+            ftp_files = ftp.list_files(path)
+            
+            # Filter for video files
+            video_files = [f['name'] for f in ftp_files 
+                          if f['name'].endswith(('.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv'))]
+            
+            logger.info(f"Found {len(video_files)} video files in preview")
+            
+            return jsonify({
+                'success': True,
+                'files': video_files,
+                'total_count': len(video_files)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error previewing files: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'Error accessing path: {str(e)}'
+            })
+            
+    except Exception as e:
+        error_msg = f"Preview playlist files error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/list-playlists', methods=['GET'])
+def list_playlists():
+    """List all playlists from both FTP servers"""
+    logger.info("=== LIST PLAYLISTS REQUEST ===")
+    try:
+        # Get playlists from both servers
+        all_playlists = []
+        
+        # Define possible playlist locations
+        # Note: /mnt/main is a symlink to /mnt/md127, so we only need one
+        playlist_paths = [
+            '/mnt/main/Playlists',
+            '/mnt/main/Playlists/Contributors'  # Will search all subfolders
+        ]
+        
+        # Check both servers
+        for server_name in ['target', 'source']:
+            if server_name not in ftp_managers:
+                logger.info(f"{server_name} server not connected, skipping")
+                continue
+                
+            ftp_manager = ftp_managers[server_name]
+            logger.info(f"Checking {server_name} server for playlists")
+            
+            # Check each possible path
+            for playlist_path in playlist_paths:
+                paths_to_check = [playlist_path]
+                
+                # If this is the Contributors path, get all subdirectories
+                if playlist_path.endswith('/Contributors'):
+                    try:
+                        contrib_files = ftp_manager.list_files(playlist_path)
+                        # Add all subdirectories
+                        for item in contrib_files:
+                            if item.get('is_dir', False) or item.get('permissions', '').startswith('d'):
+                                subdir_path = os.path.join(playlist_path, item['name'])
+                                paths_to_check.append(subdir_path)
+                                logger.info(f"Added contributor subdirectory: {subdir_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not list Contributors subdirectories: {str(e)}")
+                
+                # Now check each path (including subdirectories)
+                for check_path in paths_to_check:
+                    try:
+                        files = ftp_manager.list_files(check_path)
+                        logger.info(f"Found {len(files)} files in {check_path} on {server_name}")
+                    
+                        # Filter for playlist files (.ply extension or no extension)
+                        import tempfile
+                        import json
+                        
+                        for file in files:
+                            logger.debug(f"Checking file: {file['name']} on {server_name} in {check_path}")
+                            # Include .ply files and files without extensions (excluding .sch)
+                            is_playlist = (file['name'].endswith('.ply') or 
+                                         ('.' not in file['name'] or file['name'].count('.') == 0) and 
+                                         not file['name'].endswith('.sch'))
+                            
+                            if is_playlist:
+                                # Parse creation date from file info if available
+                                created_date = datetime.now().isoformat()  # Default to now
+                                
+                                # Try to read the playlist to get actual item count
+                                item_count = 0
+                                try:
+                                    full_path = os.path.join(check_path, file['name'])
+                                    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                                        temp_path = temp_file.name
+                                    
+                                    # Download and parse the playlist
+                                    ftp_manager.download_file(full_path, temp_path)
+                                    with open(temp_path, 'r') as f:
+                                        content = f.read()
+                                    
+                                    # Try to parse as regular JSON first
+                                    try:
+                                        playlist_data = json.loads(content)
+                                    except json.JSONDecodeError:
+                                        # Try Castus format (add outer braces)
+                                        try:
+                                            playlist_data = json.loads('{' + content + '}')
+                                            # Count items in the playlist
+                                            playlist_desc = playlist_data.get('playlist description', {})
+                                            item_count = len(playlist_desc.get('list', []))
+                                        except json.JSONDecodeError:
+                                            logger.warning(f"Failed to parse playlist {file['name']}")
+                                            item_count = 0
+                                            # Don't continue - still add the playlist with 0 items
+                                    else:
+                                        # Count items in the playlist (for regular JSON)
+                                        playlist_desc = playlist_data.get('playlist description', {})
+                                        item_count = len(playlist_desc.get('list', []))
+                                    
+                                    # Clean up temp file
+                                    os.unlink(temp_path)
+                                except Exception as e:
+                                    logger.warning(f"Could not read playlist {file['name']} to count items: {str(e)}")
+                                    item_count = 0
+                                
+                                playlist_info = {
+                                    'id': len(all_playlists) + 1,  # Use all_playlists for unique ID
+                                    'name': file['name'],
+                                    'description': f'Playlist file from {check_path} on {server_name}',
+                                    'path': check_path,
+                                    'created_date': created_date,
+                                    'item_count': item_count,
+                                    'file_size': file.get('size', 0),
+                                    'server': server_name
+                                }
+                                all_playlists.append(playlist_info)
+                        
+                    except Exception as e:
+                        logger.error(f"Error listing playlists in {check_path} on {server_name}: {str(e)}")
+                        # Continue to next path instead of failing completely
+                        continue
+        
+        logger.info(f"Found {len(all_playlists)} playlists total")
+        
+        return jsonify({
+            'success': True,
+            'playlists': all_playlists
+        })
+            
+    except Exception as e:
+        error_msg = f"List playlists error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/playlist/<int:playlist_id>/items', methods=['GET'])
+def get_playlist_items(playlist_id):
+    """Get items from a specific playlist"""
+    logger.info(f"=== GET PLAYLIST ITEMS REQUEST - ID: {playlist_id} ===")
+    
+    # Get server and path from query parameters
+    server = request.args.get('server', 'target')
+    playlist_path = request.args.get('path', '/mnt/main/Playlists')
+    logger.info(f"Looking for playlist on {server} server at {playlist_path}")
+    
+    try:
+        # Check if specified FTP is connected
+        if server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{server.capitalize()} server not connected'
+            })
+        
+        ftp_manager = ftp_managers[server]
+        
+        # Get the playlist name by listing files in the specified path
+        files = ftp_manager.list_files(playlist_path)
+        
+        # Find the playlist by ID (using index)
+        playlist_files = [f for f in files if not f['name'].endswith('.sch')]
+        logger.info(f"Found {len(playlist_files)} playlists on {server} server")
+        
+        if playlist_id > len(playlist_files) or playlist_id < 1:
+            logger.warning(f"Playlist ID {playlist_id} not found on {server} server (have {len(playlist_files)} playlists)")
+            return jsonify({
+                'success': False,
+                'message': f'Playlist not found on {server} server'
+            })
+        
+        playlist_file = playlist_files[playlist_id - 1]
+        playlist_name = playlist_file['name']
+        full_path = os.path.join(playlist_path, playlist_name)
+        
+        # Download and read the playlist file
+        import tempfile
+        import json
+        
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        try:
+            # Download the playlist file
+            ftp_manager.download_file(full_path, temp_path)
+            
+            # Read and parse the content - handle Castus format (no outer braces)
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            
+            logger.debug(f"Read playlist content (first 200 chars): {content[:200]}")
+            
+            # Try to parse as regular JSON first
+            try:
+                playlist_data = json.loads(content)
+                playlist_desc = playlist_data.get('playlist description', {})
+                logger.debug("Parsed as regular JSON")
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse as regular JSON: {str(e)}")
+                # Try Castus format (add outer braces)
+                try:
+                    playlist_data = json.loads('{' + content + '}')
+                    playlist_desc = playlist_data.get('playlist description', {})
+                    logger.debug("Parsed as Castus format (added outer braces)")
+                except json.JSONDecodeError as e2:
+                    logger.error(f"Failed to parse playlist file: {str(e2)}")
+                    logger.error(f"Content sample: {content[:500]}")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Invalid playlist format'
+                    })
+            
+            # Extract playlist info and items
+            # playlist_desc is already extracted above
+            items = []
+            
+            # Debug log the structure
+            logger.debug(f"Playlist data keys: {list(playlist_data.keys())}")
+            logger.debug(f"Playlist description keys: {list(playlist_desc.keys())}")
+            logger.debug(f"Number of items in list: {len(playlist_desc.get('list', []))}")
+            
+            for idx, item in enumerate(playlist_desc.get('list', [])):
+                # Log first item for debugging
+                if idx == 0:
+                    logger.debug(f"First item structure: {item}")
+                
+                item_info = {
+                    'id': idx + 1,
+                    'position': idx,
+                    'file_path': item.get('path', ''),
+                    'file_name': os.path.basename(item.get('path', '')),
+                    'duration': item.get('duration', 0),
+                    'start_frame': item.get('startFrame', 0),
+                    'end_frame': item.get('endFrame', 0)
+                }
+                items.append(item_info)
+            
+            playlist = {
+                'id': playlist_id,
+                'name': playlist_name,
+                'description': f'Playlist from {playlist_path}',
+                'created_date': datetime.now().isoformat(),
+                'play_mode': playlist_desc.get('play mode', 'sequential'),
+                'auto_remove': playlist_desc.get('auto remove', True)
+            }
+            
+            # Clean up temp file
+            os.unlink(temp_path)
+            
+            logger.info(f"Successfully read playlist with {len(items)} items")
+            
+            return jsonify({
+                'success': True,
+                'playlist': playlist,
+                'items': items,
+                'total_items': len(items)
+            })
+            
+        except Exception as read_error:
+            # Clean up temp file on error
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise read_error
+            
+    except Exception as e:
+        error_msg = f"Get playlist items error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/playlist/<int:playlist_id>', methods=['DELETE'])
+def delete_playlist(playlist_id):
+    """Delete a playlist from the FTP server"""
+    logger.info(f"=== DELETE PLAYLIST REQUEST - ID: {playlist_id} ===")
+    
+    # Get server and path from query parameters
+    server = request.args.get('server', 'target')
+    playlist_path = request.args.get('path', '/mnt/main/Playlists')
+    logger.info(f"Deleting playlist from {server} server at {playlist_path}")
+    
+    try:
+        # Check if specified FTP is connected
+        if server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{server.capitalize()} server not connected'
+            })
+        
+        ftp_manager = ftp_managers[server]
+        
+        # Get the playlist name by listing files in the specified path
+        files = ftp_manager.list_files(playlist_path)
+        
+        # Find the playlist by ID
+        playlist_files = []
+        for f in files:
+            logger.debug(f"Checking file for deletion: {f['name']}")
+            # Include .ply files and files without extensions (excluding .sch)
+            has_no_extension = '.' not in f['name']
+            has_ply_extension = f['name'].endswith('.ply')
+            is_not_sch = not f['name'].endswith('.sch')
+            
+            is_playlist = (has_ply_extension or (has_no_extension and is_not_sch))
+            logger.debug(f"File {f['name']}: no_ext={has_no_extension}, ply={has_ply_extension}, not_sch={is_not_sch}, is_playlist={is_playlist}")
+            
+            if is_playlist:
+                playlist_files.append(f)
+        
+        logger.info(f"Found {len(playlist_files)} playlists in {playlist_path}: {[p['name'] for p in playlist_files]}")
+        
+        # Special handling: if we can't find the playlist in the provided path,
+        # it might be because the path is wrong (e.g., playlist is in a subdirectory)
+        if playlist_id > len(playlist_files) or playlist_id < 1:
+            logger.warning(f"Playlist ID {playlist_id} not found in {playlist_path} (have {len(playlist_files)} playlists)")
+            
+            # Try to get the playlist name from the request or return error
+            playlist_name = request.args.get('name')
+            if playlist_name:
+                # Try to delete by name directly
+                try:
+                    full_path = os.path.join(playlist_path, playlist_name)
+                    ftp_manager.ftp.delete(full_path)
+                    logger.info(f"Successfully deleted playlist by name: {playlist_name}")
+                    return jsonify({
+                        'success': True,
+                        'message': f'Playlist "{playlist_name}" deleted successfully'
+                    })
+                except Exception as del_error:
+                    logger.error(f"Failed to delete playlist by name: {del_error}")
+            
+            return jsonify({
+                'success': False,
+                'message': f'Playlist not found in {playlist_path}'
+            })
+        
+        playlist_file = playlist_files[playlist_id - 1]
+        playlist_name = playlist_file['name']
+        full_path = os.path.join(playlist_path, playlist_name)
+        
+        # Delete the file from FTP
+        ftp_manager.ftp.delete(full_path)
+        
+        logger.info(f"Successfully deleted playlist: {playlist_name}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Playlist "{playlist_name}" deleted successfully'
+        })
+        
+    except Exception as e:
+        error_msg = f"Delete playlist error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/playlist/<int:playlist_id>/export', methods=['POST'])
+def export_playlist(playlist_id):
+    """Export a playlist with customizable options"""
+    logger.info(f"=== EXPORT PLAYLIST REQUEST - ID: {playlist_id} ===")
+    try:
+        data = request.get_json()
+        
+        # Get parameters with defaults
+        source_server = data.get('source_server', 'target')  # Server where playlist currently is
+        export_server = data.get('server', 'target')  # Destination server
+        export_path = data.get('export_path', '/mnt/main/Playlists')
+        filename = data.get('filename', '')
+        item_count = data.get('item_count', None)  # None means all items
+        shuffle = data.get('shuffle', False)
+        
+        logger.info(f"Export parameters: source={source_server}, dest={export_server}, path={export_path}, filename={filename}, item_count={item_count}, shuffle={shuffle}")
+        
+        # Get the playlist file from source server
+        if source_server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{source_server.capitalize()} server not connected'
+            })
+        
+        source_ftp_manager = ftp_managers[source_server]
+        playlist_path = '/mnt/main/Playlists'
+        files = source_ftp_manager.list_files(playlist_path)
+        
+        # Find the playlist by ID
+        playlist_files = [f for f in files if not f['name'].endswith('.sch')]
+        if playlist_id > len(playlist_files) or playlist_id < 1:
+            return jsonify({
+                'success': False,
+                'message': 'Playlist not found'
+            })
+        
+        playlist_file = playlist_files[playlist_id - 1]
+        playlist_name = playlist_file['name']
+        source_full_path = os.path.join(playlist_path, playlist_name)
+        
+        # Download and read the playlist
+        import tempfile
+        import json
+        
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        try:
+            # Download the playlist file
+            source_ftp_manager.download_file(source_full_path, temp_path)
+            
+            # Read and parse the content - handle Castus format (no outer braces)
+            with open(temp_path, 'r') as f:
+                content = f.read()
+            
+            # Try to parse as regular JSON first
+            try:
+                playlist_data = json.loads(content)
+                playlist_desc = playlist_data.get('playlist description', {})
+            except json.JSONDecodeError:
+                # Try Castus format (add outer braces)
+                try:
+                    playlist_data = json.loads('{' + content + '}')
+                    playlist_desc = playlist_data.get('playlist description', {})
+                except json.JSONDecodeError:
+                    logger.error("Failed to parse playlist file")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Invalid playlist format'
+                    })
+            
+            # Extract items
+            items = playlist_desc.get('list', [])
+            
+            # Apply filtering/modifications
+            if shuffle:
+                import random
+                items = items.copy()
+                random.shuffle(items)
+            
+            if item_count is not None and item_count < len(items):
+                items = items[:item_count]
+            
+            # Update the playlist data
+            playlist_desc['list'] = items
+            
+            # Use provided filename or default to original
+            if not filename:
+                filename = playlist_name
+            
+            # Ensure .ply extension
+            if not filename.endswith('.ply'):
+                filename = filename + '.ply'
+            
+            # Write modified playlist to temp file in Castus format (no outer braces)
+            with open(temp_path, 'w') as f:
+                # Create the full object, then manually format it
+                full_obj = {"playlist description": playlist_desc}
+                json_str = json.dumps(full_obj, indent=2)
+                
+                # Remove the outer braces for Castus format
+                lines = json_str.split('\n')
+                if lines[0] == '{' and lines[-1] == '}':
+                    lines = lines[1:-1]
+                    # Also remove the extra indentation from all lines
+                    lines = [line[2:] if line.startswith('  ') else line for line in lines]
+                
+                f.write('\n'.join(lines))
+            
+            # Upload to destination
+            dest_ftp_manager = ftp_managers[export_server]
+            dest_full_path = os.path.join(export_path, filename)
+            
+            success = dest_ftp_manager.upload_file(temp_path, dest_full_path)
+            
+            if success:
+                logger.info(f"Playlist exported successfully to {dest_full_path}")
+                return jsonify({
+                    'success': True,
+                    'message': f'Playlist exported to: {dest_full_path}',
+                    'path': dest_full_path,
+                    'item_count': len(items)
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to upload playlist to destination'
+                })
+                
+        finally:
+            # Clean up temp file
+            os.unlink(temp_path)
+        
+    except Exception as e:
+        error_msg = f"Export playlist error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/playlist/<int:playlist_id>/item/<int:item_id>', methods=['DELETE'])
+def remove_playlist_item(playlist_id, item_id):
+    """Remove an item from a playlist"""
+    logger.info(f"=== REMOVE PLAYLIST ITEM REQUEST - Playlist: {playlist_id}, Item: {item_id} ===")
+    try:
+        # This would need to:
+        # 1. Download the playlist file
+        # 2. Parse and modify it
+        # 3. Re-upload it
+        # For now, return a message indicating this feature needs implementation
+        
+        return jsonify({
+            'success': False,
+            'message': 'Removing playlist items requires downloading, modifying, and re-uploading the playlist file. This feature is not yet implemented.'
+        })
+        
+    except Exception as e:
+        error_msg = f"Remove playlist item error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
 @app.route('/api/export-schedule', methods=['POST'])
 def export_schedule():
     """Export a schedule to FTP server in Castus format"""
@@ -1393,6 +2082,75 @@ def export_schedule():
         error_msg = f"Export schedule error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
+
+def generate_simple_playlist_content(files):
+    """Generate content for a simple playlist in Castus format (no outer braces)"""
+    import json
+    
+    logger.debug(f"generate_simple_playlist_content called with {len(files)} files")
+    
+    playlist_desc = {
+        "title": "",
+        "author": "",
+        "play mode": "sequential",
+        "auto remove": True,
+        "editor view": {
+            "cursor frame": 0,
+            "view start": 0,
+            "view end": 299.7002997002997
+        },
+        "aspect ratio": {
+            "n": 16,
+            "d": 9
+        },
+        "timeline rate": {
+            "n": 30000,
+            "d": 1001
+        },
+        "list": [],
+        "duration": 0,
+        "invisible": False,
+        "mute": False
+    }
+    
+    # Add each file to the playlist
+    for file_path, file_name in files:
+        logger.debug(f"Processing file: {file_name} at {file_path}")
+        # Ensure proper path format
+        if not file_path.startswith('/mnt/main/ATL26 On-Air Content/'):
+            # Reconstruct the path
+            file_path = f"/mnt/main/ATL26 On-Air Content/FILL/GLOBAL FILL/{file_name}"
+        
+        item = {
+            "startFrame": 0,
+            "endFrame": 0,
+            "offsetFrame": None,
+            "start": 0,
+            "end": 0,
+            "offset": None,
+            "durationFrame": 0,
+            "duration": 0,
+            "isSelected": False,
+            "path": file_path,
+            "item duration": 0
+        }
+        playlist_desc["list"].append(item)
+    
+    logger.debug(f"Total items added to playlist: {len(playlist_desc['list'])}")
+    
+    # Format without outer braces to match Castus format
+    # First create the full object, then manually format it
+    full_obj = {"playlist description": playlist_desc}
+    json_str = json.dumps(full_obj, indent=2)
+    
+    # Remove the outer braces
+    lines = json_str.split('\n')
+    if lines[0] == '{' and lines[-1] == '}':
+        lines = lines[1:-1]
+        # Also remove the extra indentation from all lines
+        lines = [line[2:] if line.startswith('  ') else line for line in lines]
+    
+    return '\n'.join(lines)
 
 def generate_castus_schedule(schedule, items, date, format_type='daily'):
     # Reset day counter for weekly schedules
