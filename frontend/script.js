@@ -4271,6 +4271,528 @@ async function createMonthlySchedule() {
     }
 }
 
+// Function to list all playlists
+async function listAllPlaylists() {
+    console.log('Fetching all playlists...');
+    log('📋 Loading playlists...', 'info');
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/list-playlists');
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Playlists data:', data);
+        
+        if (data.success) {
+            displayPlaylistList(data.playlists);
+            log(`✅ Loaded ${data.playlists.length} playlists`, 'success');
+        } else {
+            log(`❌ ${data.message}`, 'error');
+            showNotification('Error Loading Playlists', data.message, 'error');
+        }
+    } catch (error) {
+        console.error('Error details:', error);
+        log(`❌ Error loading playlists: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Function to display playlist list
+function displayPlaylistList(playlists) {
+    const scheduleDisplay = document.getElementById('scheduleDisplay');
+    
+    if (!scheduleDisplay) return;
+    
+    if (!playlists || playlists.length === 0) {
+        scheduleDisplay.innerHTML = '<p>🎵 No playlists found. Create a playlist to get started.</p>';
+        return;
+    }
+    
+    let html = `
+        <div class="playlist-list-header">
+            <h4>🎵 Simple Playlists (${playlists.length} total)</h4>
+        </div>
+        <div class="playlist-list">
+    `;
+    
+    // Sort playlists by created date (newest first)
+    playlists.sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
+    
+    for (const playlist of playlists) {
+        const createdDate = new Date(playlist.created_date).toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        });
+        
+        html += `
+            <div class="playlist-list-item" data-playlist-id="${playlist.id}">
+                <div class="playlist-item-header">
+                    <div style="flex: 1;">
+                        <h5 style="margin: 0;">🎵 ${playlist.name}</h5>
+                        <span class="playlist-stats">${playlist.item_count || 0} items • Created: ${createdDate}${playlist.server ? ` • Server: ${playlist.server}` : ''}</span>
+                        ${playlist.description ? `<p style="margin: 5px 0 0 0; color: #666;">${playlist.description}</p>` : ''}
+                        ${playlist.path ? `<p style="margin: 2px 0 0 0; color: #999; font-size: 12px;">Path: ${playlist.path}</p>` : ''}
+                    </div>
+                    <div class="playlist-item-actions">
+                        <button class="button small primary" onclick="viewPlaylistItems(${playlist.id}, '${playlist.name}', '${playlist.server || 'target'}', '${playlist.path || '/mnt/main/Playlists'}')">
+                            <i class="fas fa-eye"></i> View Items
+                        </button>
+                        <button class="button small secondary" onclick="exportPlaylist(${playlist.id}, '${playlist.server || 'target'}', '${playlist.path || '/mnt/main/Playlists'}')">
+                            <i class="fas fa-download"></i> Export
+                        </button>
+                        <button class="button small danger" onclick="deletePlaylist(${playlist.id}, '${playlist.server || 'target'}', '${playlist.path || '/mnt/main/Playlists'}', '${playlist.name}')">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    html += '</div>';
+    scheduleDisplay.innerHTML = html;
+}
+
+// Function to view playlist items
+async function viewPlaylistItems(playlistId, playlistName, server = 'target', path = '/mnt/main/Playlists') {
+    console.log(`Loading items for playlist ${playlistId} from ${server} server at ${path}...`);
+    log(`📋 Loading playlist items for "${playlistName}" from ${server} server...`, 'info');
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${playlistId}/items?server=${server}&path=${encodeURIComponent(path)}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            displayPlaylistItems(data.playlist, data.items);
+            log(`✅ Loaded ${data.items.length} items`, 'success');
+        } else {
+            log(`❌ ${data.message}`, 'error');
+            showNotification('Error Loading Playlist Items', data.message, 'error');
+        }
+    } catch (error) {
+        log(`❌ Error loading playlist items: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Function to display playlist items
+function displayPlaylistItems(playlist, items) {
+    const scheduleDisplay = document.getElementById('scheduleDisplay');
+    
+    if (!scheduleDisplay) return;
+    
+    let html = `
+        <div class="playlist-header">
+            <button class="button small secondary" onclick="listAllPlaylists()" style="margin-bottom: 10px;">
+                <i class="fas fa-arrow-left"></i> Back to Playlists
+            </button>
+            <h4>🎵 ${playlist.name}</h4>
+            <p><strong>Description:</strong> ${playlist.description || 'No description'}</p>
+            <p><strong>Items:</strong> ${items.length} | <strong>Created:</strong> ${new Date(playlist.created_date).toLocaleString()}</p>
+        </div>
+        <div class="playlist-items">
+            <div class="playlist-table-header">
+                <span class="col-position">#</span>
+                <span class="col-filename">File Name</span>
+                <span class="col-filepath">File Path</span>
+                <span class="col-actions">Actions</span>
+            </div>
+    `;
+    
+    if (items && items.length > 0) {
+        items.forEach((item, index) => {
+            html += `
+                <div class="playlist-item-row" data-item-id="${item.id}">
+                    <span class="col-position">${item.position + 1}</span>
+                    <span class="col-filename" title="${item.file_name}">${item.file_name}</span>
+                    <span class="col-filepath" title="${item.file_path}">${item.file_path}</span>
+                    <span class="col-actions">
+                        <button class="button tiny danger" onclick="removePlaylistItem(${playlist.id}, ${item.id})">
+                            <i class="fas fa-times"></i> Remove
+                        </button>
+                    </span>
+                </div>
+            `;
+        });
+    } else {
+        html += '<div class="playlist-no-items"><p>No items in this playlist</p></div>';
+    }
+    
+    html += '</div>';
+    scheduleDisplay.innerHTML = html;
+}
+
+// Function to delete a playlist
+async function deletePlaylist(playlistId, server = 'target', path = '/mnt/main/Playlists', name = '') {
+    if (!confirm('Are you sure you want to delete this playlist?')) {
+        return;
+    }
+    
+    try {
+        let url = `http://127.0.0.1:5000/api/playlist/${playlistId}?server=${server}&path=${encodeURIComponent(path)}`;
+        if (name) {
+            url += `&name=${encodeURIComponent(name)}`;
+        }
+        
+        const response = await fetch(url, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            log(`✅ Playlist deleted successfully`, 'success');
+            showNotification('Playlist Deleted', 'The playlist has been removed', 'success');
+            // Refresh the playlist list
+            listAllPlaylists();
+        } else {
+            log(`❌ ${data.message}`, 'error');
+            showNotification('Delete Failed', data.message, 'error');
+        }
+    } catch (error) {
+        log(`❌ Error deleting playlist: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Function to export a playlist - shows modal for options
+async function exportPlaylist(playlistId, server = 'target') {
+    try {
+        console.log(`DEBUG: Fetching playlist ${playlistId} info for export from ${server} server...`);
+        
+        // First, get playlist info to populate the modal
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${playlistId}/items?server=${server}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('DEBUG: Playlist data received:', data);
+        
+        if (data.success) {
+            // Store the playlist data for export
+            window.currentExportPlaylist = {
+                id: playlistId,
+                name: data.playlist.name,
+                items: data.items,
+                totalItems: data.total_items,
+                sourceServer: server
+            };
+            
+            // Populate modal with playlist info
+            document.getElementById('exportPlaylistFilename').value = window.currentExportPlaylist.name;
+            document.getElementById('exportPlaylistInfo').innerHTML = `
+                <strong>Playlist:</strong> ${window.currentExportPlaylist.name}<br>
+                <strong>Total Items:</strong> ${window.currentExportPlaylist.totalItems}
+            `;
+            
+            // Show the modal
+            document.getElementById('playlistExportModal').style.display = 'block';
+            
+            // Add event listener for custom count selection
+            document.getElementById('exportPlaylistItemCount').addEventListener('change', function(e) {
+                const customInput = document.getElementById('exportPlaylistCustomCount');
+                if (e.target.value === 'custom') {
+                    customInput.style.display = 'block';
+                    customInput.focus();
+                } else {
+                    customInput.style.display = 'none';
+                }
+            });
+        } else {
+            console.error('DEBUG: API returned error:', data.message);
+            showNotification('Error', data.message || 'Failed to load playlist info', 'error');
+        }
+    } catch (error) {
+        console.error('DEBUG: Exception in exportPlaylist:', error);
+        log(`❌ Error loading playlist: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Function to remove an item from a playlist
+async function removePlaylistItem(playlistId, itemId) {
+    if (!confirm('Remove this item from the playlist?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${playlistId}/item/${itemId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            log(`✅ Item removed from playlist`, 'success');
+            // Refresh the playlist items
+            viewPlaylistItems(playlistId, data.playlist_name || 'Playlist');
+        } else {
+            log(`❌ ${data.message}`, 'error');
+            showNotification('Remove Failed', data.message, 'error');
+        }
+    } catch (error) {
+        log(`❌ Error removing item: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Show the simple playlist modal
+window.generateSimplePlaylist = function(event) {
+    console.log('Opening simple playlist modal');
+    document.getElementById('simplePlaylistModal').style.display = 'block';
+    
+    // Add event listener for custom count selection
+    document.getElementById('playlistItemCount').addEventListener('change', function(e) {
+        const customInput = document.getElementById('playlistCustomCount');
+        if (e.target.value === 'custom') {
+            customInput.style.display = 'block';
+            customInput.focus();
+        } else {
+            customInput.style.display = 'none';
+        }
+    });
+}
+
+// Close the simple playlist modal
+function closeSimplePlaylistModal() {
+    document.getElementById('simplePlaylistModal').style.display = 'none';
+    document.getElementById('playlistPreview').style.display = 'none';
+}
+
+// Close the playlist export modal
+function closePlaylistExportModal() {
+    document.getElementById('playlistExportModal').style.display = 'none';
+    window.currentExportPlaylist = null;
+}
+
+// Preview playlist files
+async function previewPlaylistFiles() {
+    const server = document.getElementById('playlistSourceServer').value;
+    const path = document.getElementById('playlistSourcePath').value;
+    
+    log('🔍 Previewing files...', 'info');
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/preview-playlist-files', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                server: server,
+                path: path
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            const previewDiv = document.getElementById('playlistPreview');
+            const previewContent = document.getElementById('playlistPreviewContent');
+            
+            let html = `<p>Found ${data.files.length} files:</p><ul style="margin: 0; padding-left: 20px;">`;
+            data.files.slice(0, 10).forEach(file => {
+                html += `<li>${file}</li>`;
+            });
+            if (data.files.length > 10) {
+                html += `<li><em>... and ${data.files.length - 10} more files</em></li>`;
+            }
+            html += '</ul>';
+            
+            previewContent.innerHTML = html;
+            previewDiv.style.display = 'block';
+        } else {
+            showNotification('Preview Failed', data.message, 'error');
+        }
+    } catch (error) {
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Confirm and create the playlist
+async function confirmCreatePlaylist() {
+    const server = document.getElementById('playlistSourceServer').value;
+    const sourcePath = document.getElementById('playlistSourcePath').value;
+    const exportPath = document.getElementById('playlistExportPath').value;
+    let filename = document.getElementById('playlistFilename').value;
+    const itemCountSelect = document.getElementById('playlistItemCount').value;
+    const customCount = document.getElementById('playlistCustomCount').value;
+    const shuffle = document.getElementById('playlistShuffle').checked;
+    
+    // Determine item count
+    let itemCount = null;
+    if (itemCountSelect === 'custom') {
+        itemCount = parseInt(customCount);
+        if (!itemCount || itemCount < 1) {
+            showNotification('Invalid Count', 'Please enter a valid number of items', 'error');
+            return;
+        }
+    } else if (itemCountSelect !== 'all') {
+        itemCount = parseInt(itemCountSelect);
+    }
+    
+    // Ensure filename doesn't have extension
+    if (!filename.endsWith('.json') && !filename.includes('.')) {
+        filename = filename;  // Keep as is for Castus format
+    }
+    
+    log('📋 Creating simple playlist...', 'info');
+    
+    // Show loading on button
+    const button = event.currentTarget;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+    button.disabled = true;
+    
+    try {
+        const requestBody = {
+            server: server,
+            source_path: sourcePath,
+            export_path: exportPath,
+            filename: filename,
+            item_count: itemCount,
+            shuffle: shuffle
+        };
+        console.log('Creating playlist with:', requestBody);
+        
+        const response = await fetch('http://127.0.0.1:5000/api/generate-simple-playlist', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            log(`✅ ${data.message}`, 'success');
+            if (data.file_count) {
+                log(`📁 Added ${data.file_count} files to playlist`, 'info');
+            }
+            // Show success notification
+            showNotification(
+                'Simple Playlist Created',
+                `Successfully created playlist "${filename}" with ${data.file_count || 0} files`,
+                'success'
+            );
+            
+            // Close modal
+            closeSimplePlaylistModal();
+            
+            // Optionally refresh playlist list if visible
+            if (document.getElementById('scheduleDisplay').innerHTML.includes('playlist-list')) {
+                listAllPlaylists();
+            }
+        } else {
+            log(`❌ ${data.message}`, 'error');
+            showNotification(
+                'Playlist Creation Failed',
+                data.message,
+                'error'
+            );
+        }
+    } catch (error) {
+        log(`❌ Error generating playlist: ${error.message}`, 'error');
+        showNotification(
+            'Playlist Creation Error',
+            error.message,
+            'error'
+        );
+    } finally {
+        // Restore button state
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
+    }
+}
+
+// Confirm and export the playlist with selected options
+async function confirmExportPlaylist() {
+    if (!window.currentExportPlaylist) {
+        showNotification('Error', 'No playlist selected for export', 'error');
+        return;
+    }
+    
+    const server = document.getElementById('exportPlaylistServer').value;
+    const exportPath = document.getElementById('exportPlaylistPath').value;
+    let filename = document.getElementById('exportPlaylistFilename').value;
+    const itemCountSelect = document.getElementById('exportPlaylistItemCount').value;
+    const customCount = document.getElementById('exportPlaylistCustomCount').value;
+    const shuffle = document.getElementById('exportPlaylistShuffle').checked;
+    
+    // Determine item count
+    let itemCount = null;
+    if (itemCountSelect === 'custom') {
+        itemCount = parseInt(customCount);
+        if (!itemCount || itemCount < 1) {
+            showNotification('Invalid Count', 'Please enter a valid number of items', 'error');
+            return;
+        }
+    } else if (itemCountSelect !== 'all') {
+        itemCount = parseInt(itemCountSelect);
+    }
+    
+    log('📥 Exporting playlist with custom options...', 'info');
+    
+    // Show loading on button
+    const button = event.currentTarget;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    button.disabled = true;
+    
+    try {
+        const requestBody = {
+            playlist_id: window.currentExportPlaylist.id,
+            source_server: window.currentExportPlaylist.sourceServer,  // Which server the playlist is on
+            server: server,  // Export destination server
+            export_path: exportPath,
+            filename: filename,
+            item_count: itemCount,
+            shuffle: shuffle
+        };
+        
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${window.currentExportPlaylist.id}/export`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            log(`✅ Playlist exported to ${data.path}`, 'success');
+            showNotification('Playlist Exported', `Exported to ${data.path}`, 'success');
+            closePlaylistExportModal();
+        } else {
+            log(`❌ ${data.message}`, 'error');
+            showNotification('Export Failed', data.message, 'error');
+        }
+    } catch (error) {
+        log(`❌ Error exporting playlist: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    } finally {
+        // Restore button state
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
+    }
+}
+
 async function previewSchedule() {
     const scheduleDate = document.getElementById('scheduleDate').value;
     const timeslot = document.getElementById('scheduleTimeslot').value;
