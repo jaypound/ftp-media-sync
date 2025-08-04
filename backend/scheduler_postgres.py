@@ -785,7 +785,8 @@ class PostgreSQLScheduler:
         
         conn = db_manager._get_connection()
         try:
-            cursor = conn.cursor()
+            # Use RealDictCursor for consistency
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # First get the asset_id of the item to be deleted
             cursor.execute("""
@@ -799,7 +800,7 @@ class PostgreSQLScheduler:
                 logger.warning(f"No item found with id {item_id} in schedule {schedule_id}")
                 return False
             
-            asset_id = result[0]
+            asset_id = result['asset_id']
             
             # Delete the item
             cursor.execute("""
@@ -1021,26 +1022,48 @@ class PostgreSQLScheduler:
         """Delete a schedule and all its items, decrementing total_airings for each scheduled asset"""
         conn = db_manager._get_connection()
         try:
-            cursor = conn.cursor()
+            # Use RealDictCursor to get results as dictionaries
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
             # First, get all items in this schedule and count occurrences
-            cursor.execute("""
+            query = """
                 SELECT asset_id, COUNT(*) as count
                 FROM scheduled_items
                 WHERE schedule_id = %s
                 GROUP BY asset_id
-            """, (schedule_id,))
+            """
+            logger.debug(f"Executing query: {query} with schedule_id={schedule_id}")
+            cursor.execute(query, (schedule_id,))
             
             asset_counts = cursor.fetchall()
+            logger.debug(f"Found {len(asset_counts)} unique assets in schedule {schedule_id}")
             
             # Decrement total_airings for each asset
-            for asset_id, count in asset_counts:
-                cursor.execute("""
-                    UPDATE scheduling_metadata
-                    SET total_airings = GREATEST(0, total_airings - %s)
-                    WHERE asset_id = %s
-                """, (count, asset_id))
-                logger.info(f"Decremented total_airings by {count} for asset {asset_id}")
+            for i, row in enumerate(asset_counts):
+                try:
+                    # Access dictionary keys instead of numeric indices
+                    asset_id = row['asset_id']
+                    count = row['count']
+                    
+                    logger.debug(f"Row {i}: asset_id={asset_id} (type: {type(asset_id)}), count={count} (type: {type(count)})")
+                    
+                    if asset_id is None:
+                        logger.warning(f"Skipping NULL asset_id with count {count}")
+                        continue
+                    
+                    if not isinstance(asset_id, (int, float)):
+                        logger.error(f"Invalid asset_id type: {type(asset_id)}, value: {asset_id}")
+                        continue
+                        
+                    cursor.execute("""
+                        UPDATE scheduling_metadata
+                        SET total_airings = GREATEST(0, total_airings - %s)
+                        WHERE asset_id = %s
+                    """, (count, asset_id))
+                    logger.info(f"Decremented total_airings by {count} for asset {asset_id}")
+                except Exception as e:
+                    logger.error(f"Error processing row {i}: {str(e)}, row data: {row}")
+                    raise
             
             # Delete schedule (items will cascade)
             cursor.execute("DELETE FROM schedules WHERE id = %s", (schedule_id,))

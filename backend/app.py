@@ -1492,13 +1492,15 @@ def list_playlists():
         ]
         
         # Check both servers
+        logger.info(f"Available FTP managers: {list(ftp_managers.keys())}")
         for server_name in ['target', 'source']:
+            logger.info(f"=== Checking {server_name} server ===")
             if server_name not in ftp_managers:
-                logger.info(f"{server_name} server not connected, skipping")
+                logger.warning(f"{server_name} server not connected, skipping")
                 continue
                 
             ftp_manager = ftp_managers[server_name]
-            logger.info(f"Checking {server_name} server for playlists")
+            logger.info(f"Successfully got {server_name} FTP manager")
             
             # Check each possible path
             for playlist_path in playlist_paths:
