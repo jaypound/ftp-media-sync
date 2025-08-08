@@ -25,8 +25,9 @@ class PostgreSQLScheduler:
         """Load configuration on first use to avoid circular imports"""
         if not self._config_loaded:
             try:
-                from config_manager import config_manager
-                scheduling_config = config_manager.get_scheduling_settings()
+                from config_manager import ConfigManager
+                config_mgr = ConfigManager()
+                scheduling_config = config_mgr.get_scheduling_settings()
                 rotation_order = scheduling_config.get('rotation_order')
                 if rotation_order:
                     self.duration_rotation = rotation_order

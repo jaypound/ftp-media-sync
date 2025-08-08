@@ -3304,38 +3304,69 @@ def fill_template_gaps():
         for content in available_content:
             content_by_id[content.get('id')] = content
         
+        # Debug: Log available content info
+        logger.info(f"Available content count: {len(available_content)}")
+        if available_content:
+            # Check a sample item
+            sample = available_content[0]
+            logger.info(f"Sample content item keys: {list(sample.keys())}")
+            logger.info(f"Sample duration_category: {sample.get('duration_category')}")
+            
+            # Count items by duration category
+            category_counts = {}
+            for content in available_content:
+                cat = content.get('duration_category', 'none')
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+            logger.info(f"Content by category: {category_counts}")
+        
         # Track what we've scheduled
-        scheduled_asset_ids = []
+        scheduled_asset_ids = []  # We'll track this differently now
         items_added = []
         
-        # Get existing items' IDs to avoid duplicates
+        # Track last scheduled time for each asset (for replay delays)
+        asset_last_scheduled = {}
         for item in template.get('items', []):
-            asset_id = item.get('asset_id') or item.get('id')
-            if asset_id:
-                scheduled_asset_ids.append(asset_id)
+            asset_id = item.get('asset_id') or item.get('id') or item.get('content_id')
+            if asset_id and 'start_time' in item and item['start_time']:
+                # Track the last time this asset was scheduled
+                asset_last_scheduled[asset_id] = item
+        
+        logger.info(f"Assets in current template: {len(asset_last_scheduled)}")
         
         # Fill gaps using rotation logic
         current_position = total_duration
+        consecutive_errors = 0
+        max_errors = 100  # Same as in create schedule
         
         while current_position < target_duration:
             # Get next duration category from rotation
             duration_category = scheduler._get_next_duration_category()
             
-            # Filter available content by category and exclusions
+            # Filter available content by category
             category_content = []
+            wrong_category = 0
+            
             for content in available_content:
-                # Skip if already scheduled
-                content_id = content.get('id')
-                if content_id in scheduled_asset_ids:
-                    continue
-                
                 # Check duration category
                 if content.get('duration_category') == duration_category:
                     category_content.append(content)
+                else:
+                    wrong_category += 1
+            
+            if not category_content:
+                logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, total_available={len(available_content)}")
             
             if not category_content:
                 # Try next category if no content available
                 logger.warning(f"No content available for category: {duration_category}")
+                consecutive_errors += 1
+                
+                # Check if we've hit too many consecutive errors
+                if consecutive_errors >= max_errors:
+                    logger.error(f"Aborting fill gaps: {consecutive_errors} consecutive errors")
+                    break
+                
+                # Don't reset rotation - just continue to the next category
                 continue
             
             # Sort by engagement score and shelf life (like scheduler does)
@@ -3346,7 +3377,9 @@ def fill_template_gaps():
             
             # Select the best content
             selected = category_content[0]
-            duration = float(selected.get('duration_seconds', 0))
+            # Check for duration_seconds or file_duration
+            duration = float(selected.get('duration_seconds', selected.get('file_duration', 0)))
+            consecutive_errors = 0  # Reset consecutive error counter
             
             # Check if it fits
             remaining = target_duration - current_position
@@ -3354,7 +3387,7 @@ def fill_template_gaps():
                 # Try to find shorter content that fits
                 found_fit = False
                 for alt_content in category_content[1:]:
-                    alt_duration = float(alt_content.get('duration_seconds', 0))
+                    alt_duration = float(alt_content.get('duration_seconds', alt_content.get('file_duration', 0)))
                     if alt_duration <= remaining:
                         selected = alt_content
                         duration = alt_duration
@@ -3375,15 +3408,19 @@ def fill_template_gaps():
                 'duration_seconds': duration,
                 'duration_category': selected.get('duration_category'),
                 'content_type': selected.get('content_type'),
-                'guid': selected.get('guid', ''),
-                # Start time will be calculated by frontend
-                'start_time': None,
-                'end_time': None
+                'guid': selected.get('guid', '')
+                # Don't set start_time and end_time - let frontend calculate them
             }
             
             items_added.append(new_item)
-            scheduled_asset_ids.append(selected.get('id'))
+            # Don't track scheduled_asset_ids anymore - allow duplicates
             current_position += duration
+            
+            # Log progress every 10 items to prevent timeout appearance
+            if len(items_added) % 10 == 0:
+                logger.info(f"Fill gaps progress: {len(items_added)} items added, {current_position/3600:.1f} hours filled")
+        
+        logger.info(f"Fill gaps completed: {len(items_added)} total items added, {current_position/3600:.1f} hours total")
         
         return jsonify({
             'success': True,

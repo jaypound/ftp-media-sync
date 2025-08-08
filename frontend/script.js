@@ -7545,8 +7545,8 @@ async function fillScheduleGaps() {
                     // Add the new items to the template
                     currentTemplate.items.push(...result.items_added);
                     
-                    // Recalculate times for all items
-                    recalculateTemplateTimes();
+                    // Sort items by start time and fill gaps
+                    fillGapsWithProperTimes();
                     
                     // Update the template display
                     const activePanel = document.querySelector('.panel:not([style*="display: none"])');
@@ -7703,17 +7703,151 @@ async function loadSelectedTemplate() {
     }
 }
 
+function fillGapsWithProperTimes() {
+    if (!currentTemplate || !currentTemplate.items) return;
+    
+    // Separate items with fixed times (imported) from items without times (newly added)
+    const itemsWithTimes = [];
+    const itemsWithoutTimes = [];
+    
+    currentTemplate.items.forEach(item => {
+        if (item.start_time && 
+            item.start_time !== "00:00:00:00" && 
+            item.start_time !== "00:00:00" && 
+            item.start_time !== null) {
+            itemsWithTimes.push(item);
+        } else {
+            itemsWithoutTimes.push(item);
+        }
+    });
+    
+    // Sort items with times by their start time
+    itemsWithTimes.sort((a, b) => {
+        const timeA = parseTimeToSeconds(a.start_time);
+        const timeB = parseTimeToSeconds(b.start_time);
+        return timeA - timeB;
+    });
+    
+    // Clear the items array
+    currentTemplate.items = [];
+    
+    // Now fill gaps with the new items
+    let newItemIndex = 0;
+    let currentTime = 0; // Start from midnight
+    
+    // Add items before the first fixed item
+    if (itemsWithTimes.length > 0) {
+        const firstFixedTime = parseTimeToSeconds(itemsWithTimes[0].start_time);
+        
+        // Fill from midnight to first fixed item
+        while (currentTime < firstFixedTime && newItemIndex < itemsWithoutTimes.length) {
+            const item = itemsWithoutTimes[newItemIndex];
+            const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
+            
+            // Check if this item fits before the fixed item
+            if (currentTime + duration <= firstFixedTime) {
+                item.start_time = formatTimeFromSeconds(currentTime);
+                item.end_time = formatTimeFromSeconds(currentTime + duration);
+                currentTemplate.items.push(item);
+                currentTime += duration;
+                newItemIndex++;
+            } else {
+                // Item doesn't fit, skip to after the fixed item
+                break;
+            }
+        }
+    }
+    
+    // Add the fixed items and fill gaps between them
+    for (let i = 0; i < itemsWithTimes.length; i++) {
+        const fixedItem = itemsWithTimes[i];
+        currentTemplate.items.push(fixedItem);
+        
+        // Update current time to end of this fixed item
+        const fixedStartTime = parseTimeToSeconds(fixedItem.start_time);
+        const fixedDuration = parseFloat(fixedItem.duration_seconds || 0);
+        currentTime = fixedStartTime + fixedDuration;
+        
+        // Determine the next fixed item time or end of day
+        const nextFixedTime = (i < itemsWithTimes.length - 1) 
+            ? parseTimeToSeconds(itemsWithTimes[i + 1].start_time)
+            : 24 * 60 * 60; // End of day
+        
+        // Fill gap until next fixed item
+        while (currentTime < nextFixedTime && newItemIndex < itemsWithoutTimes.length) {
+            const item = itemsWithoutTimes[newItemIndex];
+            const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
+            
+            // Check if this item fits before the next fixed item
+            if (currentTime + duration <= nextFixedTime) {
+                item.start_time = formatTimeFromSeconds(currentTime);
+                item.end_time = formatTimeFromSeconds(currentTime + duration);
+                currentTemplate.items.push(item);
+                currentTime += duration;
+                newItemIndex++;
+            } else {
+                // Item doesn't fit, skip to after the next fixed item
+                break;
+            }
+        }
+    }
+    
+    // Add any remaining items at the end of the day
+    while (newItemIndex < itemsWithoutTimes.length && currentTime < 24 * 60 * 60) {
+        const item = itemsWithoutTimes[newItemIndex];
+        const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
+        
+        item.start_time = formatTimeFromSeconds(currentTime);
+        item.end_time = formatTimeFromSeconds(currentTime + duration);
+        currentTemplate.items.push(item);
+        currentTime += duration;
+        newItemIndex++;
+    }
+}
+
+function parseTimeToSeconds(timeStr) {
+    if (!timeStr) return 0;
+    
+    // Handle different time formats
+    const parts = timeStr.split(':');
+    let hours = 0, minutes = 0, seconds = 0;
+    
+    if (parts.length >= 3) {
+        hours = parseInt(parts[0]) || 0;
+        minutes = parseInt(parts[1]) || 0;
+        seconds = parseFloat(parts[2]) || 0;
+    }
+    
+    return hours * 3600 + minutes * 60 + seconds;
+}
+
+function formatTimeFromSeconds(totalSeconds, format = 'daily') {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    const frames = 0; // We'll use 0 frames for simplicity
+    
+    if (format === 'daily') {
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+    }
+    // Add weekly format support if needed
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+}
+
 function recalculateTemplateTimes() {
     if (!currentTemplate || !currentTemplate.items) return;
     
-    // Check if we should preserve existing times (i.e., loaded from file with milliseconds)
-    const hasExistingTimes = currentTemplate.items.length > 0 && 
-                           currentTemplate.items[0].start_time && 
-                           currentTemplate.items[0].start_time !== "00:00:00:00" &&
-                           currentTemplate.items[0].start_time !== null;
+    // Check if ALL items have valid times (not just the first one)
+    const allItemsHaveValidTimes = currentTemplate.items.length > 0 && 
+                                  currentTemplate.items.every(item => 
+                                      item.start_time && 
+                                      item.start_time !== "00:00:00:00" &&
+                                      item.start_time !== "00:00:00" &&
+                                      item.start_time !== null
+                                  );
     
-    if (hasExistingTimes) {
-        // Don't recalculate - times are already set from the imported file
+    if (allItemsHaveValidTimes) {
+        // Don't recalculate - all times are already set
         return;
     }
     
