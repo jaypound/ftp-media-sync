@@ -7440,6 +7440,15 @@ async function fillScheduleGaps() {
             return;
         }
         
+        // Debug: Log current template items at the very start
+        console.log('=== fillScheduleGaps START - currentTemplate state ===');
+        console.log('  Type:', currentTemplate.type);
+        console.log('  Total items:', currentTemplate.items.length);
+        console.log('  First 3 items:');
+        currentTemplate.items.slice(0, 3).forEach((item, idx) => {
+            console.log(`    Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
+        });
+        
         // Make sure we're on the dashboard to see the template
         const activePanel = document.querySelector('.panel:not([style*="display: none"])');
         if (activePanel && activePanel.id !== 'dashboard') {
@@ -7528,12 +7537,72 @@ async function fillScheduleGaps() {
                 // Call backend to fill gaps using proper rotation logic
                 log('fillScheduleGaps: Calling backend to fill gaps with rotation logic', 'info');
                 
+                // First, clean the template to only include items with valid start times
+                // For weekly templates, ensure items have day prefixes
+                const cleanTemplate = {
+                    ...currentTemplate,
+                    items: currentTemplate.items.filter(item => {
+                        if (!item.start_time || item.start_time === "00:00:00:00" || 
+                            item.start_time === "00:00:00" || item.start_time === null) {
+                            return false;
+                        }
+                        
+                        // For weekly templates, warn if no day prefix but still include the item
+                        if (currentTemplate.type === 'weekly' && !item.start_time.toString().includes(' ')) {
+                            console.warn(`Weekly template item missing day prefix: "${item.start_time}"`);
+                        }
+                        
+                        return true;
+                    })
+                };
+                
+                console.log(`Cleaned template has ${cleanTemplate.items.length} items with valid times (from ${currentTemplate.items.length} total)`);
+                console.log('First 3 items being sent:');
+                cleanTemplate.items.slice(0, 3).forEach((item, idx) => {
+                    console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
+                });
+                
+                // Debug: Show all items in cleanTemplate before gap calculation
+                console.log('Items in cleanTemplate before gap calculation:');
+                cleanTemplate.items.forEach((item, idx) => {
+                    const startSeconds = currentTemplate.type === 'weekly' && item.start_time.includes(' ') 
+                        ? parseWeeklyTimeToSeconds(item.start_time) 
+                        : parseTimeToSeconds(item.start_time);
+                    console.log(`  ${idx}: "${item.title || item.file_name}" at ${item.start_time} (${startSeconds/3600}h)`);
+                });
+                
+                // Calculate the actual gaps to fill
+                const gaps = calculateScheduleGaps(cleanTemplate);
+                console.log('Calculated gaps to fill:', gaps);
+                
+                // Validate gaps don't contain any fixed items
+                let invalidGaps = false;
+                gaps.forEach((gap, gapIdx) => {
+                    cleanTemplate.items.forEach(item => {
+                        const itemStart = currentTemplate.type === 'weekly' && item.start_time.includes(' ')
+                            ? parseWeeklyTimeToSeconds(item.start_time)
+                            : parseTimeToSeconds(item.start_time);
+                        
+                        if (itemStart > gap.start && itemStart < gap.end) {
+                            console.error(`ERROR: Gap ${gapIdx + 1} (${gap.start/3600}h-${gap.end/3600}h) contains fixed item at ${itemStart/3600}h!`);
+                            console.error(`  This will cause overlap issues. Gap calculation is incorrect.`);
+                            invalidGaps = true;
+                        }
+                    });
+                });
+                
+                if (invalidGaps) {
+                    alert('Error: Gap calculation found overlapping items. This may be due to items without proper time formatting. Please check the template and try again.');
+                    return;
+                }
+                
                 const response = await fetch('http://127.0.0.1:5000/api/fill-template-gaps', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        template: currentTemplate,
-                        available_content: availableContent
+                        template: cleanTemplate,
+                        available_content: availableContent,
+                        gaps: gaps
                     })
                 });
                 
@@ -7542,11 +7611,28 @@ async function fillScheduleGaps() {
                 if (result.success && result.items_added && result.items_added.length > 0) {
                     log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
                     
-                    // Add the new items to the template
-                    currentTemplate.items.push(...result.items_added);
+                    // Log the state before adding items
+                    console.log('Before adding new items:', cleanTemplate.items.length, 'fixed items');
+                    
+                    // Replace template items with fixed items plus new items
+                    currentTemplate.items = [...cleanTemplate.items, ...result.items_added];
+                    
+                    console.log('After adding new items:', currentTemplate.items.length, 'items');
+                    
+                    // Debug: Log before fillGapsWithProperTimes
+                    console.log('Before fillGapsWithProperTimes - First 3 items:');
+                    currentTemplate.items.slice(0, 3).forEach((item, idx) => {
+                        console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
+                    });
                     
                     // Sort items by start time and fill gaps
                     fillGapsWithProperTimes();
+                    
+                    console.log('After fillGapsWithProperTimes:', currentTemplate.items.length, 'items');
+                    console.log('After fillGapsWithProperTimes - First 3 items:');
+                    currentTemplate.items.slice(0, 3).forEach((item, idx) => {
+                        console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
+                    });
                     
                     // Update the template display
                     const activePanel = document.querySelector('.panel:not([style*="display: none"])');
@@ -7560,7 +7646,23 @@ async function fillScheduleGaps() {
                     log(`fillScheduleGaps: Template now has ${currentTemplate.items.length} items`, 'success');
                 } else {
                     log(`fillScheduleGaps: ${result.message || 'No suitable content found to fill gaps'}`, 'warning');
-                    alert(result.message || 'Could not find suitable content to fill the schedule gaps. Try analyzing more content.');
+                    
+                    // Check if we have overlap details
+                    if (result.overlap_details) {
+                        const details = result.overlap_details;
+                        const detailMsg = `\n\nOverlap Details:\n` +
+                            `- New item: "${details.new_item.title}" (${details.new_item.start_hours.toFixed(2)}h - ${details.new_item.end_hours.toFixed(2)}h)\n` +
+                            `- Original item: "${details.original_item.title}" at ${details.original_item.start_time} (${details.original_item.start_hours.toFixed(2)}h - ${details.original_item.end_hours.toFixed(2)}h)\n` +
+                            `- Gap was: ${details.gap.start_hours.toFixed(2)}h - ${details.gap.end_hours.toFixed(2)}h`;
+                        alert(result.message + detailMsg);
+                        console.error('Overlap detected:', details);
+                    } else if (result.verification_errors) {
+                        const errorMsg = result.message + '\n\nVerification Errors:\n' + result.verification_errors.join('\n');
+                        alert(errorMsg);
+                        console.error('Verification failed:', result.verification_errors);
+                    } else {
+                        alert(result.message || 'Could not find suitable content to fill the schedule gaps. Try analyzing more content.');
+                    }
                 }
             } catch (error) {
                 log(`fillScheduleGaps: Error filling gaps - ${error.message}`, 'error');
@@ -7672,12 +7774,31 @@ async function loadSelectedTemplate() {
         console.log('Load template result:', result);
         
         if (result.success && result.template) {
+            // Debug: Check what we received from backend
+            console.log('Raw template from backend - first 3 items:');
+            result.template.items.slice(0, 3).forEach((item, idx) => {
+                console.log(`  Item ${idx}: start_time="${item.start_time}"`);
+            });
+            
             currentTemplate = result.template;
             currentTemplate.filename = result.filename;
             currentTemplate.type = result.template.type || 'daily'; // Store schedule type
             
+            // Debug: Log loaded template items
+            console.log('Template loaded with type:', currentTemplate.type);
+            console.log('First 3 items after loading:');
+            currentTemplate.items.slice(0, 3).forEach((item, idx) => {
+                console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
+            });
+            
             // Display template info
             displayTemplate();
+            
+            // Debug: Log items after displayTemplate
+            console.log('First 3 items after displayTemplate:');
+            currentTemplate.items.slice(0, 3).forEach((item, idx) => {
+                console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
+            });
             
             // Update available content to show add buttons
             if (availableContent && availableContent.length > 0) {
@@ -7703,41 +7824,305 @@ async function loadSelectedTemplate() {
     }
 }
 
+function calculateScheduleGaps(template) {
+    console.log('calculateScheduleGaps: Starting gap calculation');
+    
+    if (!template || !template.items || template.items.length === 0) {
+        // No items, entire week is a gap
+        if (template.type === 'weekly') {
+            return [{
+                start: 0,
+                end: 7 * 24 * 3600,
+                day: 'all'
+            }];
+        } else {
+            return [{
+                start: 0,
+                end: 24 * 3600,
+                day: 'daily'
+            }];
+        }
+    }
+    
+    const gaps = [];
+    const isWeekly = template.type === 'weekly';
+    
+    // First, log all original items with times
+    console.log('Original items with times:');
+    template.items.forEach((item, idx) => {
+        if (item.start_time) {
+            console.log(`  Item ${idx}: "${item.title || item.file_name}" at ${item.start_time} (duration: ${item.duration_seconds}s)`);
+        } else {
+            console.warn(`  Item ${idx}: "${item.title || item.file_name}" has NO start_time!`);
+        }
+    });
+    
+    // Count items with valid times
+    const itemsWithTimes = template.items.filter(item => item.start_time && item.start_time !== "00:00:00").length;
+    console.log(`Total items: ${template.items.length}, Items with valid times: ${itemsWithTimes}`);
+    
+    // For weekly templates with daily-formatted times, we should warn the user
+    if (isWeekly) {
+        const itemsWithTimes = template.items.filter(item => item.start_time);
+        const allDailyFormat = itemsWithTimes.every(item => !item.start_time.toString().includes(' '));
+        
+        if (allDailyFormat && itemsWithTimes.length > 0) {
+            console.warn('WARNING: Weekly template has daily-formatted times. All meetings appear to be on same day!');
+            console.warn('This will cause overlaps. Please update the template to include day prefixes (e.g., "mon 08:00:00")');
+        }
+    }
+    // Sort items by start time
+    const sortedItems = [...template.items].filter(item => item.start_time).sort((a, b) => {
+        if (isWeekly) {
+            // Check if times have day prefix
+            const hasDay_a = a.start_time && a.start_time.toString().includes(' ');
+            const hasDay_b = b.start_time && b.start_time.toString().includes(' ');
+            
+            let timeA, timeB;
+            if (hasDay_a) {
+                timeA = parseWeeklyTimeToSeconds(a.start_time);
+            } else {
+                // Daily time in weekly template - treat as time on first day (Sunday)
+                timeA = parseTimeToSeconds(a.start_time);
+            }
+            
+            if (hasDay_b) {
+                timeB = parseWeeklyTimeToSeconds(b.start_time);
+            } else {
+                // Daily time in weekly template - treat as time on first day (Sunday)
+                timeB = parseTimeToSeconds(b.start_time);
+            }
+            
+            return timeA - timeB;
+        } else {
+            const timeA = parseTimeToSeconds(a.start_time);
+            const timeB = parseTimeToSeconds(b.start_time);
+            return timeA - timeB;
+        }
+    });
+    
+    console.log(`Sorted ${sortedItems.length} items with start times`);
+    
+    let lastEndTime = 0;
+    
+    // Find gaps between items
+    sortedItems.forEach((item, idx) => {
+        let itemStartTime, itemEndTime;
+        
+        console.log(`\nProcessing sorted item ${idx}:`);
+        console.log(`  Title: "${item.title || item.file_name}"`);
+        console.log(`  Start time: ${item.start_time}`);
+        console.log(`  Duration: ${item.duration_seconds}s`);
+        
+        if (isWeekly) {
+            // Check if time has day prefix
+            const hasDay = item.start_time && item.start_time.toString().includes(' ');
+            
+            if (hasDay) {
+                itemStartTime = parseWeeklyTimeToSeconds(item.start_time);
+            } else {
+                // Daily time in weekly template - treat as time on first day
+                itemStartTime = parseTimeToSeconds(item.start_time);
+            }
+            
+            // Calculate end time from duration
+            const duration = parseFloat(item.duration_seconds || 0);
+            itemEndTime = itemStartTime + duration;
+        } else {
+            itemStartTime = parseTimeToSeconds(item.start_time);
+            const duration = parseFloat(item.duration_seconds || 0);
+            itemEndTime = itemStartTime + duration;
+        }
+        
+        console.log(`  Calculated times: start=${itemStartTime}s (${itemStartTime/3600}h), end=${itemEndTime}s (${itemEndTime/3600}h)`);
+        console.log(`  Last end time was: ${lastEndTime}s (${lastEndTime/3600}h)`);
+        
+        // If there's a gap before this item
+        if (itemStartTime > lastEndTime + 0.001) { // Add small tolerance for floating point
+            const gap = {
+                // Round to 3 decimal places to avoid floating point precision issues
+                start: Math.round(lastEndTime * 1000) / 1000,
+                end: Math.round(itemStartTime * 1000) / 1000
+            };
+            gaps.push(gap);
+            console.log(`Gap found: ${gap.start/3600}h - ${gap.end/3600}h (${(gap.end-gap.start)/3600}h duration)`);
+        } else if (itemStartTime < lastEndTime - 0.001) {
+            // Items overlap!
+            console.warn(`WARNING: Items overlap! Previous item ends at ${lastEndTime/3600}h but current item starts at ${itemStartTime/3600}h`);
+            console.warn(`  Previous item extends ${(lastEndTime - itemStartTime)/3600}h into current item`);
+        }
+        
+        console.log(`Item "${item.title || item.file_name}" occupies ${itemStartTime/3600}h - ${itemEndTime/3600}h`);
+        // Round to avoid floating point accumulation errors
+        lastEndTime = Math.round(Math.max(lastEndTime, itemEndTime) * 1000) / 1000;
+    });
+    
+    // Check for gap at the end
+    const targetDuration = isWeekly ? (7 * 24 * 3600) : (24 * 3600);
+    if (lastEndTime < targetDuration - 0.001) { // Add small tolerance
+        gaps.push({
+            // Round to 3 decimal places
+            start: Math.round(lastEndTime * 1000) / 1000,
+            end: targetDuration
+        });
+        console.log(`Final gap: ${gaps[gaps.length-1].start/3600}h - ${targetDuration/3600}h (${(targetDuration-gaps[gaps.length-1].start)/3600}h duration)`);
+    }
+    
+    console.log(`Total gaps found: ${gaps.length}`);
+    gaps.forEach((gap, idx) => {
+        console.log(`  Gap ${idx + 1}: ${gap.start/3600}h - ${gap.end/3600}h`);
+        
+        // Verify gap doesn't overlap with any original items
+        sortedItems.forEach(item => {
+            let itemStart;
+            if (isWeekly && item.start_time && item.start_time.toString().includes(' ')) {
+                itemStart = parseWeeklyTimeToSeconds(item.start_time);
+            } else {
+                itemStart = parseTimeToSeconds(item.start_time);
+            }
+            
+            if (itemStart > gap.start && itemStart < gap.end) {
+                console.error(`ERROR: Gap ${idx + 1} (${gap.start/3600}h-${gap.end/3600}h) contains item at ${itemStart/3600}h!`);
+                console.error(`  Item: "${item.title || item.file_name}" at ${item.start_time}`);
+            }
+        });
+    });
+    
+    return gaps;
+}
+
 function fillGapsWithProperTimes() {
     if (!currentTemplate || !currentTemplate.items) return;
+    
+    const isWeekly = currentTemplate.type === 'weekly';
     
     // Separate items with fixed times (imported) from items without times (newly added)
     const itemsWithTimes = [];
     const itemsWithoutTimes = [];
     
-    currentTemplate.items.forEach(item => {
+    console.log('fillGapsWithProperTimes: Total items before:', currentTemplate.items.length);
+    
+    currentTemplate.items.forEach((item, index) => {
         if (item.start_time && 
             item.start_time !== "00:00:00:00" && 
             item.start_time !== "00:00:00" && 
             item.start_time !== null) {
-            itemsWithTimes.push(item);
+            // Store the original item with its index to preserve it exactly
+            itemsWithTimes.push({item: item, originalIndex: index});
+            console.log('Fixed item found:', item.title || item.file_name, 'at', item.start_time);
         } else {
             itemsWithoutTimes.push(item);
         }
     });
     
+    console.log('Fixed items:', itemsWithTimes.length, 'New items:', itemsWithoutTimes.length);
+    
     // Sort items with times by their start time
     itemsWithTimes.sort((a, b) => {
-        const timeA = parseTimeToSeconds(a.start_time);
-        const timeB = parseTimeToSeconds(b.start_time);
-        return timeA - timeB;
+        if (isWeekly) {
+            const timeA = parseWeeklyTimeToSeconds(a.item.start_time);
+            const timeB = parseWeeklyTimeToSeconds(b.item.start_time);
+            return timeA - timeB;
+        } else {
+            const timeA = parseTimeToSeconds(a.item.start_time);
+            const timeB = parseTimeToSeconds(b.item.start_time);
+            return timeA - timeB;
+        }
     });
     
-    // Clear the items array
-    currentTemplate.items = [];
+    // DON'T clear items - we'll build a new array and replace at the end
+    const newItemsArray = [];
     
+    if (isWeekly) {
+        fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray);
+    } else {
+        fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray);
+    }
+    
+    // Now replace the items array with our properly ordered array
+    currentTemplate.items = newItemsArray;
+    
+    console.log('fillGapsWithProperTimes: Total items after:', currentTemplate.items.length);
+}
+
+function fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
+    const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    let newItemIndex = 0;
+    
+    // Process each day separately
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const dayName = days[dayIndex];
+        let currentDayTime = 0; // Start from midnight of this day
+        console.log(`Processing ${dayName}, starting with item index ${newItemIndex}`);
+        
+        // Get fixed items for this day only
+        const dayFixedItems = itemsWithTimes.filter(wrapper => {
+            const itemDay = extractDayFromWeeklyTime(wrapper.item.start_time);
+            return itemDay === dayName;
+        });
+        
+        // Sort fixed items for this day by time
+        dayFixedItems.sort((a, b) => {
+            const timeA = extractTimeFromWeeklyTime(a.item.start_time);
+            const timeB = extractTimeFromWeeklyTime(b.item.start_time);
+            return timeA - timeB;
+        });
+        
+        // Fill gaps for this day
+        for (let i = 0; i <= dayFixedItems.length; i++) {
+            let gapEnd;
+            
+            if (i < dayFixedItems.length) {
+                // Gap ends at the next fixed item
+                gapEnd = extractTimeFromWeeklyTime(dayFixedItems[i].item.start_time);
+            } else {
+                // Gap ends at midnight (24 hours)
+                gapEnd = 24 * 3600;
+            }
+            
+            // Fill the gap
+            while (currentDayTime < gapEnd && newItemIndex < itemsWithoutTimes.length) {
+                const item = itemsWithoutTimes[newItemIndex];
+                const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
+                
+                // Check if item fits within this day (don't cross midnight)
+                if (currentDayTime + duration <= gapEnd && currentDayTime + duration <= 24 * 3600) {
+                    item.start_time = formatWeeklyTime(dayName, currentDayTime);
+                    item.end_time = formatWeeklyTime(dayName, currentDayTime + duration);
+                    newItemsArray.push(item);
+                    currentDayTime += duration;
+                    newItemIndex++;
+                } else {
+                    // Item doesn't fit in remaining time today
+                    console.log(`Item doesn't fit in ${dayName}, duration ${duration}, remaining time ${gapEnd - currentDayTime}`);
+                    // Skip to next day
+                    break;
+                }
+            }
+            
+            // Add the fixed item (if not the last iteration)
+            if (i < dayFixedItems.length) {
+                // Push the ORIGINAL item, not a copy, to preserve all properties
+                const fixedItem = dayFixedItems[i].item;
+                console.log('Adding fixed item:', fixedItem.title || fixedItem.file_name, 'at', fixedItem.start_time);
+                newItemsArray.push(fixedItem);
+                // Update current time to after this fixed item
+                const fixedStartTime = extractTimeFromWeeklyTime(fixedItem.start_time);
+                const fixedDuration = parseFloat(fixedItem.duration_seconds || 0);
+                currentDayTime = fixedStartTime + fixedDuration;
+            }
+        }
+    }
+}
+
+function fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
     // Now fill gaps with the new items
     let newItemIndex = 0;
     let currentTime = 0; // Start from midnight
     
     // Add items before the first fixed item
     if (itemsWithTimes.length > 0) {
-        const firstFixedTime = parseTimeToSeconds(itemsWithTimes[0].start_time);
+        const firstFixedTime = parseTimeToSeconds(itemsWithTimes[0].item.start_time);
         
         // Fill from midnight to first fixed item
         while (currentTime < firstFixedTime && newItemIndex < itemsWithoutTimes.length) {
@@ -7748,7 +8133,7 @@ function fillGapsWithProperTimes() {
             if (currentTime + duration <= firstFixedTime) {
                 item.start_time = formatTimeFromSeconds(currentTime);
                 item.end_time = formatTimeFromSeconds(currentTime + duration);
-                currentTemplate.items.push(item);
+                newItemsArray.push(item);
                 currentTime += duration;
                 newItemIndex++;
             } else {
@@ -7760,8 +8145,8 @@ function fillGapsWithProperTimes() {
     
     // Add the fixed items and fill gaps between them
     for (let i = 0; i < itemsWithTimes.length; i++) {
-        const fixedItem = itemsWithTimes[i];
-        currentTemplate.items.push(fixedItem);
+        const fixedItem = itemsWithTimes[i].item;
+        newItemsArray.push(fixedItem);
         
         // Update current time to end of this fixed item
         const fixedStartTime = parseTimeToSeconds(fixedItem.start_time);
@@ -7770,7 +8155,7 @@ function fillGapsWithProperTimes() {
         
         // Determine the next fixed item time or end of day
         const nextFixedTime = (i < itemsWithTimes.length - 1) 
-            ? parseTimeToSeconds(itemsWithTimes[i + 1].start_time)
+            ? parseTimeToSeconds(itemsWithTimes[i + 1].item.start_time)
             : 24 * 60 * 60; // End of day
         
         // Fill gap until next fixed item
@@ -7782,7 +8167,7 @@ function fillGapsWithProperTimes() {
             if (currentTime + duration <= nextFixedTime) {
                 item.start_time = formatTimeFromSeconds(currentTime);
                 item.end_time = formatTimeFromSeconds(currentTime + duration);
-                currentTemplate.items.push(item);
+                newItemsArray.push(item);
                 currentTime += duration;
                 newItemIndex++;
             } else {
@@ -7799,10 +8184,113 @@ function fillGapsWithProperTimes() {
         
         item.start_time = formatTimeFromSeconds(currentTime);
         item.end_time = formatTimeFromSeconds(currentTime + duration);
-        currentTemplate.items.push(item);
+        newItemsArray.push(item);
         currentTime += duration;
         newItemIndex++;
     }
+}
+
+function parseWeeklyTimeToSeconds(timeStr) {
+    if (!timeStr) return 0;
+    
+    // Parse "mon 8:00 am" or "mon 08:00:00" format
+    const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const parts = timeStr.toLowerCase().split(' ');
+    if (parts.length < 2) return 0;
+    
+    const dayIndex = days.indexOf(parts[0]);
+    if (dayIndex === -1) return 0;
+    
+    // Get the time part (could be "8:00" with "am" separate, or "8:00am" together, or "08:00:00" in 24h format)
+    let timePart = parts[1];
+    let isPM = false;
+    let is24HourFormat = false;
+    
+    // Check if it's 24-hour format (has seconds or is in HH:MM:SS format)
+    if (timePart.split(':').length === 3 || (timePart.split(':').length === 2 && !timePart.includes('am') && !timePart.includes('pm') && parts.length === 2)) {
+        is24HourFormat = true;
+    }
+    
+    if (!is24HourFormat) {
+        // 12-hour format with AM/PM
+        if (parts.length > 2 && (parts[2] === 'am' || parts[2] === 'pm')) {
+            isPM = parts[2] === 'pm';
+        } else if (timePart.includes('am') || timePart.includes('pm')) {
+            isPM = timePart.includes('pm');
+            timePart = timePart.replace(/am|pm/i, '').trim();
+        }
+    }
+    
+    const timeParts = timePart.split(':');
+    let hours = parseInt(timeParts[0]) || 0;
+    const minutes = parseInt(timeParts[1]) || 0;
+    const seconds = parseFloat(timeParts[2]) || 0;
+    
+    // Convert to 24-hour format if needed
+    if (!is24HourFormat) {
+        if (isPM && hours !== 12) hours += 12;
+        if (!isPM && hours === 12) hours = 0;
+    }
+    // For 24-hour format, hours are already correct (12 means noon, not midnight)
+    
+    // Total seconds from start of week
+    return (dayIndex * 24 * 3600) + (hours * 3600) + (minutes * 60) + seconds;
+}
+
+function extractDayFromWeeklyTime(timeStr) {
+    if (!timeStr) return '';
+    const parts = timeStr.toLowerCase().split(' ');
+    return parts[0] || '';
+}
+
+function extractTimeFromWeeklyTime(timeStr) {
+    if (!timeStr) return 0;
+    
+    // Parse "mon 8:00 am" format - get just the time portion in seconds
+    const parts = timeStr.toLowerCase().split(' ');
+    if (parts.length < 2) return 0;
+    
+    let timePart = parts[1];
+    let isPM = false;
+    
+    if (parts.length > 2 && (parts[2] === 'am' || parts[2] === 'pm')) {
+        isPM = parts[2] === 'pm';
+    } else if (timePart.includes('am') || timePart.includes('pm')) {
+        isPM = timePart.includes('pm');
+        timePart = timePart.replace(/am|pm/i, '').trim();
+    }
+    
+    const timeParts = timePart.split(':');
+    let hours = parseInt(timeParts[0]) || 0;
+    const minutes = parseInt(timeParts[1]) || 0;
+    const seconds = parseFloat(timeParts[2]) || 0;
+    
+    // Convert to 24-hour format
+    if (isPM && hours !== 12) hours += 12;
+    if (!isPM && hours === 12) hours = 0;
+    
+    return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+function formatWeeklyTime(dayName, totalSeconds) {
+    // Ensure seconds are within a single day
+    const daySeconds = totalSeconds % (24 * 3600);
+    
+    const hours = Math.floor(daySeconds / 3600);
+    const minutes = Math.floor((daySeconds % 3600) / 60);
+    const seconds = Math.floor(daySeconds % 60);
+    
+    // Convert to 12-hour format
+    let displayHours = hours;
+    let period = 'am';
+    
+    if (hours >= 12) {
+        period = 'pm';
+        if (hours > 12) displayHours = hours - 12;
+    }
+    if (displayHours === 0) displayHours = 12;
+    
+    return `${dayName} ${displayHours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')} ${period}`;
 }
 
 function parseTimeToSeconds(timeStr) {
@@ -7837,6 +8325,20 @@ function formatTimeFromSeconds(totalSeconds, format = 'daily') {
 function recalculateTemplateTimes() {
     if (!currentTemplate || !currentTemplate.items) return;
     
+    console.log('recalculateTemplateTimes called for', currentTemplate.type, 'template');
+    
+    // For weekly templates, check if items already have day prefixes
+    if (currentTemplate.type === 'weekly') {
+        const hasAnyDayPrefix = currentTemplate.items.some(item => 
+            item.start_time && item.start_time.toString().includes(' ')
+        );
+        
+        if (hasAnyDayPrefix) {
+            console.log('Weekly template already has day prefixes - skipping recalculation');
+            return;
+        }
+    }
+    
     // Check if ALL items have valid times (not just the first one)
     const allItemsHaveValidTimes = currentTemplate.items.length > 0 && 
                                   currentTemplate.items.every(item => 
@@ -7847,24 +8349,37 @@ function recalculateTemplateTimes() {
                                   );
     
     if (allItemsHaveValidTimes) {
+        console.log('All items have valid times - skipping recalculation');
         // Don't recalculate - all times are already set
         return;
     }
     
     // Handle based on template type
     if (currentTemplate.type === 'weekly') {
-        // For weekly templates, we need to add day prefixes
+        // For weekly templates, only recalculate items that don't have times
         let currentSeconds = 0;
         
         currentTemplate.items.forEach(item => {
-            // Format start time with day prefix
-            item.start_time = formatTimeFromSeconds(currentSeconds, 'weekly');
-            
-            const duration = parseFloat(item.duration_seconds) || 0;
-            currentSeconds += duration;
-            
-            // Format end time with day prefix
-            item.end_time = formatTimeFromSeconds(currentSeconds, 'weekly');
+            // If item already has a valid time with day prefix, skip it
+            if (item.start_time && item.start_time.toString().includes(' ')) {
+                // Item has day prefix, calculate currentSeconds from its end time
+                const startSeconds = parseWeeklyTimeToSeconds(item.start_time);
+                const duration = parseFloat(item.duration_seconds) || 0;
+                currentSeconds = startSeconds + duration;
+                
+                // Ensure end_time also has day prefix if needed
+                if (!item.end_time || !item.end_time.toString().includes(' ')) {
+                    item.end_time = formatTimeFromSeconds(currentSeconds, 'weekly');
+                }
+            } else {
+                // No valid time, calculate it
+                item.start_time = formatTimeFromSeconds(currentSeconds, 'weekly');
+                
+                const duration = parseFloat(item.duration_seconds) || 0;
+                currentSeconds += duration;
+                
+                item.end_time = formatTimeFromSeconds(currentSeconds, 'weekly');
+            }
         });
     } else {
         // Daily templates - use existing logic
@@ -7887,8 +8402,25 @@ function recalculateTemplateTimes() {
 function displayTemplate() {
     if (!currentTemplate) return;
     
-    // Recalculate times before display
-    recalculateTemplateTimes();
+    // Check if we need to recalculate times
+    // For weekly templates, only recalculate if times don't have day prefixes
+    let needsRecalculation = false;
+    if (currentTemplate.type === 'weekly' && currentTemplate.items && currentTemplate.items.length > 0) {
+        // Check if any item is missing day prefix
+        const dayPrefixes = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+        needsRecalculation = currentTemplate.items.some(item => {
+            if (!item.start_time) return true;
+            const hasPrefix = dayPrefixes.some(day => item.start_time.toLowerCase().startsWith(day));
+            return !hasPrefix;
+        });
+    } else {
+        // For daily templates, always recalculate
+        needsRecalculation = true;
+    }
+    
+    if (needsRecalculation) {
+        recalculateTemplateTimes();
+    }
     
     // Show template info
     document.getElementById('templateInfo').style.display = 'block';
