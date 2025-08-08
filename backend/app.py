@@ -2812,6 +2812,12 @@ def load_schedule_template():
             
             logger.info(f"Parsed schedule: type={schedule_data['type']}, items={len(schedule_data['items'])}")
             
+            # Debug: Log first few items to see their times
+            if schedule_data['type'] == 'weekly' and schedule_data['items']:
+                logger.info("First 3 items from parsed weekly schedule:")
+                for i, item in enumerate(schedule_data['items'][:3]):
+                    logger.info(f"  Item {i}: start_time='{item.get('start_time')}', filename='{item.get('filename')}'")
+            
             # Try to match items with database assets
             for item in schedule_data['items']:
                 filename = item.get('filename')
@@ -2831,6 +2837,12 @@ def load_schedule_template():
                     else:
                         item['matched'] = False
                         logger.debug(f"No match found for {filename}")
+            
+            # Final debug before sending
+            if schedule_data['type'] == 'weekly':
+                logger.info("Sending weekly template to frontend with items:")
+                for i, item in enumerate(schedule_data['items'][:3]):
+                    logger.info(f"  Item {i}: start_time='{item.get('start_time')}'")
             
             return jsonify({
                 'success': True,
@@ -2894,21 +2906,32 @@ def parse_castus_schedule(content):
                     'loop': current_item.get('loop', '0')
                 }
                 
+                # Debug logging for weekly schedules
+                if schedule_data['type'] == 'weekly':
+                    logger.debug(f"Weekly item raw start_time: '{item['start_time']}'")
+                
                 # Calculate duration from start/end times if available
                 if item['start_time'] and item['end_time']:
                     duration = calculate_duration_from_times(item['start_time'], item['end_time'])
                     item['duration_seconds'] = duration
                     
-                    # Convert start_time to 24-hour format with milliseconds preserved
-                    # Remove day prefix if present (e.g., "wed 12:00:15.040 am" -> "12:00:15.040 am")
-                    start_time_clean = item['start_time']
-                    if ' ' in start_time_clean:
-                        parts = start_time_clean.split(' ', 1)
+                    # For weekly schedules, preserve the day prefix
+                    if schedule_data['type'] == 'weekly' and ' ' in item['start_time']:
+                        # Parse weekly format like "wed 12:00:15.040 am"
+                        parts = item['start_time'].split(' ', 1)
                         if len(parts[0]) <= 3:  # Likely a day abbreviation
-                            start_time_clean = parts[1]
-                    
-                    # Convert to 24-hour format
-                    item['start_time'] = convert_to_24hour_format(start_time_clean)
+                            day_prefix = parts[0]
+                            time_part = parts[1]
+                            # Convert time part to 24-hour format
+                            time_24h = convert_to_24hour_format(time_part)
+                            # Reconstruct with day prefix
+                            item['start_time'] = f"{day_prefix} {time_24h}"
+                        else:
+                            # No day prefix, just convert to 24-hour format
+                            item['start_time'] = convert_to_24hour_format(item['start_time'])
+                    else:
+                        # For daily schedules, convert to 24-hour format
+                        item['start_time'] = convert_to_24hour_format(item['start_time'])
                 
                 schedule_data['items'].append(item)
             
@@ -3264,6 +3287,15 @@ def fill_template_gaps():
         data = request.json
         template = data.get('template')
         available_content = data.get('available_content', [])
+        gaps = data.get('gaps', [])
+        
+        # Debug: Log the template items
+        logger.info(f"Received template type: {template.get('type')}")
+        logger.info(f"Template has {len(template.get('items', []))} items")
+        if template.get('items'):
+            logger.info("First 3 items for debugging:")
+            for i, item in enumerate(template.get('items', [])[:3]):
+                logger.info(f"  Item {i}: start_time='{item.get('start_time')}', title='{item.get('title', item.get('file_name'))}'")
         
         if not template or not available_content:
             return jsonify({
@@ -3274,26 +3306,108 @@ def fill_template_gaps():
         # Determine schedule type
         schedule_type = template.get('type', 'daily')
         
-        # Calculate total template duration and gaps
-        total_duration = 0
-        for item in template.get('items', []):
-            total_duration += float(item.get('duration_seconds', 0))
+        # Keep a copy of original items with their time ranges for overlap detection
+        original_items = []
         
-        # Target duration based on type
-        target_duration = 24 * 3600  # Daily
-        if schedule_type == 'weekly':
-            target_duration = 7 * 24 * 3600
-        elif schedule_type == 'monthly':
-            target_duration = 31 * 24 * 3600
+        # For weekly templates with daily-formatted times, we need to understand the intended distribution
+        items_with_times = [item for item in template.get('items', []) if 'start_time' in item and item['start_time']]
         
-        gap_seconds = target_duration - total_duration
+        # Check if this is a weekly template with daily-formatted times
+        is_weekly_with_daily_times = (schedule_type == 'weekly' and 
+                                     items_with_times and 
+                                     all(' ' not in str(item['start_time']) for item in items_with_times))
         
-        if gap_seconds <= 0:
-            return jsonify({
-                'success': True,
-                'message': 'Template is already full',
-                'items_added': []
+        if is_weekly_with_daily_times:
+            logger.warning(f"Weekly template has {len(items_with_times)} items with daily-formatted times. These items will overlap if all placed on same day!")
+            # For now, we'll process them as-is, but the gap calculation needs to handle this properly
+        
+        for idx, item in enumerate(items_with_times):
+            # Parse start time to seconds
+            start_seconds = 0
+            start_time = item['start_time']
+            
+            if schedule_type == 'weekly' and ' ' in str(start_time):
+                # Parse weekly format like "mon 8:00 am"
+                parts = start_time.lower().split(' ')
+                day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                day_index = day_map.get(parts[0], 0)
+                # Parse time portion
+                time_parts = parts[1].split(':')
+                hours = int(time_parts[0])
+                if len(parts) > 2 and parts[2] == 'pm' and hours != 12:
+                    hours += 12
+                elif len(parts) > 2 and parts[2] == 'am' and hours == 12:
+                    hours = 0
+                minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                start_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60)
+            else:
+                # Parse daily format
+                time_parts = str(start_time).split(':')
+                if len(time_parts) >= 3:
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = float(time_parts[2])
+                    start_seconds = (hours * 3600) + (minutes * 60) + seconds
+                    
+                    # For weekly templates, we need to distribute these across days
+                    # This is a temporary fix - ideally the frontend should handle this
+                    if is_weekly_with_daily_times:
+                        # Simple distribution: spread items across different days
+                        # This is just for overlap detection - the frontend will handle actual placement
+                        day_offset = (idx % 7) * 24 * 3600
+                        start_seconds += day_offset
+            
+            duration = float(item.get('duration_seconds', 0))
+            end_seconds = start_seconds + duration
+            
+            # Try multiple fields for title
+            title = item.get('title') or item.get('content_title') or item.get('file_name') or 'Unknown'
+            
+            original_items.append({
+                'title': title,
+                'start': start_seconds,
+                'end': end_seconds,
+                'start_time': item['start_time'],
+                'duration': duration
             })
+            
+            logger.info(f"Original item {idx}: {title} at '{item['start_time']}' from {start_seconds/3600:.2f}h to {end_seconds/3600:.2f}h")
+            logger.info(f"  Duration: {duration}s ({duration/3600:.6f}h), exact end: {end_seconds}s")
+        
+        logger.info(f"Found {len(original_items)} original items to preserve")
+        
+        # If gaps are provided, use them. Otherwise calculate total duration
+        if gaps:
+            logger.info(f"Using {len(gaps)} provided gaps")
+            for idx, gap in enumerate(gaps):
+                logger.info(f"  Gap {idx + 1}: {gap['start']/3600:.1f}h - {gap['end']/3600:.1f}h (duration: {(gap['end']-gap['start'])/3600:.1f}h)")
+            # We'll fill each gap separately
+            total_gap_seconds = sum(gap['end'] - gap['start'] for gap in gaps)
+            logger.info(f"Total gap time to fill: {total_gap_seconds/3600:.1f} hours")
+        else:
+            # Calculate total template duration and gaps (old method)
+            total_duration = 0
+            for item in template.get('items', []):
+                total_duration += float(item.get('duration_seconds', 0))
+            
+            # Target duration based on type
+            target_duration = 24 * 3600  # Daily
+            if schedule_type == 'weekly':
+                target_duration = 7 * 24 * 3600
+            elif schedule_type == 'monthly':
+                target_duration = 31 * 24 * 3600
+            
+            gap_seconds = target_duration - total_duration
+            
+            if gap_seconds <= 0:
+                return jsonify({
+                    'success': True,
+                    'message': 'Template is already full',
+                    'items_added': []
+                })
+            
+            # Create a single gap for backward compatibility
+            gaps = [{'start': total_duration, 'end': target_duration}]
         
         # Initialize scheduler for rotation logic
         scheduler = scheduler_postgres
@@ -3323,110 +3437,359 @@ def fill_template_gaps():
         scheduled_asset_ids = []  # We'll track this differently now
         items_added = []
         
-        # Track last scheduled time for each asset (for replay delays)
-        asset_last_scheduled = {}
+        # Track when each asset was last scheduled (for replay delays)
+        asset_schedule_times = {}  # asset_id -> list of scheduled times in seconds
+        
+        # For templates, we need to calculate times differently based on type
         for item in template.get('items', []):
             asset_id = item.get('asset_id') or item.get('id') or item.get('content_id')
             if asset_id and 'start_time' in item and item['start_time']:
-                # Track the last time this asset was scheduled
-                asset_last_scheduled[asset_id] = item
+                # Parse start time to seconds
+                start_time = item['start_time']
+                time_in_seconds = 0
+                
+                if schedule_type == 'weekly' and ' ' in str(start_time):
+                    # Parse weekly format like "mon 8:00 am"
+                    parts = start_time.lower().split(' ')
+                    day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                    day_index = day_map.get(parts[0], 0)
+                    # Parse time portion
+                    time_parts = parts[1].split(':')
+                    hours = int(time_parts[0])
+                    if len(parts) > 2 and parts[2] == 'pm' and hours != 12:
+                        hours += 12
+                    elif len(parts) > 2 and parts[2] == 'am' and hours == 12:
+                        hours = 0
+                    minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                    time_in_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60)
+                else:
+                    # Parse daily format
+                    time_parts = str(start_time).split(':')
+                    if len(time_parts) >= 3:
+                        hours = int(time_parts[0])
+                        minutes = int(time_parts[1])
+                        seconds = float(time_parts[2])
+                        time_in_seconds = (hours * 3600) + (minutes * 60) + seconds
+                
+                if asset_id not in asset_schedule_times:
+                    asset_schedule_times[asset_id] = []
+                asset_schedule_times[asset_id].append(time_in_seconds)
         
-        logger.info(f"Assets in current template: {len(asset_last_scheduled)}")
+        logger.info(f"Assets already scheduled: {len(asset_schedule_times)}")
+        
+        # Load replay delay configuration
+        try:
+            from config_manager import ConfigManager
+            config_mgr = ConfigManager()
+            scheduling_config = config_mgr.get_scheduling_settings()
+            replay_delays = scheduling_config.get('replay_delays', {
+                'id': 6,
+                'spots': 12,
+                'short_form': 24,
+                'long_form': 48
+            })
+            logger.info(f"Replay delays: {replay_delays}")
+        except Exception as e:
+            logger.warning(f"Could not load replay delays, using defaults: {e}")
+            replay_delays = {'id': 6, 'spots': 12, 'short_form': 24, 'long_form': 48}
         
         # Fill gaps using rotation logic
-        current_position = total_duration
         consecutive_errors = 0
         max_errors = 100  # Same as in create schedule
+        total_cycles_without_content = 0
+        max_cycles = 20  # After trying all categories 20 times, stop
         
-        while current_position < target_duration:
-            # Get next duration category from rotation
-            duration_category = scheduler._get_next_duration_category()
+        # Process each gap individually
+        for gap in gaps:
+            gap_start = gap['start']
+            gap_end = gap['end']
+            gap_duration = gap_end - gap_start
             
-            # Filter available content by category
-            category_content = []
-            wrong_category = 0
+            logger.info(f"Filling gap from {gap_start/3600:.1f}h to {gap_end/3600:.1f}h (duration: {gap_duration/3600:.1f}h)")
+            logger.info(f"  Exact gap values: start={gap_start}s ({gap_start/3600:.6f}h), end={gap_end}s ({gap_end/3600:.6f}h)")
             
-            for content in available_content:
-                # Check duration category
-                if content.get('duration_category') == duration_category:
+            current_position = gap_start
+            
+            while current_position < gap_end:
+                # Get next duration category from rotation
+                duration_category = scheduler._get_next_duration_category()
+                
+                # Filter available content by category and replay delays
+                category_content = []
+                wrong_category = 0
+                blocked_by_delay = 0
+                
+                # Get replay delay for this category (in hours)
+                replay_delay_hours = replay_delays.get(duration_category, 24)
+                replay_delay_seconds = replay_delay_hours * 3600
+                
+                for content in available_content:
+                    # Check duration category
+                    if content.get('duration_category') != duration_category:
+                        wrong_category += 1
+                        continue
+                    
+                    # Check replay delay
+                    content_id = content.get('id')
+                    if content_id in asset_schedule_times:
+                        # Check if enough time has passed since last scheduling
+                        last_times = asset_schedule_times[content_id]
+                        can_schedule = True
+                        
+                        for last_time in last_times:
+                            # For templates, current_position represents seconds from start
+                            time_since_last = current_position - last_time
+                            if time_since_last < replay_delay_seconds:
+                                can_schedule = False
+                                blocked_by_delay += 1
+                                break
+                        
+                        if not can_schedule:
+                            continue
+                    
                     category_content.append(content)
-                else:
-                    wrong_category += 1
             
-            if not category_content:
-                logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, total_available={len(available_content)}")
-            
-            if not category_content:
-                # Try next category if no content available
-                logger.warning(f"No content available for category: {duration_category}")
-                consecutive_errors += 1
+                if not category_content:
+                    logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, total_available={len(available_content)}")
                 
-                # Check if we've hit too many consecutive errors
-                if consecutive_errors >= max_errors:
-                    logger.error(f"Aborting fill gaps: {consecutive_errors} consecutive errors")
-                    break
+                # If no content due to delays, try without delays
+                if not category_content and blocked_by_delay > 0:
+                    logger.info(f"Trying category {duration_category} without replay delays")
+                    # Try again without checking delays
+                    for content in available_content:
+                        if content.get('duration_category') == duration_category:
+                            category_content.append(content)
+                    
+                    if category_content:
+                        logger.info(f"Found {len(category_content)} items without delay restrictions")
                 
-                # Don't reset rotation - just continue to the next category
-                continue
+                if not category_content:
+                    # Try next category if no content available
+                    logger.warning(f"No content available for category: {duration_category}")
+                    consecutive_errors += 1
+                    
+                    # Check if we've cycled through all categories multiple times
+                    if duration_category == 'id':  # First in rotation
+                        total_cycles_without_content += 1
+                        if total_cycles_without_content >= max_cycles:
+                            logger.error(f"Aborting fill gaps: cycled through all categories {total_cycles_without_content} times without finding content")
+                            break
+                    
+                    # Don't reset rotation - just continue to the next category
+                    continue
             
-            # Sort by engagement score and shelf life (like scheduler does)
-            category_content.sort(key=lambda x: (
-                -(x.get('engagement_score', 50) + 
-                  (20 if x.get('shelf_life_score') == 'high' else 10 if x.get('shelf_life_score') == 'medium' else 0))
-            ))
-            
-            # Select the best content
-            selected = category_content[0]
-            # Check for duration_seconds or file_duration
-            duration = float(selected.get('duration_seconds', selected.get('file_duration', 0)))
-            consecutive_errors = 0  # Reset consecutive error counter
-            
-            # Check if it fits
-            remaining = target_duration - current_position
-            if duration > remaining:
-                # Try to find shorter content that fits
-                found_fit = False
-                for alt_content in category_content[1:]:
-                    alt_duration = float(alt_content.get('duration_seconds', alt_content.get('file_duration', 0)))
-                    if alt_duration <= remaining:
-                        selected = alt_content
-                        duration = alt_duration
-                        found_fit = True
+                # Sort by engagement score and shelf life (like scheduler does)
+                category_content.sort(key=lambda x: (
+                    -(x.get('engagement_score', 50) + 
+                      (20 if x.get('shelf_life_score') == 'high' else 10 if x.get('shelf_life_score') == 'medium' else 0))
+                ))
+                
+                # Select the best content
+                selected = category_content[0]
+                # Check for duration_seconds or file_duration
+                duration = float(selected.get('duration_seconds', selected.get('file_duration', 0)))
+                consecutive_errors = 0  # Reset consecutive error counter
+                total_cycles_without_content = 0  # Reset cycle counter
+                
+                # Check if it fits in this gap with a safety margin
+                remaining = gap_end - current_position
+                # Add a safety margin to avoid floating point precision issues and overlaps
+                safety_margin = 1.0  # 1 second safety margin
+                if duration > remaining - safety_margin:
+                    # Try to find shorter content that fits
+                    found_fit = False
+                    for alt_content in category_content[1:]:
+                        alt_duration = float(alt_content.get('duration_seconds', alt_content.get('file_duration', 0)))
+                        if alt_duration <= remaining - safety_margin:
+                            selected = alt_content
+                            duration = alt_duration
+                            found_fit = True
+                            break
+                    
+                    if not found_fit:
+                        # No content fits in this gap, move to next gap
                         break
+            
+                # Check for overlap with original items before adding
+                new_item_start = current_position
+                new_item_end = current_position + duration
                 
-                if not found_fit:
-                    # No content fits, we're done
+                # Add small tolerance for floating point comparison
+                overlap_tolerance = 0.01  # 10ms tolerance
+                
+                overlap_found = False
+                for orig_item in original_items:
+                    # Check if new item would overlap with original item (with tolerance)
+                    if (new_item_start < orig_item['end'] - overlap_tolerance and 
+                        new_item_end > orig_item['start'] + overlap_tolerance):
+                        overlap_found = True
+                        logger.error(f"OVERLAP DETECTED! New item '{selected.get('content_title', selected.get('file_name'))}' " +
+                                   f"({new_item_start/3600:.2f}h-{new_item_end/3600:.2f}h) would overlap with " +
+                                   f"original item '{orig_item['title']}' ({orig_item['start']/3600:.2f}h-{orig_item['end']/3600:.2f}h)")
+                        logger.error(f"Gap was supposed to be {gap_start/3600:.2f}h-{gap_end/3600:.2f}h")
+                        logger.error(f"Exact values: new_start={new_item_start}s, new_end={new_item_end}s, " +
+                                   f"orig_start={orig_item['start']}s, orig_end={orig_item['end']}s")
+                        logger.error("ABORTING FILL OPERATION TO PRESERVE ORIGINAL ITEMS")
+                        
+                        return jsonify({
+                            'success': False,
+                            'message': f"Overlap detected! Attempted to place content from {new_item_start/3600:.2f}h to {new_item_end/3600:.2f}h " +
+                                     f"which overlaps with original item '{orig_item['title']}' at {orig_item['start_time']}. " +
+                                     f"Gap calculation may be incorrect.",
+                            'overlap_details': {
+                                'new_item': {
+                                    'title': selected.get('content_title', selected.get('file_name')),
+                                    'start_hours': new_item_start/3600,
+                                    'end_hours': new_item_end/3600
+                                },
+                                'original_item': {
+                                    'title': orig_item['title'],
+                                    'start_hours': orig_item['start']/3600,
+                                    'end_hours': orig_item['end']/3600,
+                                    'start_time': orig_item['start_time']
+                                },
+                                'gap': {
+                                    'start_hours': gap_start/3600,
+                                    'end_hours': gap_end/3600
+                                }
+                            }
+                        })
+                
+                if not overlap_found:
+                    # Add to template
+                    new_item = {
+                        'asset_id': selected.get('id'),
+                        'content_id': selected.get('id'),
+                        'title': selected.get('content_title', selected.get('file_name')),
+                        'file_name': selected.get('file_name'),
+                        'file_path': selected.get('file_path'),
+                        'duration_seconds': duration,
+                        'duration_category': selected.get('duration_category'),
+                        'content_type': selected.get('content_type'),
+                        'guid': selected.get('guid', '')
+                        # Don't set start_time and end_time - let frontend calculate them
+                    }
+                    
+                    items_added.append(new_item)
+                    # Track when this asset was scheduled for replay delay checking
+                    content_id = selected.get('id')
+                    if content_id not in asset_schedule_times:
+                        asset_schedule_times[content_id] = []
+                    asset_schedule_times[content_id].append(current_position)
+                    
+                    current_position += duration
+                
+                # Log progress every 10 items to prevent timeout appearance
+                if len(items_added) % 10 == 0:
+                    logger.info(f"Fill gaps progress: {len(items_added)} items added, current gap: {current_position/3600:.1f}h of {gap_end/3600:.1f}h")
+        
+        # Calculate total filled duration
+        total_filled_seconds = sum(item['duration_seconds'] for item in items_added)
+        logger.info(f"Fill gaps completed: {len(items_added)} total items added, {total_filled_seconds/3600:.1f} hours total")
+        
+        # FINAL VERIFICATION: Check that all original items would still be preserved
+        logger.info("=== FINAL VERIFICATION: Checking if all original items are preserved ===")
+        
+        # Create a combined schedule with original items and new items
+        all_items = []
+        
+        # Add original items with their times
+        for orig in original_items:
+            all_items.append({
+                'start': orig['start'],
+                'end': orig['end'],
+                'title': orig['title'],
+                'is_original': True
+            })
+        
+        # Add new items - we need to track where they were placed
+        # The frontend will assign actual positions, but for verification
+        # we'll simulate the placement in gaps
+        item_idx = 0
+        for gap in gaps:
+            gap_start = gap['start']
+            gap_end = gap['end']
+            current_pos = gap_start
+            
+            # Place items in this gap
+            while item_idx < len(items_added) and current_pos < gap_end:
+                item = items_added[item_idx]
+                item_duration = item['duration_seconds']
+                
+                # Check if item fits in remaining gap
+                if current_pos + item_duration <= gap_end:
+                    all_items.append({
+                        'start': current_pos,
+                        'end': current_pos + item_duration,
+                        'title': item.get('title', item.get('content_title', item.get('file_name', 'Unknown'))),
+                        'is_original': False
+                    })
+                    current_pos += item_duration
+                    item_idx += 1
+                else:
+                    # Item doesn't fit in this gap, move to next gap
+                    break
+        
+        # Sort all items by start time
+        all_items.sort(key=lambda x: x['start'])
+        
+        # Check for any overlaps
+        overlaps_found = []
+        for i in range(len(all_items)):
+            for j in range(i + 1, len(all_items)):
+                item1 = all_items[i]
+                item2 = all_items[j]
+                
+                # Check if items overlap
+                if item1['end'] > item2['start'] and item1['start'] < item2['end']:
+                    if item1['is_original'] or item2['is_original']:
+                        orig_item = item1 if item1['is_original'] else item2
+                        new_item = item2 if item1['is_original'] else item1
+                        
+                        overlap_info = f"Original '{orig_item['title']}' ({orig_item['start']/3600:.1f}h-{orig_item['end']/3600:.1f}h) " + \
+                                     f"overlaps with new '{new_item['title']}' ({new_item['start']/3600:.1f}h-{new_item['end']/3600:.1f}h)"
+                        overlaps_found.append(overlap_info)
+                        logger.error(f"VERIFICATION FAILED: {overlap_info}")
+        
+        # Check if all original items are still present
+        originals_preserved = True
+        for orig in original_items:
+            found = False
+            for item in all_items:
+                if item['is_original'] and abs(item['start'] - orig['start']) < 1 and abs(item['end'] - orig['end']) < 1:
+                    found = True
                     break
             
-            # Add to template
-            new_item = {
-                'asset_id': selected.get('id'),
-                'content_id': selected.get('id'),
-                'title': selected.get('content_title', selected.get('file_name')),
-                'file_name': selected.get('file_name'),
-                'file_path': selected.get('file_path'),
-                'duration_seconds': duration,
-                'duration_category': selected.get('duration_category'),
-                'content_type': selected.get('content_type'),
-                'guid': selected.get('guid', '')
-                # Don't set start_time and end_time - let frontend calculate them
-            }
-            
-            items_added.append(new_item)
-            # Don't track scheduled_asset_ids anymore - allow duplicates
-            current_position += duration
-            
-            # Log progress every 10 items to prevent timeout appearance
-            if len(items_added) % 10 == 0:
-                logger.info(f"Fill gaps progress: {len(items_added)} items added, {current_position/3600:.1f} hours filled")
+            if not found:
+                logger.error(f"VERIFICATION FAILED: Original item '{orig['title']}' at {orig['start_time']} is missing!")
+                originals_preserved = False
         
-        logger.info(f"Fill gaps completed: {len(items_added)} total items added, {current_position/3600:.1f} hours total")
+        if overlaps_found:
+            logger.error(f"VERIFICATION FAILED: Found {len(overlaps_found)} overlaps with original items!")
+            return jsonify({
+                'success': False,
+                'message': f'Final verification failed: {len(overlaps_found)} overlaps detected with original items',
+                'verification_errors': overlaps_found,
+                'items_added': items_added,
+                'total_added': len(items_added)
+            })
+        
+        if not originals_preserved:
+            return jsonify({
+                'success': False,
+                'message': 'Final verification failed: Some original items were not preserved',
+                'items_added': items_added,
+                'total_added': len(items_added)
+            })
+        
+        logger.info("VERIFICATION PASSED: All original items preserved, no overlaps detected")
         
         return jsonify({
             'success': True,
             'items_added': items_added,
             'total_added': len(items_added),
-            'new_duration': current_position
+            'new_duration': total_filled_seconds,
+            'verification': 'passed'
         })
         
     except Exception as e:
