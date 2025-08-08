@@ -2278,11 +2278,64 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         # Handle both field names for compatibility
         duration_seconds = float(item.get('scheduled_duration_seconds', item.get('duration_seconds', 0)))
         
+        # Check if we have a pre-calculated end time
+        end_time_provided = item.get('scheduled_end_time', item.get('end_time'))
+        
+        # Debug log
+        logger.debug(f"Item {idx}: start_time={start_time}, duration_seconds={duration_seconds}")
+        if end_time_provided:
+            logger.debug(f"  Using provided end_time: {end_time_provided}")
+        if 'scheduled_duration_seconds' in item:
+            logger.debug(f"  Using scheduled_duration_seconds: {item['scheduled_duration_seconds']}")
+        if 'duration_seconds' in item:
+            logger.debug(f"  Item also has duration_seconds: {item['duration_seconds']}")
+        
         # Calculate end time
         # Handle different time formats
         if isinstance(start_time, str):
-            # Handle time with microseconds (HH:MM:SS.ffffff) or frames (HH:MM:SS:FF)
-            if '.' in start_time:
+            # Check if this is a weekly format time (e.g., "sun 12:00:00 am")
+            if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                # Parse weekly format
+                parts = start_time.split(' ', 1)
+                day_name = parts[0]
+                time_part = parts[1] if len(parts) > 1 else '12:00:00 am'
+                
+                # Convert 12-hour format to 24-hour
+                time_24 = convert_to_24hour_format(time_part)
+                if '.' in time_24:
+                    time_base, micro_str = time_24.split('.')
+                    time_parts = time_base.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    microseconds = int(micro_str.ljust(6, '0')[:6])
+                    start_dt = datetime(2000, 1, 1, hours, minutes, seconds, microseconds)
+                else:
+                    time_parts = time_24.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    start_dt = datetime(2000, 1, 1, hours, minutes, seconds)
+            # Check if time has AM/PM first (before checking for microseconds)
+            elif 'am' in start_time.lower() or 'pm' in start_time.lower():
+                # Convert to 24-hour format first
+                time_24 = convert_to_24hour_format(start_time)
+                if '.' in time_24:
+                    time_base, micro_str = time_24.split('.')
+                    time_parts = time_base.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    microseconds = int(micro_str.ljust(6, '0')[:6])
+                    start_dt = datetime(2000, 1, 1, hours, minutes, seconds, microseconds)
+                else:
+                    time_parts = time_24.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    start_dt = datetime(2000, 1, 1, hours, minutes, seconds)
+            # Handle time with microseconds (HH:MM:SS.ffffff) in 24-hour format
+            elif '.' in start_time:
                 # Has microseconds - parse them
                 time_base, micro_str = start_time.split('.')
                 time_parts = time_base.split(':')
@@ -2303,7 +2356,80 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         else:
             # Handle datetime.time object from PostgreSQL
             start_dt = datetime.combine(datetime(2000, 1, 1), start_time)
-        end_dt = start_dt + timedelta(seconds=duration_seconds)
+        
+        # If we have a provided end time, use it instead of calculating
+        if end_time_provided and isinstance(end_time_provided, str):
+            # Parse the provided end time
+            if ' ' in end_time_provided and any(day in end_time_provided.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                # Weekly format end time
+                parts = end_time_provided.split(' ', 1)
+                time_part = parts[1] if len(parts) > 1 else '12:00:00 am'
+                time_24 = convert_to_24hour_format(time_part)
+                if '.' in time_24:
+                    time_base, micro_str = time_24.split('.')
+                    time_parts = time_base.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    microseconds = int(micro_str.ljust(6, '0')[:6])
+                    end_dt = datetime(2000, 1, 1, hours, minutes, seconds, microseconds)
+                else:
+                    time_parts = time_24.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    end_dt = datetime(2000, 1, 1, hours, minutes, seconds)
+            elif '.' in end_time_provided:
+                # Has microseconds - check if it's 12-hour format with AM/PM
+                if 'am' in end_time_provided.lower() or 'pm' in end_time_provided.lower():
+                    # Convert to 24-hour format first
+                    time_24 = convert_to_24hour_format(end_time_provided)
+                    if '.' in time_24:
+                        time_base, micro_str = time_24.split('.')
+                        time_parts = time_base.split(':')
+                        hours = int(time_parts[0])
+                        minutes = int(time_parts[1])
+                        seconds = int(time_parts[2])
+                        microseconds = int(micro_str.ljust(6, '0')[:6])
+                        end_dt = datetime(2000, 1, 1, hours, minutes, seconds, microseconds)
+                    else:
+                        time_parts = time_24.split(':')
+                        hours = int(time_parts[0])
+                        minutes = int(time_parts[1])
+                        seconds = int(time_parts[2])
+                        end_dt = datetime(2000, 1, 1, hours, minutes, seconds)
+                else:
+                    # Already in 24-hour format
+                    time_base, micro_str = end_time_provided.split('.')
+                    time_parts = time_base.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2])
+                    microseconds = int(micro_str.ljust(6, '0')[:6])
+                    end_dt = datetime(2000, 1, 1, hours, minutes, seconds, microseconds)
+            else:
+                # Regular time format - check for AM/PM
+                if 'am' in end_time_provided.lower() or 'pm' in end_time_provided.lower():
+                    # Convert to 24-hour format first
+                    time_24 = convert_to_24hour_format(end_time_provided)
+                    time_parts = time_24.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2]) if len(time_parts) > 2 else 0
+                    end_dt = datetime(2000, 1, 1, hours, minutes, seconds)
+                else:
+                    # Already in 24-hour format
+                    time_parts = end_time_provided.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1])
+                    seconds = int(time_parts[2]) if len(time_parts) > 2 else 0
+                    end_dt = datetime(2000, 1, 1, hours, minutes, seconds)
+            
+            # Recalculate duration based on provided times
+            duration_seconds = (end_dt - start_dt).total_seconds()
+        else:
+            # Calculate end time from duration
+            end_dt = start_dt + timedelta(seconds=duration_seconds)
         
         # Extract milliseconds from duration
         whole_seconds = int(duration_seconds)
@@ -2320,8 +2446,9 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             start_time_formatted += " " + start_dt.strftime("%p").lower()
             
             end_time_formatted = f"day {day_number} " + end_dt.strftime("%I:%M:%S").lstrip("0") 
-            if milliseconds > 0:
-                end_time_formatted += f".{milliseconds:03d}"
+            end_milliseconds = end_dt.microsecond // 1000
+            if end_milliseconds > 0:
+                end_time_formatted += f".{end_milliseconds:03d}"
             end_time_formatted += " " + end_dt.strftime("%p").lower()
             
         elif format_type == 'weekly':
@@ -2330,11 +2457,31 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             # but use exact start times from previous items to avoid precision issues
             
             # Parse the actual start time from the database
+            item_day_index = 0  # Default to Sunday
             if isinstance(start_time, str):
-                time_parts = start_time.split(':')
-                db_hours = int(time_parts[0])
-                db_minutes = int(time_parts[1])
-                db_seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                # Check if this is a weekly format time with day prefix
+                if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                    # Extract day and time parts
+                    parts = start_time.split(' ', 1)
+                    day_name = parts[0].lower()
+                    time_part = parts[1] if len(parts) > 1 else '12:00:00 am'
+                    
+                    # Get day index
+                    day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                    item_day_index = day_map.get(day_name, 0)
+                    
+                    # Convert to 24-hour format
+                    time_24 = convert_to_24hour_format(time_part)
+                    time_parts = time_24.split(':')
+                    db_hours = int(time_parts[0])
+                    db_minutes = int(time_parts[1])
+                    db_seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                else:
+                    # Regular time format
+                    time_parts = start_time.split(':')
+                    db_hours = int(time_parts[0])
+                    db_minutes = int(time_parts[1])
+                    db_seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
             else:
                 # Handle datetime.time object from PostgreSQL
                 db_hours = start_time.hour
@@ -2342,8 +2489,13 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                 db_seconds = start_time.second + start_time.microsecond / 1000000.0
             
             # Calculate the actual start time in seconds from the database
-            # For weekly schedules, we need to track which day we're on
-            if idx == 0:
+            # For weekly schedules with day prefixes, use the day index directly
+            # Check if we found a day prefix (has_day_prefix would be better but checking the original condition)
+            if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                # Calculate exact start time based on day index
+                item_start_seconds = (item_day_index * 24 * 60 * 60) + (db_hours * 3600) + (db_minutes * 60) + db_seconds
+                current_day = item_day_index
+            elif idx == 0:
                 item_start_seconds = 0.0
                 current_day = 0
             else:
@@ -2352,8 +2504,17 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                 prev_start = prev_item.get('scheduled_start_time')
                 
                 if isinstance(prev_start, str):
-                    prev_parts = prev_start.split(':')
-                    prev_hours = int(prev_parts[0])
+                    # Check if this is a weekly format time with day prefix
+                    if ' ' in prev_start and any(day in prev_start.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                        # Extract time part and convert to 24-hour
+                        parts = prev_start.split(' ', 1)
+                        time_part = parts[1] if len(parts) > 1 else '12:00:00 am'
+                        time_24 = convert_to_24hour_format(time_part)
+                        prev_parts = time_24.split(':')
+                        prev_hours = int(prev_parts[0])
+                    else:
+                        prev_parts = prev_start.split(':')
+                        prev_hours = int(prev_parts[0])
                 else:
                     prev_hours = prev_start.hour
                 
@@ -2378,14 +2539,18 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                     logger.debug(f"  Previous end: {previous_end_seconds:.6f}s")
                     logger.debug(f"  Gap/Overlap: {item_start_seconds - previous_end_seconds:.6f}s")
                 
-                # Check for overlap with a small tolerance for floating-point precision
+                # Check for overlap with proper rounding to avoid floating-point precision issues
                 OVERLAP_TOLERANCE = 0.001  # 1 millisecond tolerance
                 if idx > 0:
-                    gap_or_overlap = item_start_seconds - previous_end_seconds
+                    # Round to millisecond precision to avoid floating-point errors
+                    item_start_ms = round(item_start_seconds * 1000) / 1000
+                    previous_end_ms = round(previous_end_seconds * 1000) / 1000
+                    gap_or_overlap = item_start_ms - previous_end_ms
+                    
                     if gap_or_overlap < -OVERLAP_TOLERANCE:
                         # Real overlap detected
                         overlap = -gap_or_overlap
-                        logger.error(f"OVERLAP DETECTED at item {idx}: Previous end={previous_end_seconds:.6f}, Current start={item_start_seconds:.6f}, Overlap={overlap:.6f} seconds")
+                        logger.error(f"OVERLAP DETECTED at item {idx}: Previous end={previous_end_ms:.6f}, Current start={item_start_ms:.6f}, Overlap={overlap:.6f} seconds")
                         # Abort export with error message
                         return f"ERROR: Schedule has overlapping items at position {idx}. Item starts {overlap:.3f} seconds before previous item ends."
                     elif abs(gap_or_overlap) <= OVERLAP_TOLERANCE:
@@ -2400,9 +2565,16 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                     item_start_seconds = (current_day + 1) * 24 * 60 * 60
             
             # Calculate which day of the week this item is on
-            day_offset = int(item_start_seconds // (24 * 60 * 60))
-            item_day = (schedule_date + timedelta(days=day_offset))
-            item_day_name = item_day.strftime('%a').lower()
+            # For weekly schedules, use the actual day from the input if available
+            if format_type == 'weekly' and ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                # Use the day name we already parsed
+                day_names = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+                item_day_name = day_names[item_day_index]
+            else:
+                # Calculate based on offset for non-weekly or items without day prefix
+                day_offset = int(item_start_seconds // (24 * 60 * 60))
+                item_day = (schedule_date + timedelta(days=day_offset))
+                item_day_name = item_day.strftime('%a').lower()
             
             # Format start time with actual milliseconds from database
             # Extract milliseconds from the actual start time
@@ -2418,39 +2590,79 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             logger.debug(f"  start_milliseconds calculation: {start_dt.microsecond} // 1000 = {start_milliseconds}")
             logger.debug(f"  Formatted start: {start_time_formatted}")
             
-            # For end time, calculate based on actual start time and duration
-            # This ensures proper alignment even with gaps
-            end_seconds = item_start_seconds + duration_seconds
-            end_day_offset = int(end_seconds // (24 * 60 * 60))
-            end_time_in_day = end_seconds % (24 * 60 * 60)
-            
-            # Convert end time to hours, minutes, seconds
-            end_hours = int(end_time_in_day // 3600)
-            end_minutes = int((end_time_in_day % 3600) // 60)
-            end_whole_seconds = int(end_time_in_day % 60)
-            end_milliseconds = int((end_time_in_day % 1) * 1000)
-            
-            # Create end datetime for formatting
-            end_dt_corrected = datetime(2000, 1, 1, end_hours, end_minutes, end_whole_seconds)
-            end_item_day = schedule_date + timedelta(days=end_day_offset)
-            end_item_day_name = end_item_day.strftime('%a').lower()
-            
-            # Format end time with actual milliseconds
-            end_time_formatted = f"{end_item_day_name} " + end_dt_corrected.strftime("%I:%M:%S").lstrip("0") + f".{end_milliseconds:03d} " + end_dt_corrected.strftime("%p").lower()
+            # For end time, use the actual end_dt if we have it
+            if end_time_provided:
+                # Use the end_dt we already parsed
+                # For weekly schedules, check if end_time has a day prefix
+                if format_type == 'weekly' and isinstance(end_time_provided, str) and ' ' in end_time_provided and any(day in end_time_provided.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                    # Extract the day name from the end time
+                    parts = end_time_provided.split(' ', 1)
+                    end_item_day_name = parts[0].lower()
+                else:
+                    # Calculate which day this end time falls on
+                    end_seconds = item_start_seconds + duration_seconds
+                    end_day_offset = int(end_seconds // (24 * 60 * 60))
+                    end_item_day = schedule_date + timedelta(days=end_day_offset)
+                    end_item_day_name = end_item_day.strftime('%a').lower()
+                
+                # Get milliseconds from the actual end_dt
+                end_milliseconds = end_dt.microsecond // 1000
+                
+                # Format end time with actual values from end_dt
+                end_time_formatted = f"{end_item_day_name} " + end_dt.strftime("%I:%M:%S").lstrip("0")
+                if end_milliseconds > 0:
+                    end_time_formatted += f".{end_milliseconds:03d}"
+                else:
+                    end_time_formatted += ".000"
+                end_time_formatted += " " + end_dt.strftime("%p").lower()
+            else:
+                # Calculate based on actual start time and duration
+                # This ensures proper alignment even with gaps
+                end_seconds = item_start_seconds + duration_seconds
+                end_day_offset = int(end_seconds // (24 * 60 * 60))
+                end_time_in_day = end_seconds % (24 * 60 * 60)
+                
+                # Convert end time to hours, minutes, seconds
+                end_hours = int(end_time_in_day // 3600)
+                end_minutes = int((end_time_in_day % 3600) // 60)
+                end_whole_seconds = int(end_time_in_day % 60)
+                # Calculate milliseconds more precisely to avoid floating-point errors
+                # Round to nearest millisecond to ensure consistency
+                end_milliseconds = round((end_time_in_day % 1) * 1000)
+                
+                # Create end datetime for formatting
+                end_dt_corrected = datetime(2000, 1, 1, end_hours, end_minutes, end_whole_seconds)
+                end_item_day = schedule_date + timedelta(days=end_day_offset)
+                end_item_day_name = end_item_day.strftime('%a').lower()
+                
+                # Format end time with actual milliseconds
+                end_time_formatted = f"{end_item_day_name} " + end_dt_corrected.strftime("%I:%M:%S").lstrip("0") + f".{end_milliseconds:03d} " + end_dt_corrected.strftime("%p").lower()
             
             # Debug the end time formatting
-            logger.debug(f"  Formatted end: {end_time_formatted} (end_milliseconds: {end_milliseconds}, from {end_time_in_day % 1:.6f}s)")
+            if 'end_time_in_day' in locals():
+                logger.debug(f"  Formatted end: {end_time_formatted} (end_milliseconds: {end_milliseconds}, from {end_time_in_day % 1:.6f}s)")
+            else:
+                logger.debug(f"  Formatted end: {end_time_formatted} (end_milliseconds: {end_milliseconds})")
         else:
             # Daily format times
+            # Extract actual milliseconds from start time
+            start_milliseconds = start_dt.microsecond // 1000
+            
             # Special handling for first item - should start at exactly 12:00 am
-            if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0:
+            if idx == 0 and start_dt.hour == 0 and start_dt.minute == 0 and start_milliseconds == 0:
                 start_time_formatted = "12:00 am"
             else:
-                # For other start times, add .000 if no milliseconds
-                start_time_formatted = start_dt.strftime("%I:%M:%S").lstrip("0") + ".000 " + start_dt.strftime("%p").lower()
+                # For all start times, include actual milliseconds
+                start_time_formatted = start_dt.strftime("%I:%M:%S").lstrip("0")
+                if start_milliseconds > 0:
+                    start_time_formatted += f".{start_milliseconds:03d}"
+                else:
+                    start_time_formatted += ".000"
+                start_time_formatted += " " + start_dt.strftime("%p").lower()
             
-            # For end time, include the actual milliseconds
-            end_time_formatted = end_dt.strftime("%I:%M:%S").lstrip("0") + f".{milliseconds:03d} " + end_dt.strftime("%p").lower()
+            # For end time, include the actual milliseconds from end_dt
+            end_milliseconds = end_dt.microsecond // 1000
+            end_time_formatted = end_dt.strftime("%I:%M:%S").lstrip("0") + f".{end_milliseconds:03d} " + end_dt.strftime("%p").lower()
         
         # Get the file path from the database
         file_path = item.get('file_path', '')
@@ -2498,7 +2710,8 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         
         # Update previous end time for overlap detection
         if format_type == 'weekly':
-            previous_end_seconds = item_start_seconds + duration_seconds
+            # Round to millisecond precision to match overlap detection
+            previous_end_seconds = round((item_start_seconds + duration_seconds) * 1000) / 1000
     
     return "\n".join(lines)
 
@@ -2685,6 +2898,17 @@ def parse_castus_schedule(content):
                 if item['start_time'] and item['end_time']:
                     duration = calculate_duration_from_times(item['start_time'], item['end_time'])
                     item['duration_seconds'] = duration
+                    
+                    # Convert start_time to 24-hour format with milliseconds preserved
+                    # Remove day prefix if present (e.g., "wed 12:00:15.040 am" -> "12:00:15.040 am")
+                    start_time_clean = item['start_time']
+                    if ' ' in start_time_clean:
+                        parts = start_time_clean.split(' ', 1)
+                        if len(parts[0]) <= 3:  # Likely a day abbreviation
+                            start_time_clean = parts[1]
+                    
+                    # Convert to 24-hour format
+                    item['start_time'] = convert_to_24hour_format(start_time_clean)
                 
                 schedule_data['items'].append(item)
             
@@ -2707,10 +2931,14 @@ def parse_castus_schedule(content):
     return schedule_data
 
 def convert_to_24hour_format(time_str):
-    """Convert Castus time format (12-hour with am/pm) to 24-hour format (HH:MM:SS)"""
+    """Convert Castus time format (12-hour with am/pm) to 24-hour format (HH:MM:SS or HH:MM:SS.mmm)"""
     try:
         import re
         from datetime import datetime
+        
+        # Extract milliseconds if present
+        milliseconds_match = re.search(r'\.(\d+)', time_str)
+        milliseconds = milliseconds_match.group(1) if milliseconds_match else None
         
         # Remove milliseconds for parsing
         time_clean = re.sub(r'\.\d+', '', time_str)
@@ -2719,7 +2947,11 @@ def convert_to_24hour_format(time_str):
         for fmt in ["%I:%M:%S %p", "%I:%M %p"]:
             try:
                 dt = datetime.strptime(time_clean, fmt)
-                return dt.strftime("%H:%M:%S")
+                result = dt.strftime("%H:%M:%S")
+                # Add milliseconds back if they were present
+                if milliseconds:
+                    result += f".{milliseconds}"
+                return result
             except ValueError:
                 continue
         
@@ -2736,6 +2968,10 @@ def calculate_duration_from_times(start_time, end_time):
         import re
         
         def parse_time(time_str):
+            # Extract milliseconds if present
+            milliseconds_match = re.search(r'\.(\d+)', time_str)
+            milliseconds = float(f"0.{milliseconds_match.group(1)}") if milliseconds_match else 0.0
+            
             # Remove milliseconds for parsing
             time_clean = re.sub(r'\.\d+', '', time_str)
             
@@ -2745,20 +2981,23 @@ def calculate_duration_from_times(start_time, end_time):
             # Try different time formats
             for fmt in ["%I:%M:%S %p", "%I:%M %p"]:
                 try:
-                    return datetime.strptime(time_clean, fmt)
+                    dt = datetime.strptime(time_clean, fmt)
+                    # Add milliseconds as fractional seconds
+                    return dt, milliseconds
                 except ValueError:
                     continue
             
             raise ValueError(f"Unable to parse time: {time_str}")
         
-        start_dt = parse_time(start_time)
-        end_dt = parse_time(end_time)
+        start_dt, start_ms = parse_time(start_time)
+        end_dt, end_ms = parse_time(end_time)
         
         # Handle day boundary
         if end_dt < start_dt:
             end_dt = end_dt.replace(day=end_dt.day + 1)
         
-        duration = (end_dt - start_dt).total_seconds()
+        # Calculate duration including milliseconds
+        duration = (end_dt - start_dt).total_seconds() + (end_ms - start_ms)
         return duration
         
     except:
@@ -3018,6 +3257,148 @@ def load_schedule_from_ftp():
         logger.error(f"Error loading schedule from FTP: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/fill-template-gaps', methods=['POST'])
+def fill_template_gaps():
+    """Fill gaps in a template using the same logic as schedule creation"""
+    try:
+        data = request.json
+        template = data.get('template')
+        available_content = data.get('available_content', [])
+        
+        if not template or not available_content:
+            return jsonify({
+                'success': False,
+                'message': 'Template and available content are required'
+            })
+        
+        # Determine schedule type
+        schedule_type = template.get('type', 'daily')
+        
+        # Calculate total template duration and gaps
+        total_duration = 0
+        for item in template.get('items', []):
+            total_duration += float(item.get('duration_seconds', 0))
+        
+        # Target duration based on type
+        target_duration = 24 * 3600  # Daily
+        if schedule_type == 'weekly':
+            target_duration = 7 * 24 * 3600
+        elif schedule_type == 'monthly':
+            target_duration = 31 * 24 * 3600
+        
+        gap_seconds = target_duration - total_duration
+        
+        if gap_seconds <= 0:
+            return jsonify({
+                'success': True,
+                'message': 'Template is already full',
+                'items_added': []
+            })
+        
+        # Initialize scheduler for rotation logic
+        scheduler = scheduler_postgres
+        scheduler._reset_rotation()
+        
+        # Convert available content to the format expected by scheduler
+        content_by_id = {}
+        for content in available_content:
+            content_by_id[content.get('id')] = content
+        
+        # Track what we've scheduled
+        scheduled_asset_ids = []
+        items_added = []
+        
+        # Get existing items' IDs to avoid duplicates
+        for item in template.get('items', []):
+            asset_id = item.get('asset_id') or item.get('id')
+            if asset_id:
+                scheduled_asset_ids.append(asset_id)
+        
+        # Fill gaps using rotation logic
+        current_position = total_duration
+        
+        while current_position < target_duration:
+            # Get next duration category from rotation
+            duration_category = scheduler._get_next_duration_category()
+            
+            # Filter available content by category and exclusions
+            category_content = []
+            for content in available_content:
+                # Skip if already scheduled
+                content_id = content.get('id')
+                if content_id in scheduled_asset_ids:
+                    continue
+                
+                # Check duration category
+                if content.get('duration_category') == duration_category:
+                    category_content.append(content)
+            
+            if not category_content:
+                # Try next category if no content available
+                logger.warning(f"No content available for category: {duration_category}")
+                continue
+            
+            # Sort by engagement score and shelf life (like scheduler does)
+            category_content.sort(key=lambda x: (
+                -(x.get('engagement_score', 50) + 
+                  (20 if x.get('shelf_life_score') == 'high' else 10 if x.get('shelf_life_score') == 'medium' else 0))
+            ))
+            
+            # Select the best content
+            selected = category_content[0]
+            duration = float(selected.get('duration_seconds', 0))
+            
+            # Check if it fits
+            remaining = target_duration - current_position
+            if duration > remaining:
+                # Try to find shorter content that fits
+                found_fit = False
+                for alt_content in category_content[1:]:
+                    alt_duration = float(alt_content.get('duration_seconds', 0))
+                    if alt_duration <= remaining:
+                        selected = alt_content
+                        duration = alt_duration
+                        found_fit = True
+                        break
+                
+                if not found_fit:
+                    # No content fits, we're done
+                    break
+            
+            # Add to template
+            new_item = {
+                'asset_id': selected.get('id'),
+                'content_id': selected.get('id'),
+                'title': selected.get('content_title', selected.get('file_name')),
+                'file_name': selected.get('file_name'),
+                'file_path': selected.get('file_path'),
+                'duration_seconds': duration,
+                'duration_category': selected.get('duration_category'),
+                'content_type': selected.get('content_type'),
+                'guid': selected.get('guid', ''),
+                # Start time will be calculated by frontend
+                'start_time': None,
+                'end_time': None
+            }
+            
+            items_added.append(new_item)
+            scheduled_asset_ids.append(selected.get('id'))
+            current_position += duration
+        
+        return jsonify({
+            'success': True,
+            'items_added': items_added,
+            'total_added': len(items_added),
+            'new_duration': current_position
+        })
+        
+    except Exception as e:
+        logger.error(f"Fill template gaps error: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
 @app.route('/api/export-template', methods=['POST'])
 def export_template():
     """Export a template as a schedule file"""
@@ -3042,20 +3423,125 @@ def export_template():
             })
         
         # Generate schedule content from template
+        # Determine format type based on template type
+        format_type = 'weekly' if template.get('type') == 'weekly' else 'daily'
+        
         # Calculate start/end times for items
         current_time = datetime.strptime("00:00:00", "%H:%M:%S")
         
-        for item in template['items']:
-            # Handle time with frames if present
-            if 'start_time' in item and ':' in item['start_time']:
-                time_parts = item['start_time'].split(':')
-                if len(time_parts) == 4:
-                    # Has frames, use the base time for calculation
-                    item['scheduled_start_time'] = ':'.join(time_parts[:3])
+        # For weekly templates, we need to ensure all times have proper day prefixes
+        if format_type == 'weekly':
+            # Track the current day and time position
+            current_seconds = 0.0
+            
+            for idx, item in enumerate(template['items']):
+                # Get the start time
+                start_time = item.get('start_time', '')
+                
+                # Check if start_time already has a day prefix
+                has_day_prefix = False
+                if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                    has_day_prefix = True
+                    item['scheduled_start_time'] = start_time
+                    
+                    # Parse the day and time to update current position
+                    parts = start_time.split(' ', 1)
+                    day_name = parts[0].lower()
+                    day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                    day_index = day_map.get(day_name, 0)
+                    
+                    # Parse time component
+                    time_part = parts[1] if len(parts) > 1 else '12:00:00 am'
+                    if 'am' in time_part.lower() or 'pm' in time_part.lower():
+                        time_24 = convert_to_24hour_format(time_part)
+                    else:
+                        time_24 = time_part
+                    time_parts = time_24.split(':')
+                    hours = int(time_parts[0])
+                    minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                    seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                    
+                    current_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60) + seconds
                 else:
+                    # No day prefix - we need to calculate it based on position
+                    # Determine which day this item falls on
+                    day_index = int(current_seconds // (24 * 3600))
+                    day_names = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+                    day_name = day_names[day_index % 7]
+                    
+                    # Parse the time component
+                    if 'am' in start_time.lower() or 'pm' in start_time.lower():
+                        # Convert AM/PM to 24-hour first
+                        time_24 = convert_to_24hour_format(start_time)
+                    else:
+                        time_24 = start_time
+                    
+                    # Add the day prefix
+                    if 'am' in start_time.lower() or 'pm' in start_time.lower():
+                        # Keep the original AM/PM format
+                        item['scheduled_start_time'] = f"{day_name} {start_time}"
+                    else:
+                        # Convert to AM/PM format for consistency
+                        time_parts = time_24.split(':')
+                        if time_parts:
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                            seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                            
+                            # Format as 12-hour time
+                            period = 'am' if hours < 12 else 'pm'
+                            display_hours = hours
+                            if hours == 0:
+                                display_hours = 12
+                            elif hours > 12:
+                                display_hours = hours - 12
+                            
+                            time_str = f"{display_hours}:{minutes:02d}:{int(seconds):02d}"
+                            if seconds % 1 > 0:
+                                milliseconds = int((seconds % 1) * 1000)
+                                time_str += f".{milliseconds:03d}"
+                            time_str += f" {period}"
+                            
+                            item['scheduled_start_time'] = f"{day_name} {time_str}"
+                
+                # Handle end_time similarly if provided
+                if 'end_time' in item:
+                    end_time = item['end_time']
+                    if ' ' in end_time and any(day in end_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                        item['scheduled_end_time'] = end_time
+                    else:
+                        # Calculate which day the end time falls on
+                        duration = float(item.get('duration_seconds', 0))
+                        end_seconds = current_seconds + duration
+                        end_day_index = int(end_seconds // (24 * 3600))
+                        day_names = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+                        end_day_name = day_names[end_day_index % 7]
+                        
+                        # Add day prefix to end time
+                        if 'am' in end_time.lower() or 'pm' in end_time.lower():
+                            item['scheduled_end_time'] = f"{end_day_name} {end_time}"
+                        else:
+                            # Format end time with AM/PM
+                            item['scheduled_end_time'] = f"{end_day_name} {end_time}"
+                
+                # Update current position for next item
+                duration = float(item.get('duration_seconds', 0))
+                current_seconds += duration
+                
+                # Also set scheduled_duration_seconds
+                item['scheduled_duration_seconds'] = duration
+        else:
+            # Daily templates - simpler handling
+            for item in template['items']:
+                if 'start_time' in item:
                     item['scheduled_start_time'] = item['start_time']
-            else:
-                item['scheduled_start_time'] = current_time.strftime("%H:%M:%S")
+                    if 'end_time' in item:
+                        item['scheduled_end_time'] = item['end_time']
+                else:
+                    item['scheduled_start_time'] = current_time.strftime("%H:%M:%S")
+            
+            # Also set scheduled_duration_seconds for consistency with schedule export
+            item['scheduled_duration_seconds'] = float(item.get('duration_seconds', 0))
             
             duration_seconds = float(item.get('duration_seconds', 0))
             current_time += timedelta(seconds=duration_seconds)
@@ -3069,9 +3555,14 @@ def export_template():
         }
         
         # Generate Castus format
-        # Determine format type based on template type
-        format_type = 'weekly' if template.get('type') == 'weekly' else 'daily'
         schedule_content = generate_castus_schedule(mock_schedule, template['items'], mock_schedule['air_date'], format_type)
+        
+        # Check if generate_castus_schedule returned an error (overlap detected)
+        if schedule_content.startswith("ERROR:"):
+            return jsonify({
+                'success': False,
+                'message': schedule_content
+            })
         
         # Write to temporary file - explicitly preserve TABs
         import tempfile
