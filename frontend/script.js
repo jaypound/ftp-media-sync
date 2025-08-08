@@ -2421,6 +2421,14 @@ window.addEventListener('load', function() {
     log('Welcome to the modern FTP sync interface!');
     log('Navigate using the menu above to configure servers and settings');
     
+    // Debug: Check if template functions are available
+    console.log('=== Template Functions Debug ===');
+    console.log('showLoadTemplateModal:', typeof window.showLoadTemplateModal);
+    console.log('showLoadWeeklyTemplateModal:', typeof window.showLoadWeeklyTemplateModal);
+    console.log('showLoadMonthlyTemplateModal:', typeof window.showLoadMonthlyTemplateModal);
+    console.log('fillScheduleGaps:', typeof window.fillScheduleGaps);
+    console.log('================================');
+    
     // Initialize theme
     initializeTheme();
     
@@ -5918,6 +5926,99 @@ function formatDurationTimecode(durationSeconds, fps = 30) {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
 }
 
+// Format duration with milliseconds preserved
+function formatDurationTimecodeWithMs(durationSeconds, fps = 30) {
+    const duration = parseFloat(durationSeconds) || 0;
+    
+    const hours = Math.floor(duration / 3600);
+    const minutes = Math.floor((duration % 3600) / 60);
+    const seconds = Math.floor(duration % 60);
+    const milliseconds = duration % 1;
+    const frames = Math.round(milliseconds * fps);
+    
+    // Format as HH:MM:SS:FF
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+}
+
+// Convert time string (HH:MM:SS or HH:MM:SS.mmm) to timecode format (HH:MM:SS:FF)
+function formatTimeToTimecode(timeStr, fps = 30) {
+    if (!timeStr) return '00:00:00:00';
+    
+    // Handle weekly format times that include day prefix (e.g., "wed 12:00:15.040 am")
+    let cleanTime = timeStr;
+    if (timeStr.includes(' ') && (timeStr.includes('am') || timeStr.includes('pm'))) {
+        // Extract just the time part
+        const parts = timeStr.split(' ');
+        if (parts.length >= 2) {
+            // Skip the day prefix if present
+            const timePartIndex = parts[0].length <= 3 ? 1 : 0;
+            cleanTime = parts.slice(timePartIndex).join(' ');
+        }
+        
+        // Convert 12-hour to 24-hour format first
+        const time24 = convert12to24Hour(cleanTime);
+        if (time24) {
+            cleanTime = time24;
+        }
+    }
+    
+    // Parse time parts
+    const parts = cleanTime.split(':');
+    if (parts.length < 3) return cleanTime;
+    
+    const hours = parts[0].padStart(2, '0');
+    const minutes = parts[1].padStart(2, '0');
+    
+    // Handle seconds and milliseconds
+    const secondsParts = parts[2].split('.');
+    const seconds = secondsParts[0].padStart(2, '0');
+    
+    let frames = '00';
+    if (secondsParts.length > 1) {
+        // Convert milliseconds to frames
+        const milliseconds = parseFloat(`0.${secondsParts[1]}`);
+        frames = Math.round(milliseconds * fps).toString().padStart(2, '0');
+    }
+    
+    return `${hours}:${minutes}:${seconds}:${frames}`;
+}
+
+// Helper function to convert 12-hour to 24-hour format
+function convert12to24Hour(timeStr) {
+    try {
+        // Remove milliseconds temporarily
+        const millisMatch = timeStr.match(/\.(\d+)/);
+        const millis = millisMatch ? millisMatch[1] : null;
+        const cleanTime = timeStr.replace(/\.\d+/, '');
+        
+        // Parse the time
+        const match = cleanTime.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)/i);
+        if (!match) return null;
+        
+        let hours = parseInt(match[1]);
+        const minutes = match[2];
+        const seconds = match[3] || '00';
+        const period = match[4].toLowerCase();
+        
+        // Convert to 24-hour
+        if (period === 'pm' && hours !== 12) {
+            hours += 12;
+        } else if (period === 'am' && hours === 12) {
+            hours = 0;
+        }
+        
+        // Format result
+        let result = `${hours.toString().padStart(2, '0')}:${minutes}:${seconds}`;
+        if (millis) {
+            result += `.${millis}`;
+        }
+        
+        return result;
+    } catch (e) {
+        return null;
+    }
+}
+
 // Convert HH:MM:SS or HH:MM:SS.microseconds to HH:MM:SS:FF format
 function formatTimeWithFrames(timeStr, fps = 30) {
     if (!timeStr) return '00:00:00:00';
@@ -7160,34 +7261,318 @@ async function loadSelectedScheduleFromFTP() {
 let currentTemplateType = 'daily'; // Track whether we're loading daily or weekly
 
 function showLoadTemplateModal() {
-    currentTemplateType = 'daily';
-    document.getElementById('loadTemplateModal').style.display = 'block';
-    document.getElementById('loadTemplateModalTitle').textContent = 'Load Daily Schedule Template';
-    
-    // Load default path from scheduling settings
-    const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
-    const defaultPath = schedulingSettings.defaultExportPath || '/mnt/md127/Schedules';
-    document.getElementById('templatePath').value = defaultPath;
+    try {
+        log('showLoadTemplateModal: Starting to show daily template modal', 'info');
+        currentTemplateType = 'daily';
+        
+        const modal = document.getElementById('loadTemplateModal');
+        if (!modal) {
+            log('showLoadTemplateModal: ERROR - Modal element not found!', 'error');
+            return;
+        }
+        
+        modal.style.display = 'block';
+        log('showLoadTemplateModal: Modal display set to block', 'info');
+        
+        // Debug modal visibility
+        setTimeout(() => {
+            const computedStyle = window.getComputedStyle(modal);
+            console.log('Modal debug info:');
+            console.log('- Display:', computedStyle.display);
+            console.log('- Visibility:', computedStyle.visibility);
+            console.log('- Z-index:', computedStyle.zIndex);
+            console.log('- Position:', computedStyle.position);
+            console.log('- Opacity:', computedStyle.opacity);
+            console.log('- Modal element:', modal);
+            console.log('- Modal parent:', modal.parentElement);
+            console.log('- Modal offsetParent:', modal.offsetParent);
+        }, 100);
+        
+        const titleElement = document.getElementById('loadTemplateModalTitle');
+        if (titleElement) {
+            titleElement.textContent = 'Load Daily Schedule Template';
+        } else {
+            log('showLoadTemplateModal: Warning - Title element not found', 'warning');
+        }
+        
+        // Load default path from scheduling settings
+        const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
+        const defaultPath = schedulingSettings.defaultExportPath || '/mnt/main/Schedules';
+        
+        const pathInput = document.getElementById('templatePath');
+        if (pathInput) {
+            pathInput.value = defaultPath;
+            log(`showLoadTemplateModal: Set path to ${defaultPath}`, 'info');
+        } else {
+            log('showLoadTemplateModal: ERROR - Path input not found!', 'error');
+        }
+        
+        // Clear file list and reset button
+        const fileList = document.getElementById('templateFileList');
+        if (fileList) {
+            fileList.innerHTML = '<p style="color: #666;">Select a server and click Refresh to load schedule files</p>';
+        }
+        
+        const loadBtn = document.getElementById('loadTemplateBtn');
+        if (loadBtn) {
+            loadBtn.disabled = true;
+        }
+        
+        log('showLoadTemplateModal: Daily template modal shown successfully', 'success');
+    } catch (error) {
+        log(`showLoadTemplateModal: ERROR - ${error.message}`, 'error');
+        console.error('Error in showLoadTemplateModal:', error);
+    }
 }
 
 function showLoadWeeklyTemplateModal() {
-    currentTemplateType = 'weekly';
-    document.getElementById('loadTemplateModal').style.display = 'block';
-    document.getElementById('loadTemplateModalTitle').textContent = 'Load Weekly Schedule Template';
-    
-    // Load default path from scheduling settings
-    const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
-    const defaultPath = schedulingSettings.defaultExportPath || '/mnt/md127/Schedules';
-    document.getElementById('templatePath').value = defaultPath;
-    
-    // Clear previous file list
-    document.getElementById('templateFileList').innerHTML = '<p style="color: #666;">Select a server and click Refresh to load schedule files</p>';
-    document.getElementById('loadTemplateBtn').disabled = true;
+    try {
+        log('showLoadWeeklyTemplateModal: Starting to show weekly template modal', 'info');
+        currentTemplateType = 'weekly';
+        
+        const modal = document.getElementById('loadTemplateModal');
+        if (!modal) {
+            log('showLoadWeeklyTemplateModal: ERROR - Modal element not found!', 'error');
+            return;
+        }
+        
+        modal.style.display = 'block';
+        log('showLoadWeeklyTemplateModal: Modal display set to block', 'info');
+        
+        const titleElement = document.getElementById('loadTemplateModalTitle');
+        if (titleElement) {
+            titleElement.textContent = 'Load Weekly Schedule Template';
+        }
+        
+        // Load default path from scheduling settings
+        const schedulingSettings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
+        const defaultPath = schedulingSettings.defaultExportPath || '/mnt/main/Schedules';
+        
+        const pathInput = document.getElementById('templatePath');
+        if (pathInput) {
+            pathInput.value = defaultPath;
+            log(`showLoadWeeklyTemplateModal: Set path to ${defaultPath}`, 'info');
+        }
+        
+        // Clear previous file list
+        const fileList = document.getElementById('templateFileList');
+        if (fileList) {
+            fileList.innerHTML = '<p style="color: #666;">Select a server and click Refresh to load schedule files</p>';
+        }
+        
+        const loadBtn = document.getElementById('loadTemplateBtn');
+        if (loadBtn) {
+            loadBtn.disabled = true;
+        }
+        
+        log('showLoadWeeklyTemplateModal: Weekly template modal shown successfully', 'success');
+    } catch (error) {
+        log(`showLoadWeeklyTemplateModal: ERROR - ${error.message}`, 'error');
+        console.error('Error in showLoadWeeklyTemplateModal:', error);
+    }
 }
 
 function closeLoadTemplateModal() {
     document.getElementById('loadTemplateModal').style.display = 'none';
     selectedTemplateFile = null;
+}
+
+function showLoadMonthlyTemplateModal() {
+    try {
+        log('showLoadMonthlyTemplateModal: Starting to show monthly template modal', 'info');
+        currentTemplateType = 'monthly';
+        
+        const modal = document.getElementById('loadTemplateModal');
+        if (!modal) {
+            log('showLoadMonthlyTemplateModal: ERROR - Modal element not found!', 'error');
+            return;
+        }
+        
+        modal.style.display = 'block';
+        log('showLoadMonthlyTemplateModal: Modal display set to block', 'info');
+        
+        const titleElement = document.getElementById('loadTemplateModalTitle');
+        if (titleElement) {
+            titleElement.textContent = 'Load Monthly Schedule Template';
+        }
+        
+        // Load default path from scheduling settings
+        const settings = JSON.parse(localStorage.getItem('schedulingSettings') || '{}');
+        const defaultPath = settings.defaultExportPath || '/mnt/main/Schedules';
+        
+        const pathInput = document.getElementById('templatePath');
+        if (pathInput) {
+            pathInput.value = defaultPath;
+            log(`showLoadMonthlyTemplateModal: Set path to ${defaultPath}`, 'info');
+        }
+        
+        // Clear file list and reset button
+        const fileList = document.getElementById('templateFileList');
+        if (fileList) {
+            fileList.innerHTML = '<p style="color: #666;">Select a server and click Refresh to load schedule files</p>';
+        }
+        
+        const loadBtn = document.getElementById('loadTemplateBtn');
+        if (loadBtn) {
+            loadBtn.disabled = true;
+        }
+        
+        log('showLoadMonthlyTemplateModal: Monthly template modal shown successfully', 'success');
+    } catch (error) {
+        log(`showLoadMonthlyTemplateModal: ERROR - ${error.message}`, 'error');
+        console.error('Error in showLoadMonthlyTemplateModal:', error);
+    }
+}
+
+async function fillScheduleGaps() {
+    try {
+        log('fillScheduleGaps: Function called', 'info');
+        
+        if (!currentTemplate) {
+            log('fillScheduleGaps: No current template loaded', 'warning');
+            alert('Please load a template first');
+            return;
+        }
+        
+        if (!currentTemplate.items || currentTemplate.items.length === 0) {
+            log('fillScheduleGaps: Template has no items', 'warning');
+            alert('Please load a template with items first');
+            return;
+        }
+        
+        // Make sure we're on the dashboard to see the template
+        const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+        if (activePanel && activePanel.id !== 'dashboard') {
+            // Switch to dashboard if not already there
+            showPanel('dashboard');
+        }
+        
+        log(`fillScheduleGaps: Current template has ${currentTemplate.items.length} items`, 'info');
+
+        // Check if we have analyzed content to fill gaps with
+        log(`fillScheduleGaps: Checking availableContent array, length: ${availableContent ? availableContent.length : 0}`, 'info');
+        
+        if (!availableContent || availableContent.length === 0) {
+            log('fillScheduleGaps: No content loaded, attempting to load available content', 'info');
+            
+            // Try to load available content
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/analyzed-content', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content_type: '',
+                        duration_category: '',
+                        search: ''
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success && result.content && result.content.length > 0) {
+                    availableContent = result.content;
+                    log(`fillScheduleGaps: Loaded ${availableContent.length} available content items`, 'success');
+                } else {
+                    log('fillScheduleGaps: No analyzed content available', 'warning');
+                    alert('No analyzed content available. Please analyze some files first.');
+                    return;
+                }
+            } catch (error) {
+                log(`fillScheduleGaps: Error loading content: ${error.message}`, 'error');
+                alert('Error loading available content. Please try again.');
+                return;
+            }
+        }
+        
+        log(`fillScheduleGaps: Found ${availableContent.length} analyzed files available`, 'info');
+
+        // Calculate total template duration
+        let totalDuration = 0;
+        currentTemplate.items.forEach(item => {
+            const duration = parseFloat(item.duration_seconds);
+            if (!isNaN(duration) && duration > 0) {
+                totalDuration += duration;
+            } else {
+                log(`fillScheduleGaps: Item has invalid duration: ${item.title || item.file_name} - ${item.duration_seconds}`, 'warning');
+            }
+        });
+        
+        log(`fillScheduleGaps: Total template duration: ${totalDuration} seconds (${formatDuration(totalDuration)})`, 'info');
+
+        // Calculate total time needed based on template type
+        let hoursNeeded = 24; // Default for daily
+        if (currentTemplate.type === 'weekly') {
+            hoursNeeded = 24 * 7; // 7 days
+        } else if (currentTemplate.type === 'monthly') {
+            hoursNeeded = 24 * 31; // 31 days max
+        }
+        
+        const secondsNeeded = hoursNeeded * 3600;
+        const gapSeconds = secondsNeeded - totalDuration;
+
+        if (gapSeconds <= 0) {
+            const templateTypeText = currentTemplate.type === 'weekly' ? '7 days' : currentTemplate.type === 'monthly' ? '31 days' : '24 hours';
+            log(`fillScheduleGaps: Template already fills or exceeds ${templateTypeText} (${formatDuration(totalDuration)})`, 'warning');
+            alert(`Template already fills or exceeds ${templateTypeText}`);
+            return;
+        }
+
+        const gapHours = Math.floor(gapSeconds / 3600);
+        const gapMinutes = Math.floor((gapSeconds % 3600) / 60);
+        
+        log(`fillScheduleGaps: Gap to fill: ${gapHours}h ${gapMinutes}m (${gapSeconds} seconds)`, 'info');
+
+        if (confirm(`Current template duration: ${formatDuration(totalDuration)}\nGap to fill: ${gapHours}h ${gapMinutes}m\n\nFill the gaps with available content?`)) {
+            log(`fillScheduleGaps: User confirmed - filling ${gapHours}h ${gapMinutes}m of schedule gaps`, 'info');
+            
+            try {
+                // Call backend to fill gaps using proper rotation logic
+                log('fillScheduleGaps: Calling backend to fill gaps with rotation logic', 'info');
+                
+                const response = await fetch('http://127.0.0.1:5000/api/fill-template-gaps', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        template: currentTemplate,
+                        available_content: availableContent
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.items_added && result.items_added.length > 0) {
+                    log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
+                    
+                    // Add the new items to the template
+                    currentTemplate.items.push(...result.items_added);
+                    
+                    // Recalculate times for all items
+                    recalculateTemplateTimes();
+                    
+                    // Update the template display
+                    const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+                    if (activePanel && activePanel.id === 'dashboard') {
+                        displayDashboardTemplate();
+                    } else {
+                        displayTemplate();
+                    }
+                    
+                    alert(`Successfully added ${result.items_added.length} items to fill the schedule gaps.`);
+                    log(`fillScheduleGaps: Template now has ${currentTemplate.items.length} items`, 'success');
+                } else {
+                    log(`fillScheduleGaps: ${result.message || 'No suitable content found to fill gaps'}`, 'warning');
+                    alert(result.message || 'Could not find suitable content to fill the schedule gaps. Try analyzing more content.');
+                }
+            } catch (error) {
+                log(`fillScheduleGaps: Error filling gaps - ${error.message}`, 'error');
+                alert(`Error filling schedule gaps: ${error.message}`);
+            }
+        } else {
+            log('fillScheduleGaps: User cancelled gap filling', 'info');
+        }
+    } catch (error) {
+        log(`fillScheduleGaps: ERROR - ${error.message}`, 'error');
+        console.error('Error in fillScheduleGaps:', error);
+    }
 }
 
 async function loadTemplateFiles() {
@@ -7299,6 +7684,9 @@ async function loadSelectedTemplate() {
                 displayAvailableContent(availableContent);
             }
             
+            // Save template to library
+            saveTemplateToLibrary(currentTemplate);
+            
             closeLoadTemplateModal();
             log(`Template loaded: ${result.filename}`, 'success');
             log(`✅ Template loaded successfully: ${result.filename} with ${currentTemplate.items.length} items`);
@@ -7318,19 +7706,48 @@ async function loadSelectedTemplate() {
 function recalculateTemplateTimes() {
     if (!currentTemplate || !currentTemplate.items) return;
     
-    let currentTime = "00:00:00:00"; // Start with frames
+    // Check if we should preserve existing times (i.e., loaded from file with milliseconds)
+    const hasExistingTimes = currentTemplate.items.length > 0 && 
+                           currentTemplate.items[0].start_time && 
+                           currentTemplate.items[0].start_time !== "00:00:00:00" &&
+                           currentTemplate.items[0].start_time !== null;
     
-    currentTemplate.items.forEach(item => {
-        item.start_time = currentTime;
-        const duration = parseFloat(item.duration_seconds) || 0;
+    if (hasExistingTimes) {
+        // Don't recalculate - times are already set from the imported file
+        return;
+    }
+    
+    // Handle based on template type
+    if (currentTemplate.type === 'weekly') {
+        // For weekly templates, we need to add day prefixes
+        let currentSeconds = 0;
         
-        // Calculate end time with frame precision
-        const endTime = calculateEndTime(currentTime, duration);
-        item.end_time = endTime;
+        currentTemplate.items.forEach(item => {
+            // Format start time with day prefix
+            item.start_time = formatTimeFromSeconds(currentSeconds, 'weekly');
+            
+            const duration = parseFloat(item.duration_seconds) || 0;
+            currentSeconds += duration;
+            
+            // Format end time with day prefix
+            item.end_time = formatTimeFromSeconds(currentSeconds, 'weekly');
+        });
+    } else {
+        // Daily templates - use existing logic
+        let currentTime = "00:00:00:00"; // Start with frames
         
-        // Update current time for next item
-        currentTime = endTime;
-    });
+        currentTemplate.items.forEach(item => {
+            item.start_time = currentTime;
+            const duration = parseFloat(item.duration_seconds) || 0;
+            
+            // Calculate end time with frame precision
+            const endTime = calculateEndTime(currentTime, duration);
+            item.end_time = endTime;
+            
+            // Update current time for next item
+            currentTime = endTime;
+        });
+    }
 }
 
 function displayTemplate() {
@@ -7405,22 +7822,29 @@ function displayTemplate() {
                 }
             }
             
-            const durationTimecode = formatDurationTimecode(item.duration_seconds || 0);
+            const durationTimecode = formatDurationTimecodeWithMs(item.duration_seconds || 0);
             const hasAssetId = item.asset_id || item.content_id;
             const itemStyle = hasAssetId ? '' : 'opacity: 0.6;';
             const itemTitle = hasAssetId ? item.file_path : `${item.file_path} (Not in database - must be added from Available Content)`;
             
+            // Format start and end times to show frames
+            const startTimeFormatted = formatTimeToTimecode(item.start_time || '00:00:00');
+            const endTimeFormatted = formatTimeToTimecode(item.end_time || '00:00:00');
+            
             html += `
                 <div class="template-item" style="${itemStyle}">
                     <span style="color: #666;">${index + 1}</span>
-                    <span>${item.start_time}</span>
+                    <span>${startTimeFormatted}</span>
                     <span title="${itemTitle}">
                         ${item.filename}
                         ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i>' : ''}
                     </span>
                     <span>${durationTimecode}</span>
-                    <span>${item.end_time}</span>
+                    <span>${endTimeFormatted}</span>
                     <div class="template-item-actions">
+                        <button class="button info small" onclick="showTemplateItemInfo(${index})">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
                         <button class="button danger small" onclick="removeTemplateItem(${index})">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -7441,8 +7865,19 @@ function displayTemplate() {
 function clearTemplate() {
     if (confirm('Are you sure you want to clear the current template?')) {
         currentTemplate = null;
+        
+        // Clear both scheduling and dashboard template displays
         document.getElementById('templateInfo').style.display = 'none';
         document.getElementById('templateDisplay').innerHTML = '<p>Load a template file to begin editing</p>';
+        
+        document.getElementById('dashboardTemplateInfo').style.display = 'none';
+        document.getElementById('dashboardTemplateDisplay').innerHTML = '<p style="text-align: center; color: #666;">Load a template file to begin editing</p>';
+        
+        // Hide export button
+        const exportBtn = document.getElementById('exportTemplateBtn');
+        if (exportBtn) {
+            exportBtn.style.display = 'none';
+        }
         
         // Update available content to remove add buttons
         if (availableContent && availableContent.length > 0) {
@@ -7456,7 +7891,15 @@ function clearTemplate() {
 function removeTemplateItem(index) {
     if (currentTemplate && currentTemplate.items) {
         currentTemplate.items.splice(index, 1);
-        displayTemplate();
+        
+        // Check which panel is active and display accordingly
+        const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+        if (activePanel && activePanel.id === 'dashboard') {
+            displayDashboardTemplate();
+        } else {
+            displayTemplate();
+        }
+        
         log('Item removed from template', 'info');
     }
 }
@@ -7471,8 +7914,990 @@ function moveTemplateItem(index, direction) {
         [items[index], items[index + 1]] = [items[index + 1], items[index]];
     }
     
-    displayTemplate();
+    // Check which panel is active and display accordingly
+    const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+    if (activePanel && activePanel.id === 'dashboard') {
+        displayDashboardTemplate();
+    } else {
+        displayTemplate();
+    }
 }
+
+function showTemplateItemInfo(index) {
+    if (!currentTemplate || !currentTemplate.items || !currentTemplate.items[index]) return;
+    
+    const item = currentTemplate.items[index];
+    const info = [];
+    
+    const displayTitle = item.title || item.name || item.file_name || item.filename || 'Untitled';
+    info.push(`<strong>Title:</strong> ${displayTitle}`);
+    info.push(`<strong>Start Time:</strong> ${item.start_time}`);
+    info.push(`<strong>End Time:</strong> ${item.end_time}`);
+    info.push(`<strong>Duration:</strong> ${formatDuration(item.duration_seconds)}`);
+    
+    if (item.asset_id) {
+        info.push(`<strong>Asset ID:</strong> ${item.asset_id}`);
+    }
+    if (item.content_type) {
+        info.push(`<strong>Content Type:</strong> ${item.content_type}`);
+    }
+    if (item.file_name || item.filename) {
+        info.push(`<strong>File:</strong> ${item.file_name || item.filename}`);
+    }
+    if (item.summary) {
+        info.push(`<strong>Summary:</strong> ${item.summary}`);
+    }
+    
+    // Create a simple modal to show the info
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Template Item Details</h2>
+                <span class="close" onclick="this.parentElement.parentElement.parentElement.remove()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-content">
+                    ${info.join('<br><br>')}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="this.parentElement.parentElement.parentElement.remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Close modal when clicking outside
+    modal.onclick = function(event) {
+        if (event.target === modal) {
+            modal.remove();
+        }
+    };
+}
+
+// Template storage
+let savedTemplates = JSON.parse(localStorage.getItem('savedTemplates') || '[]');
+let currentExportTemplate = null;
+
+function showTemplateLibrary() {
+    log('Opening template library', 'info');
+    document.getElementById('templateLibraryModal').style.display = 'block';
+    loadTemplateLibrary();
+}
+
+function closeTemplateLibraryModal() {
+    document.getElementById('templateLibraryModal').style.display = 'none';
+}
+
+function loadTemplateLibrary() {
+    const libraryList = document.getElementById('templateLibraryList');
+    
+    if (savedTemplates.length === 0) {
+        libraryList.innerHTML = '<p style="text-align: center; color: #666;">No saved templates. Import a template to get started.</p>';
+        return;
+    }
+    
+    let html = '<div class="template-library-grid">';
+    savedTemplates.forEach((template, index) => {
+        const itemCount = template.items ? template.items.length : 0;
+        const totalDuration = template.items ? 
+            template.items.reduce((sum, item) => sum + (item.duration_seconds || 0), 0) : 0;
+        const durationStr = formatDuration(totalDuration);
+        
+        html += `
+            <div class="template-library-item">
+                <div class="template-library-header">
+                    <h4>${template.filename || template.name || 'Untitled Template'}</h4>
+                    <span class="template-type ${template.type}">${template.type || 'daily'}</span>
+                </div>
+                <div class="template-library-info">
+                    <p><i class="fas fa-list"></i> ${itemCount} items</p>
+                    <p><i class="fas fa-clock"></i> ${durationStr}</p>
+                    <p><i class="fas fa-calendar"></i> Saved: ${new Date(template.savedDate).toLocaleDateString()}</p>
+                </div>
+                <div class="template-library-actions">
+                    <button class="button primary small" onclick="viewTemplate(${index})">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    <button class="button secondary small" onclick="loadSavedTemplate(${index})">
+                        <i class="fas fa-upload"></i> Load
+                    </button>
+                    <button class="button info small" onclick="exportTemplate(${index})">
+                        <i class="fas fa-file-export"></i> Export
+                    </button>
+                    <button class="button danger small" onclick="deleteTemplate(${index})">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
+    
+    libraryList.innerHTML = html;
+}
+
+function displayDashboardTemplate() {
+    if (!currentTemplate) return;
+    
+    // Show template info
+    document.getElementById('dashboardTemplateInfo').style.display = 'block';
+    
+    // Show export button
+    const exportBtn = document.getElementById('exportTemplateBtn');
+    if (exportBtn) {
+        exportBtn.style.display = 'inline-block';
+    }
+    const scheduleType = currentTemplate.type === 'weekly' ? 'Weekly' : currentTemplate.type === 'monthly' ? 'Monthly' : 'Daily';
+    // Use filename as the primary name source
+    const templateName = currentTemplate.filename || currentTemplate.name || 'Untitled';
+    document.getElementById('dashboardTemplateName').textContent = `${templateName} (${scheduleType})`;
+    document.getElementById('dashboardTemplateItemCount').textContent = currentTemplate.items ? currentTemplate.items.length : 0;
+    
+    // Calculate total duration
+    let totalDuration = 0;
+    if (currentTemplate.items) {
+        currentTemplate.items.forEach(item => {
+            totalDuration += parseFloat(item.duration_seconds) || 0;
+        });
+    }
+    
+    const hours = Math.floor(totalDuration / 3600);
+    const minutes = Math.floor((totalDuration % 3600) / 60);
+    const seconds = Math.floor(totalDuration % 60);
+    document.getElementById('dashboardTemplateDuration').textContent = 
+        `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    
+    // Display template items
+    const templateDisplay = document.getElementById('dashboardTemplateDisplay');
+    
+    if (!currentTemplate.items || currentTemplate.items.length === 0) {
+        templateDisplay.innerHTML = '<p style="color: #666; text-align: center;">No items in template.</p>';
+        return;
+    }
+    
+    let html = '<div class="template-items-container">';
+    
+    // For weekly schedules, track which day we're on
+    let currentDay = '';
+    
+    currentTemplate.items.forEach((item, index) => {
+        // For weekly schedules, check if we need to add a day header
+        if (currentTemplate.type === 'weekly' && item.start_time) {
+            // Extract day from start time (e.g., "wed 12:00 am" -> "wed")
+            const dayMatch = item.start_time.match(/^(\w{3})\s/);
+            if (dayMatch) {
+                const itemDay = dayMatch[1];
+                if (itemDay !== currentDay) {
+                    currentDay = itemDay;
+                    const dayNames = {
+                        'sun': 'Sunday',
+                        'mon': 'Monday',
+                        'tue': 'Tuesday',
+                        'wed': 'Wednesday',
+                        'thu': 'Thursday',
+                        'fri': 'Friday',
+                        'sat': 'Saturday'
+                    };
+                    html += `
+                        <div class="template-day-header" style="background: rgba(55, 126, 255, 0.15); padding: 0.5rem 1rem; margin: 0.5rem 0; font-weight: bold; color: var(--primary-color); border-radius: 4px;">
+                            ${dayNames[itemDay] || itemDay.toUpperCase()}
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        // Format duration with milliseconds preserved
+        const durationTimecode = item.duration_timecode || formatDurationTimecodeWithMs(item.duration_seconds);
+        const hasAssetId = item.asset_id || item.id;
+        
+        // Format start time as timecode with milliseconds
+        const startTimeTimecode = formatTimeToTimecode(item.start_time || '00:00:00');
+        
+        html += `
+            <div class="template-item ${!hasAssetId ? 'missing-asset' : ''}">
+                <span class="template-item-number">${index + 1}</span>
+                <span class="template-item-time">${startTimeTimecode}</span>
+                <span class="template-item-title">
+                    ${item.title || item.name || item.file_name || item.filename || 'Untitled'}
+                    ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i>' : ''}
+                </span>
+                <span>${durationTimecode}</span>
+                <span>${item.end_time || '00:00:00'}</span>
+                <div class="template-item-actions">
+                    <button class="button info small" onclick="showTemplateItemInfo(${index})">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                    <button class="button danger small" onclick="removeTemplateItem(${index})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                    <button class="button secondary small" onclick="moveTemplateItem(${index}, 'up')" ${index === 0 ? 'disabled' : ''}>
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                    <button class="button secondary small" onclick="moveTemplateItem(${index}, 'down')" ${index === currentTemplate.items.length - 1 ? 'disabled' : ''}>
+                        <i class="fas fa-arrow-down"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
+    
+    templateDisplay.innerHTML = html;
+}
+
+function viewTemplate(index) {
+    const template = savedTemplates[index];
+    if (!template) return;
+    
+    // Close library modal and load the template for viewing
+    closeTemplateLibraryModal();
+    currentTemplate = JSON.parse(JSON.stringify(template)); // Deep copy
+    
+    // Check which panel is active and display accordingly
+    const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+    if (activePanel && activePanel.id === 'dashboard') {
+        displayDashboardTemplate();
+    } else {
+        displayTemplate();
+    }
+    
+    log(`Viewing template: ${template.filename || template.name || 'Untitled'}`, 'info');
+}
+
+function loadSavedTemplate(index) {
+    const template = savedTemplates[index];
+    if (!template) return;
+    
+    if (confirm(`Load template "${template.filename || template.name || 'Untitled'}"? This will replace the current template.`)) {
+        closeTemplateLibraryModal();
+        currentTemplate = JSON.parse(JSON.stringify(template)); // Deep copy
+        
+        // Check which panel is active and display accordingly
+        const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+        if (activePanel && activePanel.id === 'dashboard') {
+            displayDashboardTemplate();
+        } else {
+            displayTemplate();
+        }
+        
+        log(`Loaded template: ${template.filename || template.name || 'Untitled'}`, 'success');
+    }
+}
+
+function exportTemplate(index) {
+    const template = savedTemplates[index];
+    if (!template) return;
+    
+    currentExportTemplate = template;
+    document.getElementById('exportTemplateName').textContent = template.filename || template.name || 'Untitled Template';
+    
+    // Set default filename based on template type and name
+    const date = new Date();
+    const dateStr = date.toISOString().split('T')[0].replace(/-/g, '');
+    const templateType = template.type || 'daily';
+    let defaultFilename = '';
+    
+    if (templateType === 'daily') {
+        defaultFilename = `daily_${dateStr}.sch`;
+    } else if (templateType === 'weekly') {
+        defaultFilename = `weekly_${dateStr}.sch`;
+    } else if (templateType === 'monthly') {
+        defaultFilename = `monthly_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}.sch`;
+    }
+    
+    document.getElementById('templateExportFilename').value = defaultFilename;
+    document.getElementById('templateExportFormat').value = `castus_${templateType}`;
+    
+    document.getElementById('templateExportModal').style.display = 'block';
+}
+
+function closeTemplateExportModal() {
+    document.getElementById('templateExportModal').style.display = 'none';
+    currentExportTemplate = null;
+}
+
+async function confirmTemplateExport() {
+    if (!currentExportTemplate) return;
+    
+    const server = document.getElementById('templateExportServer').value;
+    const path = document.getElementById('templateExportPath').value;
+    const filename = document.getElementById('templateExportFilename').value;
+    const format = document.getElementById('templateExportFormat').value;
+    
+    if (!filename) {
+        alert('Please enter a filename');
+        return;
+    }
+    
+    log(`Exporting template to ${server} server: ${path}/${filename}`, 'info');
+    
+    try {
+        // This would typically make an API call to export the template
+        // For now, we'll prepare the data and show a message
+        const exportData = {
+            template: currentExportTemplate,
+            server: server,
+            path: path,
+            filename: filename,
+            format: format
+        };
+        
+        // TODO: Implement actual export to FTP
+        log('Template export feature not yet implemented', 'warning');
+        alert('Template export to FTP is not yet implemented. The template data has been prepared for export.');
+        
+        closeTemplateExportModal();
+    } catch (error) {
+        log(`Export error: ${error.message}`, 'error');
+    }
+}
+
+function deleteTemplate(index) {
+    const template = savedTemplates[index];
+    if (!template) return;
+    
+    if (confirm(`Delete template "${template.filename || template.name || 'Untitled'}"? This cannot be undone.`)) {
+        savedTemplates.splice(index, 1);
+        localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
+        loadTemplateLibrary();
+        log(`Deleted template: ${template.filename || template.name || 'Untitled'}`, 'info');
+    }
+}
+
+// Save template when loaded
+function saveTemplateToLibrary(template) {
+    // Add metadata
+    template.savedDate = new Date().toISOString();
+    if (!template.name && template.filename) {
+        template.name = template.filename.replace(/\.[^/.]+$/, ''); // Remove extension
+    }
+    
+    // Check if template already exists
+    const existingIndex = savedTemplates.findIndex(t => 
+        t.filename === template.filename && t.type === template.type
+    );
+    
+    if (existingIndex >= 0) {
+        // Update existing template
+        savedTemplates[existingIndex] = template;
+    } else {
+        // Add new template
+        savedTemplates.push(template);
+    }
+    
+    localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
+    log(`Saved template to library: ${template.filename || template.name || 'Untitled'}`, 'success');
+}
+
+// Fill gaps with content using scheduling algorithm
+async function fillGapsWithContent(template, gapSeconds, availableContent) {
+    if (!template || !availableContent || availableContent.length === 0) {
+        throw new Error('No content available to fill gaps');
+    }
+    
+    // Find all gaps in the schedule, including from the start
+    const gaps = findScheduleGaps(template);
+    if (gaps.length === 0) {
+        log('fillGapsWithContent: No gaps found in schedule', 'info');
+        return [];
+    }
+    
+    log(`fillGapsWithContent: Found ${gaps.length} gaps to fill`, 'info');
+    gaps.forEach((gap, i) => {
+        log(`  Gap ${i + 1}: ${gap.startTime} to ${gap.endTime} (${formatDuration(gap.duration)})`, 'info');
+    });
+    
+    // Check if there's a gap at the end of the schedule
+    const lastGap = gaps[gaps.length - 1];
+    const scheduleEnd = template.type === 'weekly' ? 7 * 24 * 3600 : 24 * 3600;
+    if (lastGap && lastGap.endSeconds === scheduleEnd) {
+        log(`fillGapsWithContent: Schedule has gap until end (${template.type === 'weekly' ? 'end of week' : 'midnight'})`, 'info');
+    } else if (gaps.length > 0) {
+        log(`fillGapsWithContent: Last gap ends at ${lastGap.endTime} (${lastGap.endSeconds} seconds), schedule should end at ${scheduleEnd} seconds`, 'info');
+    }
+    
+    const newItems = [];
+    
+    // Filter out content with invalid durations and sort by engagement score and shelf life
+    const validContent = availableContent.filter(content => {
+        // Try duration_seconds first, then file_duration
+        let duration = parseFloat(content.duration_seconds);
+        if (isNaN(duration) || duration <= 0) {
+            duration = parseFloat(content.file_duration);
+        }
+        
+        if (isNaN(duration) || duration <= 0) {
+            log(`fillGapsWithContent: Skipping ${content.content_title || content.file_name} - invalid duration: duration_seconds=${content.duration_seconds}, file_duration=${content.file_duration}`, 'warning');
+            return false;
+        }
+        
+        // Store the valid duration in duration_seconds for consistency
+        content.duration_seconds = duration;
+        return true;
+    });
+    
+    log(`fillGapsWithContent: ${availableContent.length - validContent.length} items filtered out due to invalid duration`, 'info');
+    
+    const sortedContent = [...validContent].sort((a, b) => {
+        const scoreA = (a.engagement_score || 50) + (a.shelf_life_score === 'high' ? 20 : a.shelf_life_score === 'medium' ? 10 : 0);
+        const scoreB = (b.engagement_score || 50) + (b.shelf_life_score === 'high' ? 20 : b.shelf_life_score === 'medium' ? 10 : 0);
+        return scoreB - scoreA;
+    });
+    
+    log(`fillGapsWithContent: Available content count: ${sortedContent.length}`, 'info');
+    log(`fillGapsWithContent: Gap to fill: ${formatDuration(gapSeconds)} (${gapSeconds} seconds)`, 'info');
+    
+    // Log duration categories available
+    const categoryCounts = {};
+    sortedContent.forEach(c => {
+        categoryCounts[c.duration_category || 'unknown'] = (categoryCounts[c.duration_category || 'unknown'] || 0) + 1;
+    });
+    log(`fillGapsWithContent: Duration categories available: ${JSON.stringify(categoryCounts)}`, 'info');
+    
+    // Debug: Log first few items to see what fields they have
+    if (sortedContent.length > 0) {
+        log(`fillGapsWithContent: Sample content item:`, 'info');
+        const sample = sortedContent[0];
+        log(`  - Title: ${sample.content_title || sample.file_name}`, 'info');
+        log(`  - Duration seconds: ${sample.duration_seconds}`, 'info');
+        log(`  - File duration: ${sample.file_duration}`, 'info');
+        log(`  - Duration category: ${sample.duration_category}`, 'info');
+    }
+    
+    // Use rotation order from scheduling config
+    const rotationOrder = scheduleConfig?.ROTATION_ORDER || ['id', 'short_form', 'long_form', 'spots'];
+    let rotationIndex = 0;
+    
+    // Track used content to avoid immediate repeats
+    const recentlyUsed = new Set();
+    const recentLimit = Math.min(10, Math.floor(sortedContent.length / 4));
+    
+    // Keep track of how many times we've used each content
+    const contentUsageCount = new Map();
+    let itemsAdded = 0;
+    
+    // Process gaps one at a time, recalculating after each gap is filled
+    let gapsToProcess = [...gaps];
+    
+    while (gapsToProcess.length > 0) {
+        const gap = gapsToProcess.shift();
+        let currentSeconds = gap.startSeconds;
+        let remainingGapTime = gap.duration;
+        
+        log(`fillGapsWithContent: Filling gap from ${gap.startTime} to ${gap.endTime} (${gap.startSeconds}s to ${gap.endSeconds}s)`, 'info');
+        
+        const maxIterations = sortedContent.length * 10; // Prevent infinite loops
+        let iterations = 0;
+        let gapItems = []; // Items added to this specific gap
+        
+        while (remainingGapTime > 0 && iterations < maxIterations) {
+            iterations++;
+            
+            // Get current duration category from rotation
+            const targetCategory = rotationOrder[rotationIndex % rotationOrder.length];
+            
+            // Find content matching the target category that hasn't been overused
+            let selectedItem = null;
+            let minUsageCount = Number.MAX_SAFE_INTEGER;
+            
+            // First, try to find content in the target category
+            for (const content of sortedContent) {
+                const usageCount = contentUsageCount.get(content.id) || 0;
+                if (content.duration_category === targetCategory && 
+                    content.duration_seconds <= remainingGapTime &&
+                    usageCount < minUsageCount) {
+                    selectedItem = content;
+                    minUsageCount = usageCount;
+                    if (usageCount === 0) break; // Prefer unused content
+                }
+            }
+        
+        // If no match in target category, find any suitable content
+        if (!selectedItem) {
+            minUsageCount = Number.MAX_SAFE_INTEGER;
+            for (const content of sortedContent) {
+                const usageCount = contentUsageCount.get(content.id) || 0;
+                if (content.duration_seconds <= remainingGapTime && usageCount < minUsageCount) {
+                    selectedItem = content;
+                    minUsageCount = usageCount;
+                    if (usageCount === 0) break; // Prefer unused content
+                }
+            }
+        }
+        
+        // If still no match but we have a big gap, allow any content
+        if (!selectedItem && remainingGapTime > 300) { // More than 5 minutes remaining
+            minUsageCount = Number.MAX_SAFE_INTEGER;
+            for (const content of sortedContent) {
+                const usageCount = contentUsageCount.get(content.id) || 0;
+                if (usageCount < minUsageCount) {
+                    selectedItem = content;
+                    minUsageCount = usageCount;
+                }
+            }
+        }
+        
+        if (!selectedItem) {
+            log(`fillGapsWithContent: No more suitable content available. Items added: ${itemsAdded}, Gap remaining: ${formatDuration(remainingGapTime)}`, 'warning');
+            break;
+        }
+        
+        // Ensure we have a valid duration
+        const itemDuration = parseFloat(selectedItem.duration_seconds);
+        if (isNaN(itemDuration) || itemDuration <= 0) {
+            log(`fillGapsWithContent: ERROR - Selected item has invalid duration: ${selectedItem.duration_seconds}`, 'error');
+            continue; // Skip this item and try another
+        }
+        
+            log(`fillGapsWithContent: Selected ${selectedItem.content_title || selectedItem.file_name} (${formatDuration(itemDuration)}, ${selectedItem.duration_category})`, 'info');
+            log(`  File path: ${selectedItem.file_path}`, 'info');
+            
+            // Calculate times for this item
+            const startTime = formatTimeFromSeconds(currentSeconds, template.type);
+            currentSeconds += itemDuration;
+            const endTime = formatTimeFromSeconds(currentSeconds, template.type);
+            
+            log(`  Will place at: ${startTime} to ${endTime}`, 'info');
+            
+            // Debug log for long items
+            if (itemDuration > 3600) { // More than 1 hour
+                log(`fillGapsWithContent: WARNING - Adding long item (${formatDuration(itemDuration)}) at ${startTime} to ${endTime}`, 'warning');
+                log(`  Gap being filled: ${gap.startTime} to ${gap.endTime} (${formatDuration(gap.duration)})`, 'info');
+                log(`  Current position in gap: ${formatDuration(currentSeconds - gap.startSeconds)} of ${formatDuration(gap.duration)}`, 'info');
+            }
+            
+            // Add one frame gap after this item to prevent overlaps (1/30 second)
+            // But don't add gap if this would exceed the gap we're trying to fill
+            const frameGap = 1.0 / 30.0; // One frame at 30fps
+            if (remainingGapTime > frameGap) {
+                currentSeconds += frameGap;
+            }
+            
+            // Create schedule item
+            const scheduleItem = {
+                start_time: startTime,
+                end_time: endTime,
+                scheduled_start_time: startTime,  // Set scheduled times for export
+                scheduled_end_time: endTime,
+                duration_seconds: itemDuration,
+                scheduled_duration_seconds: itemDuration,  // Ensure this is set for export
+                duration_timecode: formatDurationTimecodeWithMs(itemDuration),
+                asset_id: selectedItem.id,
+                content_id: selectedItem.id,
+                title: selectedItem.title || selectedItem.content_title,
+                name: selectedItem.title || selectedItem.content_title,
+                file_name: selectedItem.file_name,
+                filename: selectedItem.file_name,
+                file_path: selectedItem.file_path,
+                content_type: selectedItem.content_type,
+                summary: selectedItem.summary,
+                guid: selectedItem.guid || ''
+            };
+            
+            newItems.push(scheduleItem);
+            gapItems.push(scheduleItem);
+            itemsAdded++;
+            
+            // Update tracking
+            remainingGapTime -= itemDuration;
+            if (remainingGapTime > frameGap) {
+                remainingGapTime -= frameGap; // Account for the frame gap
+            }
+            contentUsageCount.set(selectedItem.id, (contentUsageCount.get(selectedItem.id) || 0) + 1);
+            
+            // Move to next rotation category
+            rotationIndex++;
+            
+            // Log progress
+            if (itemsAdded % 10 === 0) {
+                log(`fillGapsWithContent: Added ${itemsAdded} items`, 'info');
+            }
+        }
+        
+        if (iterations >= maxIterations) {
+            log(`fillGapsWithContent: Stopped filling gap after maximum iterations`, 'warning');
+        }
+        
+        // If we added items to this gap, update the template and recalculate remaining gaps
+        if (gapItems.length > 0) {
+            // Add gap items to template
+            template.items.push(...gapItems);
+            
+            // Sort all items by start time
+            template.items.sort((a, b) => {
+                const aSeconds = parseTimeToSeconds(a.start_time, template.type);
+                const bSeconds = parseTimeToSeconds(b.start_time, template.type);
+                return aSeconds - bSeconds;
+            });
+            
+            // Debug: Log all items after sorting to check for overlaps
+            log('Template items after adding gap fill and sorting:', 'info');
+            template.items.forEach((item, idx) => {
+                const startSec = parseTimeToSeconds(item.start_time, template.type);
+                const endSec = parseTimeToSeconds(item.end_time, template.type);
+                log(`  Item ${idx}: ${item.start_time} to ${item.end_time} (${startSec}s to ${endSec}s) - ${item.title || item.file_name}`, 'info');
+                if (idx > 0) {
+                    const prevEndSec = parseTimeToSeconds(template.items[idx-1].end_time, template.type);
+                    if (startSec < prevEndSec) {
+                        log(`    WARNING: Overlap detected! Starts ${prevEndSec - startSec}s before previous item ends`, 'error');
+                    }
+                }
+            });
+            
+            // Always recalculate gaps after adding items
+            const newGaps = findScheduleGaps(template);
+            log(`fillGapsWithContent: After filling gap, found ${newGaps.length} total gaps in schedule`, 'info');
+            
+            // Update remaining gaps with new gap information
+            // Simple approach: process all gaps except those we've already handled
+            // We keep track of processed gaps by checking if they overlap with or come before
+            // the current position in our gap filling
+            gapsToProcess = newGaps.filter(newGap => {
+                // Skip gaps that are entirely before the current gap started
+                // (these were processed in earlier iterations)
+                if (newGap.endSeconds <= gap.startSeconds) {
+                    return false;
+                }
+                
+                // Skip the portion of the current gap we've already filled
+                if (newGap.startSeconds >= gap.startSeconds && newGap.startSeconds < currentSeconds) {
+                    return false;
+                }
+                
+                // Process everything else
+                return true;
+            });
+            
+            log(`fillGapsWithContent: ${gapsToProcess.length} gaps remaining to process`, 'info');
+            if (gapsToProcess.length > 0) {
+                log(`  Next gap to process: ${gapsToProcess[0].startTime} to ${gapsToProcess[0].endTime}`, 'info');
+            } else if (newGaps.length > 0) {
+                // Log if there were gaps but none qualified for processing
+                log(`  Note: ${newGaps.length} gaps exist but were filtered out:`, 'info');
+                newGaps.forEach((g, idx) => {
+                    log(`    Gap ${idx + 1}: ${g.startTime} to ${g.endTime} (starts at ${g.startSeconds}s)`, 'info');
+                });
+                log(`  Current gap ended at ${gap.endSeconds}s, we filled to ${currentSeconds}s`, 'info');
+            }
+        }
+    }
+    
+    log(`fillGapsWithContent: Added ${itemsAdded} items to fill gaps`, 'success');
+    
+    // After filling each gap, we should update the template and recalculate gaps
+    // This is now done within the loop above by updating template.items directly
+    
+    // Final sort of all items by start time
+    if (template.items.length > 0) {
+        template.items.sort((a, b) => {
+            const aSeconds = parseTimeToSeconds(a.start_time, template.type);
+            const bSeconds = parseTimeToSeconds(b.start_time, template.type);
+            return aSeconds - bSeconds;
+        });
+    }
+    
+    return newItems;
+}
+
+// Find gaps in a schedule template
+function findScheduleGaps(template) {
+    const gaps = [];
+    
+    if (!template || !template.items || template.items.length === 0) {
+        // Entire schedule is empty
+        const totalDuration = template.type === 'weekly' ? 7 * 24 * 3600 : 24 * 3600;
+        gaps.push({
+            startTime: template.type === 'weekly' ? 'sun 12:00:00.000 am' : '00:00:00',
+            endTime: template.type === 'weekly' ? 'sat 11:59:59.999 pm' : '23:59:59',
+            startSeconds: 0,
+            endSeconds: totalDuration,
+            duration: totalDuration
+        });
+        return gaps;
+    }
+    
+    // Sort items by start time
+    const sortedItems = [...template.items].sort((a, b) => {
+        const aSeconds = parseTimeToSeconds(a.start_time, template.type);
+        const bSeconds = parseTimeToSeconds(b.start_time, template.type);
+        return aSeconds - bSeconds;
+    });
+    
+    // Check for gap at the beginning
+    const firstItemStart = parseTimeToSeconds(sortedItems[0].start_time, template.type);
+    if (firstItemStart > 0) {
+        gaps.push({
+            startTime: template.type === 'weekly' ? 'sun 12:00:00.000 am' : '00:00:00',
+            endTime: sortedItems[0].start_time,
+            startSeconds: 0,
+            endSeconds: firstItemStart,
+            duration: firstItemStart
+        });
+    }
+    
+    // Check for gaps between items
+    for (let i = 0; i < sortedItems.length - 1; i++) {
+        const currentEnd = parseTimeToSeconds(sortedItems[i].end_time, template.type);
+        const nextStart = parseTimeToSeconds(sortedItems[i + 1].start_time, template.type);
+        
+        if (nextStart > currentEnd) {
+            gaps.push({
+                startTime: sortedItems[i].end_time,
+                endTime: sortedItems[i + 1].start_time,
+                startSeconds: currentEnd,
+                endSeconds: nextStart,
+                duration: nextStart - currentEnd
+            });
+        }
+    }
+    
+    // Check for gap at the end
+    const lastItem = sortedItems[sortedItems.length - 1];
+    const lastItemEnd = parseTimeToSeconds(lastItem.end_time, template.type);
+    const scheduleEnd = template.type === 'weekly' ? 7 * 24 * 3600 : 24 * 3600;
+    
+    if (lastItemEnd < scheduleEnd) {
+        gaps.push({
+            startTime: lastItem.end_time,
+            endTime: template.type === 'weekly' ? 'sat 11:59:59.999 pm' : '23:59:59',
+            startSeconds: lastItemEnd,
+            endSeconds: scheduleEnd,
+            duration: scheduleEnd - lastItemEnd
+        });
+    }
+    
+    return gaps;
+}
+
+// Parse time to seconds, handling weekly format
+function parseTimeToSeconds(timeStr, templateType) {
+    if (!timeStr) return 0;
+    
+    if (templateType === 'weekly' && timeStr.includes(' ')) {
+        // Parse weekly format: "wed 12:00:15.040 am"
+        const parts = timeStr.split(' ');
+        const dayStr = parts[0];
+        const timeOnly = parts.slice(1).join(' ');
+        
+        // Convert day to offset
+        const dayOffsets = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+        const dayOffset = dayOffsets[dayStr.toLowerCase()] || 0;
+        
+        // Parse time part
+        const time24 = convert12to24Hour(timeOnly);
+        if (time24) {
+            const [h, m, s] = time24.split(':');
+            const seconds = parseFloat(h) * 3600 + parseFloat(m) * 60 + parseFloat(s);
+            return dayOffset * 24 * 3600 + seconds;
+        }
+    }
+    
+    // Parse regular time format - check for AM/PM
+    if (timeStr.toLowerCase().includes('am') || timeStr.toLowerCase().includes('pm')) {
+        // Convert 12-hour to 24-hour format first
+        const time24 = convert12to24Hour(timeStr);
+        if (time24) {
+            const parts = time24.split(':');
+            if (parts.length >= 3) {
+                return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+            }
+        }
+    }
+    
+    // Parse 24-hour format or plain HH:MM:SS
+    const parts = timeStr.split(':');
+    if (parts.length >= 3) {
+        return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+    }
+    
+    return 0;
+}
+
+// Helper function to format seconds to time string with proper format
+function formatTimeFromSeconds(totalSeconds, templateType = 'daily') {
+    if (templateType === 'weekly') {
+        // Calculate day and time for weekly schedules
+        const dayIndex = Math.floor(totalSeconds / (24 * 3600));
+        const daySeconds = totalSeconds % (24 * 3600);
+        
+        const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const dayName = days[dayIndex] || 'sun';
+        
+        const hours = Math.floor(daySeconds / 3600);
+        const minutes = Math.floor((daySeconds % 3600) / 60);
+        const seconds = daySeconds % 60;
+        const milliseconds = Math.round((seconds % 1) * 1000);
+        const wholeSeconds = Math.floor(seconds);
+        
+        // Convert to 12-hour format
+        let period = 'am';
+        let displayHours = hours;
+        if (hours >= 12) {
+            period = 'pm';
+            if (hours > 12) displayHours = hours - 12;
+        }
+        if (displayHours === 0) displayHours = 12;
+        
+        // Format with milliseconds if present
+        let timeStr = `${dayName} ${displayHours}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}`;
+        if (milliseconds > 0) {
+            timeStr += `.${milliseconds.toString().padStart(3, '0')}`;
+        }
+        timeStr += ` ${period}`;
+        
+        return timeStr;
+    } else {
+        // Regular daily format - return in 12-hour AM/PM format to match imported templates
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const milliseconds = Math.round((seconds % 1) * 1000);
+        const wholeSeconds = Math.floor(seconds);
+        
+        // Convert to 12-hour format
+        let period = 'am';
+        let displayHours = hours;
+        if (hours >= 12) {
+            period = 'pm';
+            if (hours > 12) displayHours = hours - 12;
+        }
+        if (displayHours === 0) displayHours = 12;
+        
+        // Format time string
+        let timeStr = `${displayHours}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}`;
+        if (milliseconds > 0) {
+            timeStr += `.${milliseconds.toString().padStart(3, '0')}`;
+        }
+        timeStr += ` ${period}`;
+        
+        return timeStr;
+    }
+}
+
+// Helper function to format duration to timecode
+function formatDurationTimecode(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const frames = Math.floor((seconds % 1) * 30); // Assuming 30fps
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
+}
+
+// Export current loaded template
+function exportCurrentTemplate() {
+    if (!currentTemplate) {
+        alert('No template loaded. Please load a template first.');
+        return;
+    }
+    
+    log('Opening export dialog for current template', 'info');
+    
+    // Set the export modal for the current template
+    document.getElementById('exportTemplateName').textContent = currentTemplate.filename || currentTemplate.name || 'Current Template';
+    
+    // Set default filename based on template type and today's date
+    const date = new Date();
+    const templateType = currentTemplate.type || 'daily';
+    let defaultFilename = '';
+    
+    if (templateType === 'daily') {
+        const dateStr = date.toISOString().split('T')[0];
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+        defaultFilename = `${dayName}_${dateStr.replace(/-/g, '')}.sch`;
+    } else if (templateType === 'weekly') {
+        const dateStr = date.toISOString().split('T')[0].replace(/-/g, '');
+        defaultFilename = `weekly_${dateStr}.sch`;
+    } else if (templateType === 'monthly') {
+        const monthYear = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
+        defaultFilename = `monthly_${monthYear}.sch`;
+    }
+    
+    document.getElementById('templateExportFilename').value = defaultFilename;
+    document.getElementById('templateExportFormat').value = `castus_${templateType}`;
+    
+    // Load saved export settings if available
+    const savedPath = localStorage.getItem('exportPath') || '/mnt/main/Schedules';
+    document.getElementById('templateExportPath').value = savedPath;
+    
+    // Store current template for export
+    currentExportTemplate = currentTemplate;
+    
+    // Show the export modal
+    document.getElementById('templateExportModal').style.display = 'block';
+}
+
+// Override the confirmTemplateExport to actually export to FTP
+async function confirmTemplateExport() {
+    if (!currentExportTemplate) return;
+    
+    const server = document.getElementById('templateExportServer').value;
+    const path = document.getElementById('templateExportPath').value;
+    const filename = document.getElementById('templateExportFilename').value;
+    const format = document.getElementById('templateExportFormat').value;
+    
+    if (!filename) {
+        alert('Please enter a filename');
+        return;
+    }
+    
+    // Save export settings
+    localStorage.setItem('exportPath', path);
+    
+    log(`Exporting template to ${server} server: ${path}/${filename}`, 'info');
+    
+    try {
+        // Prepare the schedule data
+        const scheduleData = {
+            template: currentExportTemplate,
+            export_server: server,
+            export_path: path,
+            filename: filename,
+            format: format,
+            items: currentExportTemplate.items || []
+        };
+        
+        // Export the template as a schedule file
+        const response = await fetch('http://127.0.0.1:5000/api/export-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scheduleData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`Template exported successfully to ${server}:${path}/${filename}`, 'success');
+            alert(`Template exported successfully!\n\nFile: ${filename}\nLocation: ${server}:${path}`);
+            closeTemplateExportModal();
+        } else {
+            log(`Export failed: ${result.message}`, 'error');
+            alert(`Export failed: ${result.message}`);
+        }
+    } catch (error) {
+        log(`Export error: ${error.message}`, 'error');
+        alert(`Error exporting template: ${error.message}`);
+    }
+}
+
+// Make template functions globally accessible
+window.showLoadTemplateModal = showLoadTemplateModal;
+window.showLoadWeeklyTemplateModal = showLoadWeeklyTemplateModal;
+window.showLoadMonthlyTemplateModal = showLoadMonthlyTemplateModal;
+window.fillScheduleGaps = fillScheduleGaps;
+window.showTemplateLibrary = showTemplateLibrary;
+window.closeTemplateLibraryModal = closeTemplateLibraryModal;
+window.viewTemplate = viewTemplate;
+window.loadSavedTemplate = loadSavedTemplate;
+window.exportTemplate = exportTemplate;
+window.deleteTemplate = deleteTemplate;
+window.closeTemplateExportModal = closeTemplateExportModal;
+window.confirmTemplateExport = confirmTemplateExport;
+window.exportCurrentTemplate = exportCurrentTemplate;
 
 function addToTemplate(assetId) {
     if (!currentTemplate) {

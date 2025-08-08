@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>FTP Media Sync - Feature List</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">FTP Media Sync - Feature List</h1>
+</header>
+<h1 id="ftp-media-sync---feature-list">FTP Media Sync - Feature
+List</h1>
+<p>Based on the codebase and recent development, here’s a comprehensive
+list of the FTP Media Sync application’s current features:</p>
+<h2 id="core-ftp-synchronization-features">Core FTP Synchronization
+Features</h2>
+<ul>
+<li><strong>Dual FTP Server Management</strong>: Connect to source and
+target FTP servers simultaneously</li>
+<li><strong>Bidirectional Sync</strong>: Files can be synced in both
+directions (source-to-target and target-to-source)</li>
+<li><strong>Multiple Path Support</strong>: Sync from different folders
+with different sync rules:
+<ul>
+<li>On-Air Content folder (unidirectional)</li>
+<li>Recordings folder (bidirectional)</li>
+</ul></li>
+<li><strong>File Filtering</strong>:
+<ul>
+<li>Filter by file extensions (mp4, mkv, avi, mov, wmv, m4v, flv)</li>
+<li>Filter by file size (min/max limits)</li>
+<li>Subdirectory scanning support</li>
+</ul></li>
+<li><strong>Sync Options</strong>:
+<ul>
+<li>Dry run mode (preview changes without actual sync)</li>
+<li>Overwrite existing files option</li>
+<li>Keep temporary files for debugging</li>
+</ul></li>
+<li><strong>Symbolic Link Support</strong>: Handles /mnt/main →
+/mnt/md127 symbolic links</li>
+</ul>
+<h2 id="file-management">File Management</h2>
+<ul>
+<li><strong>File Comparison</strong>: Compare files between servers
+showing:
+<ul>
+<li>Files missing on target</li>
+<li>Files with size differences</li>
+<li>Target-only files (for bidirectional sync)</li>
+<li>Identical files</li>
+</ul></li>
+<li><strong>Bulk Operations</strong>:
+<ul>
+<li>Queue multiple files for sync</li>
+<li>Bulk delete operations</li>
+<li>Select/deselect all functionality</li>
+</ul></li>
+<li><strong>Delete Functionality</strong>: Delete files from either
+server with dry run option</li>
+</ul>
+<h2 id="media-analysis-features">Media Analysis Features</h2>
+<ul>
+<li><strong>Audio Extraction &amp; Transcription</strong>:
+<ul>
+<li>Extract audio from video files</li>
+<li>Transcribe using Faster Whisper</li>
+<li>Language detection</li>
+</ul></li>
+<li><strong>AI Content Analysis</strong> (when configured):
+<ul>
+<li>Generate content summaries</li>
+<li>Extract topics, people, locations, events</li>
+<li>Calculate engagement scores</li>
+<li>Determine shelf life ratings</li>
+</ul></li>
+<li><strong>Metadata Extraction</strong>:
+<ul>
+<li>Parse filename metadata</li>
+<li>Classify content types (psa, meeting, announcement, etc.)</li>
+<li>Calculate duration categories</li>
+</ul></li>
+</ul>
+<h2 id="database-integration">Database Integration</h2>
+<ul>
+<li><strong>PostgreSQL Storage</strong>: Store analysis results and
+metadata</li>
+<li><strong>Content Classification</strong>: 14 different content type
+categories specific to Atlanta broadcasting</li>
+<li><strong>Scheduling Metadata</strong>: Track scheduling information
+for content</li>
+</ul>
+<h2 id="scheduling-features">Scheduling Features</h2>
+<ul>
+<li><strong>Schedule Creation</strong>: Create daily schedules from
+analyzed content</li>
+<li><strong>Schedule Management</strong>:
+<ul>
+<li>View schedules by date</li>
+<li>Edit schedule items</li>
+<li>Delete schedules</li>
+<li>Export schedules to JSON</li>
+</ul></li>
+<li><strong>Playlist Generation</strong>: Export schedules as playlists
+for broadcast systems</li>
+<li><strong>FTP Export</strong>: Export schedules directly to FTP
+servers</li>
+</ul>
+<h2 id="user-interface">User Interface</h2>
+<ul>
+<li><strong>Multi-Panel Dashboard</strong>:
+<ul>
+<li>Server configuration panel</li>
+<li>Scanning configuration with folder toggles</li>
+<li>File comparison results</li>
+<li>Analysis interface</li>
+<li>Scheduling interface</li>
+</ul></li>
+<li><strong>Real-time Logging</strong>: Detailed operation logs in the
+UI</li>
+<li><strong>Progress Tracking</strong>: Visual progress bars for long
+operations</li>
+<li><strong>Responsive Design</strong>: Clean, modern interface</li>
+</ul>
+<h2 id="configuration-management">Configuration Management</h2>
+<ul>
+<li><strong>Persistent Settings</strong>: Auto-save configuration to
+JSON</li>
+<li><strong>Environment Variables</strong>: Support for API keys via
+.env files</li>
+<li><strong>Customizable Sync Settings</strong>:
+<ul>
+<li>File size limits</li>
+<li>File extensions</li>
+<li>Connection timeouts</li>
+<li>Transfer timeouts</li>
+</ul></li>
+</ul>
+<h2 id="advanced-features">Advanced Features</h2>
+<ul>
+<li><strong>Connection Pooling</strong>: Efficient database connection
+management</li>
+<li><strong>Retry Logic</strong>: Automatic retry for failed
+operations</li>
+<li><strong>Path Mapping</strong>: Handle complex FTP path structures
+with quoted folders</li>
+<li><strong>Error Handling</strong>: Comprehensive error logging and
+user feedback</li>
+<li><strong>Concurrent Operations</strong>: Analyze multiple files in
+batch</li>
+</ul>
+<h2 id="security-features">Security Features</h2>
+<ul>
+<li><strong>Password Protection</strong>: FTP passwords stored
+securely</li>
+<li><strong>API Key Management</strong>: Separate storage for
+OpenAI/Anthropic keys</li>
+<li><strong>No hardcoded credentials</strong>: All sensitive data in
+config or environment</li>
+</ul>
+<h2 id="performance-features">Performance Features</h2>
+<ul>
+<li><strong>File Caching</strong>: 15-minute cache for web fetches</li>
+<li><strong>Efficient Scanning</strong>: Optimized FTP directory
+listing</li>
+<li><strong>Smart Verification</strong>: Multiple fallback methods for
+upload verification</li>
+<li><strong>Connection Reuse</strong>: Maintain FTP connections across
+operations</li>
+</ul>
+<h2 id="content-type-classifications">Content Type Classifications</h2>
+<p>The application recognizes these Atlanta-specific content types: -
+<strong>an</strong>: Announcement - <strong>bmp</strong>: Bump (short
+promo) - <strong>imow</strong>: Inside Moving Atlanta Weekly -
+<strong>im</strong>: Inside Atlanta - <strong>ia</strong>: Interstitial
+Announcement - <strong>lm</strong>: Legislative Minute -
+<strong>mtg</strong>: Meeting - <strong>maf</strong>: Moving Atlanta
+Forward - <strong>pkg</strong>: Package - <strong>pmo</strong>: Promo -
+<strong>psa</strong>: Public Service Announcement -
+<strong>szl</strong>: Sizzle Reel - <strong>spp</strong>: Special
+Projects - <strong>other</strong>: Other/Uncategorized</p>
+<p>The application is designed specifically for broadcast media
+management, with features tailored for managing video content between
+Castus servers in a television station environment.</p>
+</body>
+</html>

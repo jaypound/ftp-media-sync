@@ -747,44 +747,6 @@
                 </div>
             </div>
             
-            <!-- Load Template Modal -->
-            <div id="loadTemplateModal" class="modal" style="display: none;">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3><i class="fas fa-file-download"></i> <span id="loadTemplateModalTitle">Load Daily Schedule Template</span></h3>
-                        <button class="modal-close" onclick="closeLoadTemplateModal()">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="form-group">
-                            <label for="templateServer">Select Server</label>
-                            <select id="templateServer" class="form-control" onchange="loadTemplateFiles()">
-                                <option value="">Select a server...</option>
-                                <option value="source">Source Server</option>
-                                <option value="target">Target Server</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="templatePath">Template Path</label>
-                            <input type="text" id="templatePath" class="form-control" value="/mnt/md127/Schedules" placeholder="/path/to/schedules">
-                            <button class="button secondary small" onclick="loadTemplateFiles()" style="margin-top: 5px;">
-                                <i class="fas fa-sync"></i> Refresh
-                            </button>
-                        </div>
-                        <div class="form-group">
-                            <label>Available Schedule Files</label>
-                            <div id="templateFileList" class="file-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
-                                <p style="color: #666;">Select a server and click Refresh to load schedule files</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="button secondary" onclick="closeLoadTemplateModal()">Cancel</button>
-                        <button class="button primary" onclick="loadSelectedTemplate()" id="loadTemplateBtn" disabled>
-                            <i class="fas fa-file-download"></i> Load Template
-                        </button>
-                    </div>
-                </div>
-            </div>
             
             <!-- Load Schedule from FTP Modal -->
             <div id="loadScheduleFromFTPModal" class="modal" style="display: none;">
@@ -855,6 +817,42 @@
                     <h4><i class="fas fa-download"></i> Target Server Files</h4>
                     <div class="file-count" id="targetFileCount">No files scanned</div>
                     <div id="targetFilesList" class="file-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Schedule Templates Panel -->
+        <div class="card" id="scheduleTemplatesCard">
+            <div class="card-header">
+                <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
+                <div class="template-buttons">
+                    <button class="button primary small" onclick="console.log('Daily button clicked'); showLoadTemplateModal()">
+                        <i class="fas fa-file-import"></i> Import Daily Template
+                    </button>
+                    <button class="button primary small" onclick="console.log('Weekly button clicked'); showLoadWeeklyTemplateModal()">
+                        <i class="fas fa-calendar-week"></i> Import Weekly Template
+                    </button>
+                    <button class="button primary small" onclick="console.log('Monthly button clicked'); showLoadMonthlyTemplateModal()">
+                        <i class="fas fa-calendar-alt"></i> Import Monthly Template
+                    </button>
+                    <button class="button secondary small" onclick="console.log('Fill gaps button clicked'); fillScheduleGaps()">
+                        <i class="fas fa-fill"></i> Fill Schedule Gaps
+                    </button>
+                    <button class="button info small" onclick="showTemplateLibrary()">
+                        <i class="fas fa-folder-open"></i> Template Library
+                    </button>
+                    <button class="button success small" onclick="exportCurrentTemplate()" id="exportTemplateBtn" style="display: none;">
+                        <i class="fas fa-file-export"></i> Export Template
+                    </button>
+                </div>
+            </div>
+            <div class="card-content">
+                <div id="dashboardTemplateInfo" class="template-info" style="display: none;">
+                    <p><strong>Template:</strong> <span id="dashboardTemplateName">Untitled</span></p>
+                    <p><strong>Items:</strong> <span id="dashboardTemplateItemCount">0</span> | <strong>Duration:</strong> <span id="dashboardTemplateDuration">00:00:00</span></p>
+                </div>
+                <div id="dashboardTemplateDisplay" class="template-display">
+                    <p style="text-align: center; color: #666;">Load a template file to begin editing</p>
                 </div>
             </div>
         </div>
@@ -960,6 +958,108 @@
     </div>
 
 
+
+    <!-- Template Library Modal -->
+    <div id="templateLibraryModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-folder-open"></i> Template Library</h3>
+                <button class="modal-close" onclick="closeTemplateLibraryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="templateLibraryList" style="max-height: 500px; overflow-y: auto;">
+                    <p style="text-align: center; color: #666;">Loading templates...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeTemplateLibraryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Template Export Modal -->
+    <div id="templateExportModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-export"></i> Export Template</h3>
+                <button class="modal-close" onclick="closeTemplateExportModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Template Name</label>
+                    <p id="exportTemplateName" style="font-weight: bold; margin: 5px 0;"></p>
+                </div>
+                <div class="form-group">
+                    <label for="templateExportServer">Export Server</label>
+                    <select id="templateExportServer" class="form-control">
+                        <option value="source">Source Server</option>
+                        <option value="target" selected>Target Server</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="templateExportPath">Export Path</label>
+                    <input type="text" id="templateExportPath" class="form-control" value="/mnt/main/Schedules" placeholder="/path/to/export">
+                </div>
+                <div class="form-group">
+                    <label for="templateExportFilename">Filename</label>
+                    <input type="text" id="templateExportFilename" class="form-control" placeholder="template_name.sch">
+                </div>
+                <div class="form-group">
+                    <label for="templateExportFormat">Export Format</label>
+                    <select id="templateExportFormat" class="form-control">
+                        <option value="castus_daily">Castus Daily Schedule</option>
+                        <option value="castus_weekly">Castus Weekly Schedule</option>
+                        <option value="castus_monthly">Castus Monthly Schedule</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeTemplateExportModal()">Cancel</button>
+                <button class="button primary" onclick="confirmTemplateExport()">
+                    <i class="fas fa-file-export"></i> Export
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Template Modal -->
+    <div id="loadTemplateModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-download"></i> <span id="loadTemplateModalTitle">Load Daily Schedule Template</span></h3>
+                <button class="modal-close" onclick="closeLoadTemplateModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="templateServer">Select Server</label>
+                    <select id="templateServer" class="form-control" onchange="loadTemplateFiles()">
+                        <option value="">Select a server...</option>
+                        <option value="source">Source Server</option>
+                        <option value="target">Target Server</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="templatePath">Template Path</label>
+                    <input type="text" id="templatePath" class="form-control" value="/mnt/main/Schedules" placeholder="/path/to/schedules">
+                    <button class="button secondary small" onclick="loadTemplateFiles()" style="margin-top: 5px;">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+                <div class="form-group">
+                    <label>Available Schedule Files</label>
+                    <div id="templateFileList" class="file-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px;">
+                        <p style="color: #666;">Select a server and click Refresh to load schedule files</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeLoadTemplateModal()">Cancel</button>
+                <button class="button primary" onclick="loadSelectedTemplate()" id="loadTemplateBtn" disabled>
+                    <i class="fas fa-file-download"></i> Load Template
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Notification Container -->
     <div id="notificationContainer" class="notification-container"></div>
