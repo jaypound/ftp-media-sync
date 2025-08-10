@@ -14,6 +14,8 @@ import logging
 from bson import ObjectId
 from datetime import datetime, timedelta
 import uuid
+import subprocess
+import shutil
 
 # Load environment variables from .env file
 load_dotenv()
@@ -4004,6 +4006,246 @@ def export_template():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'message': 'FTP Sync Backend is running'})
+
+
+# Meeting Trimmer endpoints
+@app.route('/api/meeting-recordings', methods=['GET'])
+def get_meeting_recordings():
+    """Get list of meeting recordings with trim status"""
+    try:
+        recordings_path = '/mnt/main/Recordings'
+        trimmed_path = '/mnt/main/ATL26 On-Air Content/MEETINGS'
+        
+        recordings = []
+        
+        # Function to scan directory recursively
+        def scan_directory(path):
+            if os.path.exists(path):
+                for root, dirs, files in os.walk(path):
+                    for filename in files:
+                        if filename.endswith('.mp4') and 'MTG' in filename:
+                            file_path = os.path.join(root, filename)
+                            
+                            # Check if already trimmed
+                            trimmed_name = filename
+                            if not filename.startswith('250'):
+                                # Extract meeting name from filename
+                                parts = filename.split('_')
+                                if len(parts) >= 3:
+                                    meeting_name = '_'.join(parts[2:]).replace('.mp4', '')
+                                    # Extract date from filename if it exists
+                                    date_str = None
+                                    if len(parts[0]) == 6 and parts[0].isdigit():
+                                        # Convert YYMMDD to YYMMDD format
+                                        date_str = parts[0]
+                                    else:
+                                        date_str = datetime.now().strftime('%y%m%d')
+                                    trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                            
+                            is_trimmed = os.path.exists(os.path.join(trimmed_path, trimmed_name))
+                            
+                            # Get file info
+                            stat = os.stat(file_path)
+                            
+                            # Get relative path for display
+                            rel_path = os.path.relpath(file_path, recordings_path)
+                            
+                            recordings.append({
+                                'filename': filename,
+                                'path': file_path,
+                                'relative_path': rel_path,
+                                'size': stat.st_size,
+                                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                                'duration': get_video_duration(file_path),
+                                'is_trimmed': is_trimmed,
+                                'trimmed_name': trimmed_name
+                            })
+        
+        # Scan the recordings directory and subdirectories
+        scan_directory(recordings_path)
+        
+        # Sort by modified date (newest first)
+        recordings.sort(key=lambda x: x['modified'], reverse=True)
+        
+        return jsonify({'status': 'success', 'recordings': recordings})
+        
+    except Exception as e:
+        logger.error(f"Error getting recordings: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/trim-recording', methods=['POST'])
+def trim_recording():
+    """Trim dead time from beginning and end of recording"""
+    try:
+        data = request.json
+        file_path = data.get('file_path')
+        trim_start = int(data.get('trim_start', 30))  # Default 30 seconds
+        trim_end = int(data.get('trim_end', 60))      # Default 60 seconds
+        
+        if not os.path.exists(file_path):
+            return jsonify({'status': 'error', 'message': 'File not found'}), 404
+        
+        # Detect actual meeting start and end times
+        logger.info(f"Analyzing audio levels in {file_path}")
+        start_time, end_time = detect_meeting_boundaries(file_path, trim_start, trim_end)
+        
+        # Create trimmed filename
+        filename = os.path.basename(file_path)
+        parts = filename.split('_')
+        if len(parts) >= 3:
+            meeting_name = '_'.join(parts[2:]).replace('.mp4', '')
+            date_str = datetime.now().strftime('%y%m%d')
+            trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+        else:
+            trimmed_name = f"trimmed_{filename}"
+        
+        output_path = os.path.join('/tmp', trimmed_name)
+        
+        # Trim the video using ffmpeg
+        duration = end_time - start_time
+        cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(start_time),
+            '-i', file_path,
+            '-t', str(duration),
+            '-c', 'copy',  # Copy codec for fast processing
+            output_path
+        ]
+        
+        logger.info(f"Trimming video: start={start_time}s, duration={duration}s")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            return jsonify({'status': 'error', 'message': 'Failed to trim video'}), 500
+        
+        return jsonify({
+            'status': 'success',
+            'output_path': output_path,
+            'trimmed_name': trimmed_name,
+            'start_time': start_time,
+            'end_time': end_time,
+            'duration': duration
+        })
+        
+    except Exception as e:
+        logger.error(f"Error trimming recording: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/copy-trimmed-recording', methods=['POST'])
+def copy_trimmed_recording():
+    """Copy trimmed recording to MEETINGS folder"""
+    try:
+        data = request.json
+        source_path = data.get('source_path')
+        filename = data.get('filename')
+        
+        if not os.path.exists(source_path):
+            return jsonify({'status': 'error', 'message': 'Source file not found'}), 404
+        
+        # Copy to MEETINGS folder
+        dest_path = os.path.join('/mnt/main/ATL26 On-Air Content/MEETINGS', filename)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        
+        # Copy the file
+        shutil.copy2(source_path, dest_path)
+        
+        # Clean up temp file
+        if source_path.startswith('/tmp/'):
+            os.remove(source_path)
+        
+        logger.info(f"Copied trimmed recording to {dest_path}")
+        return jsonify({'status': 'success', 'dest_path': dest_path})
+        
+    except Exception as e:
+        logger.error(f"Error copying recording: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+def get_video_duration(file_path):
+    """Get video duration in seconds using ffprobe"""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            file_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return float(result.stdout.strip())
+    except:
+        pass
+    return 0
+
+
+def detect_meeting_boundaries(file_path, trim_start_default, trim_end_default):
+    """Detect meeting start and end based on audio levels"""
+    try:
+        # Get video duration
+        duration = get_video_duration(file_path)
+        
+        # Extract audio levels using ffmpeg
+        cmd = [
+            'ffmpeg', '-i', file_path,
+            '-af', 'silencedetect=n=-30dB:d=10',
+            '-f', 'null', '-'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, stderr=subprocess.STDOUT)
+        
+        # Parse silence detection output
+        silence_starts = []
+        silence_ends = []
+        
+        for line in result.stdout.split('\n'):
+            if 'silence_start:' in line:
+                try:
+                    time = float(line.split('silence_start:')[1].split()[0])
+                    silence_starts.append(time)
+                except:
+                    pass
+            elif 'silence_end:' in line:
+                try:
+                    time = float(line.split('silence_end:')[1].split()[0])
+                    silence_ends.append(time)
+                except:
+                    pass
+        
+        # Find meeting start (first sustained audio after initial silence)
+        start_time = trim_start_default
+        if silence_ends:
+            # Look for first silence end after the default trim start
+            for end_time in silence_ends:
+                if end_time > trim_start_default:
+                    start_time = end_time
+                    break
+        
+        # Find meeting end (last sustained audio before final silence)
+        end_time = duration - trim_end_default
+        if silence_starts:
+            # Look for last silence start before the default trim end
+            for i in range(len(silence_starts) - 1, -1, -1):
+                if silence_starts[i] < duration - trim_end_default:
+                    end_time = silence_starts[i]
+                    break
+        
+        # Ensure minimum duration
+        if end_time - start_time < 60:
+            start_time = trim_start_default
+            end_time = duration - trim_end_default
+        
+        return start_time, end_time
+        
+    except Exception as e:
+        logger.error(f"Error detecting boundaries: {str(e)}")
+        # Fallback to defaults
+        duration = get_video_duration(file_path)
+        return trim_start_default, max(duration - trim_end_default, trim_start_default + 60)
 
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")
