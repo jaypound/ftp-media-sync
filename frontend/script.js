@@ -2299,6 +2299,26 @@ document.addEventListener('DOMContentLoaded', function() {
             updateModelOptions(this.value);
         });
     }
+    
+    // Add backup event listeners for template library modal close buttons
+    const templateLibraryCloseBtn = document.querySelector('#templateLibraryModal .modal-close');
+    const templateLibraryCloseFooterBtn = document.querySelector('#templateLibraryModal .modal-footer .button.secondary');
+    
+    if (templateLibraryCloseBtn) {
+        templateLibraryCloseBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            console.log('Template library X button clicked (event listener)');
+            closeTemplateLibraryModal();
+        });
+    }
+    
+    if (templateLibraryCloseFooterBtn) {
+        templateLibraryCloseFooterBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            console.log('Template library Close button clicked (event listener)');
+            closeTemplateLibraryModal();
+        });
+    }
 });
 
 // File Analysis Functions
@@ -8650,12 +8670,117 @@ let currentExportTemplate = null;
 
 function showTemplateLibrary() {
     log('Opening template library', 'info');
-    document.getElementById('templateLibraryModal').style.display = 'block';
+    const modal = document.getElementById('templateLibraryModal');
+    if (!modal) {
+        console.error('Template library modal not found!');
+        return;
+    }
+    
+    modal.style.display = 'block';
     loadTemplateLibrary();
+    
+    // Add click handlers directly when showing the modal
+    setTimeout(() => {
+        // Find and attach to close button (X)
+        const closeBtn = modal.querySelector('.modal-close');
+        if (closeBtn) {
+            console.log('Attaching click handler to X button');
+            console.log('X button element:', closeBtn);
+            console.log('X button HTML:', closeBtn.outerHTML);
+            console.log('X button onclick before:', closeBtn.onclick);
+            
+            // Remove any existing onclick attribute
+            closeBtn.removeAttribute('onclick');
+            
+            // Add event listener instead of onclick
+            closeBtn.addEventListener('click', function(e) {
+                console.log('X button clicked via addEventListener');
+                console.log('Event:', e);
+                console.log('Event target:', e.target);
+                
+                try {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    closeTemplateLibraryModal();
+                } catch (error) {
+                    console.error('Error in X button click handler:', error);
+                    // Force close
+                    const modalToClose = document.getElementById('templateLibraryModal');
+                    if (modalToClose) {
+                        modalToClose.style.display = 'none';
+                    }
+                }
+            }, true); // Use capture phase
+            
+            // Also try direct onclick as backup
+            closeBtn.onclick = function() {
+                console.log('X button clicked via direct onclick');
+                closeTemplateLibraryModal();
+                return false;
+            };
+        } else {
+            console.error('X button not found in template library modal');
+        }
+        
+        // Find and attach to Close button
+        const closeFooterBtn = modal.querySelector('.modal-footer button.secondary');
+        if (closeFooterBtn) {
+            console.log('Attaching click handler to Close button');
+            closeFooterBtn.onclick = function(e) {
+                console.log('Close button clicked via onclick');
+                e.preventDefault();
+                e.stopPropagation();
+                closeTemplateLibraryModal();
+                return false;
+            };
+        } else {
+            console.error('Close button not found in template library modal');
+        }
+        
+        // Also add click outside modal to close
+        modal.onclick = function(e) {
+            if (e.target === modal) {
+                console.log('Clicked outside modal content');
+                closeTemplateLibraryModal();
+            }
+        };
+    }, 100);
 }
 
 function closeTemplateLibraryModal() {
-    document.getElementById('templateLibraryModal').style.display = 'none';
+    console.log('closeTemplateLibraryModal called');
+    const modal = document.getElementById('templateLibraryModal');
+    if (modal) {
+        // Force hide with multiple methods
+        modal.style.display = 'none';
+        modal.style.visibility = 'hidden';
+        modal.classList.remove('show');
+        modal.setAttribute('style', 'display: none !important');
+        
+        console.log('Template library modal closed');
+        console.log('Modal display style after closing:', window.getComputedStyle(modal).display);
+        
+        // Also remove any backdrop if exists
+        const backdrop = document.querySelector('.modal-backdrop');
+        if (backdrop) {
+            backdrop.remove();
+        }
+        
+        // Clear any event handlers that might be interfering
+        const closeBtn = modal.querySelector('.modal-close');
+        if (closeBtn) {
+            closeBtn.onclick = null;
+        }
+        const closeFooterBtn = modal.querySelector('.modal-footer button.secondary');
+        if (closeFooterBtn) {
+            closeFooterBtn.onclick = null;
+        }
+        modal.onclick = null;
+    } else {
+        console.error('Template library modal not found!');
+    }
 }
 
 function loadTemplateLibrary() {
@@ -9932,3 +10057,214 @@ async function scanSelectedFolders() {
     
     isScanning = false;
 }
+
+// Meeting Trimmer functions
+let trimSettings = {
+    trim_start: 30,
+    trim_end: 60
+};
+
+let autoTrimInterval = null;
+
+function showTrimSettings() {
+    document.getElementById('trimSettingsModal').classList.add('show');
+}
+
+function closeTrimSettingsModal() {
+    document.getElementById('trimSettingsModal').classList.remove('show');
+}
+
+function saveTrimSettings() {
+    trimSettings.trim_start = parseInt(document.getElementById('trimStartSeconds').value) || 30;
+    trimSettings.trim_end = parseInt(document.getElementById('trimEndSeconds').value) || 60;
+    
+    // Save to localStorage
+    localStorage.setItem('trimSettings', JSON.stringify(trimSettings));
+    
+    closeTrimSettingsModal();
+    showNotification('Trim settings saved', 'success');
+}
+
+async function refreshRecordingsList() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/meeting-recordings');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            displayRecordings(data.recordings);
+        } else {
+            showNotification('Failed to load recordings: ' + data.message, 'error');
+        }
+    } catch (error) {
+        console.error('Error loading recordings:', error);
+        showNotification('Error loading recordings', 'error');
+    }
+}
+
+function displayRecordings(recordings) {
+    const container = document.getElementById('recordingsList');
+    
+    if (!recordings || recordings.length === 0) {
+        container.innerHTML = '<div class="no-recordings">No meeting recordings found</div>';
+        return;
+    }
+    
+    container.innerHTML = recordings.map(recording => `
+        <div class="recording-item">
+            <div class="recording-info">
+                <div class="recording-name">${recording.relative_path || recording.filename}</div>
+                <div class="recording-meta">
+                    <span>Duration: ${formatDuration(recording.duration)}</span>
+                    <span>Size: ${formatFileSize(recording.size)}</span>
+                    <span>Modified: ${new Date(recording.modified).toLocaleString()}</span>
+                </div>
+            </div>
+            <div class="recording-actions">
+                ${recording.is_trimmed 
+                    ? '<span class="status-badge trimmed">Trimmed</span>' 
+                    : `<button class="button primary small" onclick="trimRecording('${recording.path}', '${recording.filename}')">
+                         <i class="fas fa-cut"></i> Trim
+                       </button>`
+                }
+            </div>
+        </div>
+    `).join('');
+}
+
+async function trimRecording(filePath, filename) {
+    try {
+        // Show progress
+        const recordingItem = event.target.closest('.recording-item');
+        const actionsDiv = recordingItem.querySelector('.recording-actions');
+        actionsDiv.innerHTML = '<div class="trim-progress">Trimming... <i class="fas fa-spinner fa-spin"></i></div>';
+        
+        // Send trim request
+        const response = await fetch('http://127.0.0.1:5000/api/trim-recording', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: filePath,
+                trim_start: trimSettings.trim_start,
+                trim_end: trimSettings.trim_end
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Copy to MEETINGS folder
+            const copyResponse = await fetch('http://127.0.0.1:5000/api/copy-trimmed-recording', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_path: data.output_path,
+                    filename: data.trimmed_name
+                })
+            });
+            
+            const copyData = await copyResponse.json();
+            
+            if (copyData.status === 'success') {
+                showNotification(`Successfully trimmed ${filename}`, 'success');
+                refreshRecordingsList();
+            } else {
+                showNotification('Failed to copy trimmed file: ' + copyData.message, 'error');
+            }
+        } else {
+            showNotification('Failed to trim recording: ' + data.message, 'error');
+            refreshRecordingsList();
+        }
+    } catch (error) {
+        console.error('Error trimming recording:', error);
+        showNotification('Error trimming recording', 'error');
+        refreshRecordingsList();
+    }
+}
+
+function toggleAutoTrim() {
+    const button = document.getElementById('autoTrimToggle');
+    
+    if (autoTrimInterval) {
+        // Stop auto-trim
+        clearInterval(autoTrimInterval);
+        autoTrimInterval = null;
+        button.innerHTML = '<i class="fas fa-robot"></i> Auto-Trim: OFF';
+        button.classList.remove('active');
+        showNotification('Auto-trim disabled', 'info');
+    } else {
+        // Start auto-trim
+        autoTrimInterval = setInterval(autoTrimCheck, 60000); // Check every minute
+        button.innerHTML = '<i class="fas fa-robot"></i> Auto-Trim: ON';
+        button.classList.add('active');
+        showNotification('Auto-trim enabled', 'success');
+        autoTrimCheck(); // Run immediately
+    }
+}
+
+async function autoTrimCheck() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/meeting-recordings');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Find untrimmed recordings
+            const untrimmed = data.recordings.filter(r => !r.is_trimmed);
+            
+            if (untrimmed.length > 0) {
+                console.log(`Found ${untrimmed.length} untrimmed recordings`);
+                
+                // Trim the first untrimmed recording
+                const recording = untrimmed[0];
+                await trimRecording(recording.path, recording.filename);
+            }
+        }
+    } catch (error) {
+        console.error('Error in auto-trim check:', error);
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return 'Unknown';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    } else {
+        return `${secs}s`;
+    }
+}
+
+function formatFileSize(bytes) {
+    if (!bytes) return 'Unknown';
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+// Load trim settings on page load
+document.addEventListener('DOMContentLoaded', () => {
+    // Load saved trim settings
+    const saved = localStorage.getItem('trimSettings');
+    if (saved) {
+        trimSettings = JSON.parse(saved);
+        document.getElementById('trimStartSeconds').value = trimSettings.trim_start;
+        document.getElementById('trimEndSeconds').value = trimSettings.trim_end;
+    }
+    
+    // Initial load of recordings
+    refreshRecordingsList();
+    
+    // Add click handler for trim settings modal
+    const trimModal = document.getElementById('trimSettingsModal');
+    if (trimModal) {
+        trimModal.addEventListener('click', (e) => {
+            if (e.target === trimModal) {
+                closeTrimSettingsModal();
+            }
+        });
+    }
+});

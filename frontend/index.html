@@ -857,6 +857,29 @@
             </div>
         </div>
 
+        <!-- Meeting Trimmer Panel -->
+        <div class="card" id="meetingTrimmerCard">
+            <div class="card-header">
+                <h3><i class="fas fa-cut"></i> Meeting Trimmer</h3>
+                <div class="trimmer-buttons">
+                    <button class="button primary small" onclick="showTrimSettings()">
+                        <i class="fas fa-cog"></i> Settings
+                    </button>
+                    <button class="button secondary small" onclick="refreshRecordingsList()">
+                        <i class="fas fa-sync"></i> Refresh List
+                    </button>
+                    <button class="button info small" id="autoTrimToggle" onclick="toggleAutoTrim()">
+                        <i class="fas fa-robot"></i> Auto-Trim: OFF
+                    </button>
+                </div>
+            </div>
+            <div class="trimmer-content">
+                <div id="recordingsList" class="recordings-list">
+                    <p style="text-align: center; color: #666;">Click "Refresh List" to load recordings</p>
+                </div>
+            </div>
+        </div>
+
         <!-- File Comparison Results -->
         <div class="card" id="comparisonCard" style="display: none;">
             <div class="card-header">
@@ -964,7 +987,6 @@
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
                 <h3><i class="fas fa-folder-open"></i> Template Library</h3>
-                <button class="modal-close" onclick="closeTemplateLibraryModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="templateLibraryList" style="max-height: 500px; overflow-y: auto;">
@@ -1057,6 +1079,44 @@
                 <button class="button primary" onclick="loadSelectedTemplate()" id="loadTemplateBtn" disabled>
                     <i class="fas fa-file-download"></i> Load Template
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trim Settings Modal -->
+    <div id="trimSettingsModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-cog"></i> Meeting Trim Settings</h3>
+                <button class="modal-close" onclick="closeTrimSettingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="trimStartSeconds">Trim Start (seconds)</label>
+                    <input type="number" id="trimStartSeconds" class="form-control" min="0" value="30">
+                    <small>Amount of dead time to remove from the beginning of recordings</small>
+                </div>
+                <div class="form-group">
+                    <label for="trimEndSeconds">Trim End (seconds)</label>
+                    <input type="number" id="trimEndSeconds" class="form-control" min="0" value="60">
+                    <small>Amount of dead time to remove from the end of recordings</small>
+                </div>
+                <div class="form-group">
+                    <label for="autoTrimEnabled">
+                        <input type="checkbox" id="autoTrimEnabled">
+                        Enable automatic trimming for new recordings
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="keepOriginal">
+                        <input type="checkbox" id="keepOriginal" checked>
+                        Keep original file after trimming
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeTrimSettingsModal()">Cancel</button>
+                <button class="button primary" onclick="saveTrimSettings()">Save Settings</button>
             </div>
         </div>
     </div>
