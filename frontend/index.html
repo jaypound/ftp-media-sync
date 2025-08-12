@@ -40,6 +40,10 @@
                     <i class="fas fa-calendar-alt"></i>
                     Scheduling
                 </button>
+                <button class="nav-item" onclick="showPanel('meetings')">
+                    <i class="fas fa-calendar-check"></i>
+                    Meetings Schedule
+                </button>
                 <button class="nav-item dark-mode-toggle" onclick="toggleDarkMode()" id="darkModeToggle">
                     <i class="fas fa-moon"></i>
                     Dark
@@ -793,6 +797,56 @@
             </div>
         </div>
 
+        <!-- Meetings Schedule Panel -->
+        <div id="meetings" class="panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-calendar-check"></i> Atlanta City Council Meetings Schedule</h2>
+                <p>Manage and track Atlanta City Council meetings</p>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-sync"></i> Import Meetings</h3>
+                </div>
+                <div class="import-controls">
+                    <button class="button primary" onclick="importMeetingsFromWeb()">
+                        <i class="fas fa-download"></i> Import from City Council Website
+                    </button>
+                    <span class="import-status" id="importStatus"></span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-calendar"></i> Meetings Schedule</h3>
+                    <button class="button primary small" onclick="openAddMeetingModal()">
+                        <i class="fas fa-plus"></i> Add Meeting
+                    </button>
+                </div>
+                <div class="meetings-table-container">
+                    <table class="meetings-table" id="meetingsTable">
+                        <thead>
+                            <tr>
+                                <th>Meeting Name</th>
+                                <th>Date</th>
+                                <th>Start Time</th>
+                                <th>Duration</th>
+                                <th>Room</th>
+                                <th>ATL26</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="meetingsTableBody">
+                            <!-- Meetings will be populated here -->
+                        </tbody>
+                    </table>
+                    <div class="no-meetings" id="noMeetingsMessage" style="display: none;">
+                        <p>No meetings scheduled. Click "Add Meeting" or import from the City Council website.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Scanned Files Display -->
         <div class="card" id="scannedFilesCard" style="display: none;">
             <div class="card-header">
@@ -840,6 +894,15 @@
                     </button>
                     <button class="button info small" onclick="showTemplateLibrary()">
                         <i class="fas fa-folder-open"></i> Template Library
+                    </button>
+                    <button class="button warning small" onclick="importDailyMeetings()">
+                        <i class="fas fa-calendar-day"></i> Import Daily Meetings
+                    </button>
+                    <button class="button warning small" onclick="importWeeklyMeetings()">
+                        <i class="fas fa-calendar-week"></i> Import Weekly Meetings
+                    </button>
+                    <button class="button warning small" onclick="importMonthlyMeetings()">
+                        <i class="fas fa-calendar"></i> Import Monthly Meetings
                     </button>
                     <button class="button success small" onclick="exportCurrentTemplate()" id="exportTemplateBtn" style="display: none;">
                         <i class="fas fa-file-export"></i> Export Template
@@ -1083,6 +1146,199 @@
         </div>
     </div>
 
+    <!-- Trim Analysis Modal -->
+    <div id="trimAnalysisModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-cut"></i> Trim Analysis & Processing</h3>
+                <button class="modal-close" onclick="closeTrimAnalysisModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- File Information -->
+                <div class="trim-section">
+                    <h4>File Information</h4>
+                    <div class="form-group">
+                        <label>File</label>
+                        <p id="trimAnalysisFilename" style="font-weight: bold; word-break: break-all;"></p>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <button class="button primary" onclick="downloadForTrim()" id="downloadForTrimBtn">
+                                <i class="fas fa-download"></i> Download File
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <button class="button secondary" onclick="viewOriginalFile()" id="viewOriginalBtn" disabled>
+                                <i class="fas fa-play"></i> View Original
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <!-- Trim Point Analysis -->
+                <div class="trim-section">
+                    <h4>Trim Point Analysis</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <button class="button primary" onclick="findTrimPoints(false)" id="findTrimPointsBtn">
+                                <i class="fas fa-search"></i> Find Trim Points
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <button class="button secondary" onclick="findTrimPoints(true)" id="findTrimPointsAIBtn">
+                                <i class="fas fa-bolt"></i> Fast AI Detection
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Start Trim</label>
+                            <div class="timecode-group">
+                                <input type="text" id="trimStartTimecode" class="form-control timecode" placeholder="00:00:00.0" readonly>
+                                <input type="number" id="trimAnalysisStartTime" class="form-control" min="0" step="0.1" placeholder="0.0">
+                                <small>seconds</small>
+                            </div>
+                            <div class="detected-words">
+                                <small><i class="fas fa-quote-left"></i> <span id="startWords">No words detected yet</span></small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>End Trim</label>
+                            <div class="timecode-group">
+                                <input type="text" id="trimEndTimecode" class="form-control timecode" placeholder="00:00:00.0" readonly>
+                                <input type="number" id="trimAnalysisEndTime" class="form-control" min="0" step="0.1" placeholder="0.0">
+                                <small>seconds</small>
+                            </div>
+                            <div class="detected-words">
+                                <small><i class="fas fa-quote-right"></i> <span id="endWords">No words detected yet</span></small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <button class="button secondary small" onclick="previewTrimStart()" id="previewStartBtn" disabled>
+                                <i class="fas fa-step-forward"></i> Preview Start
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <button class="button secondary small" onclick="previewTrimEnd()" id="previewEndBtn" disabled>
+                                <i class="fas fa-step-backward"></i> Preview End
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <!-- Trimming -->
+                <div class="trim-section">
+                    <h4>Trimming</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Trimmed Duration</label>
+                            <p id="trimAnalysisNewDuration" class="duration-display">--:--:--</p>
+                        </div>
+                        <div class="form-group">
+                            <button class="button primary" onclick="executeTrim()" id="executeTrimBtn" disabled>
+                                <i class="fas fa-cut"></i> Trim File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <!-- Final Steps -->
+                <div class="trim-section">
+                    <h4>Final Steps</h4>
+                    <div class="form-group">
+                        <label for="trimAnalysisNewFilename">Final Filename</label>
+                        <input type="text" id="trimAnalysisNewFilename" class="form-control">
+                        <small>Edit filename before copying to destination</small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" id="viewTrimmedGroup" style="display: none;">
+                            <button class="button secondary" onclick="viewTrimmedFile()" id="viewTrimmedBtn">
+                                <i class="fas fa-play"></i> View Trimmed File
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <button class="button success" onclick="copyToDestination('castus1')" id="copyCastus1Btn" disabled>
+                                <i class="fas fa-copy"></i> Copy to Castus1
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <button class="button success" onclick="copyToDestination('castus2')" id="copyCastus2Btn" disabled>
+                                <i class="fas fa-copy"></i> Copy to Castus2
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <button class="button danger small" onclick="deleteTrimmedFile()" id="deleteTrimmedBtn" disabled>
+                                <i class="fas fa-trash"></i> Delete Trimmed
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Status Display -->
+                <div id="trimAnalysisStatus" style="margin-top: 1rem; display: none;">
+                    <div class="alert alert-info">
+                        <i class="fas fa-spinner fa-spin"></i> <span id="trimAnalysisStatusText">Processing...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeTrimAnalysisModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Trim Preview Modal -->
+    <div id="videoTrimModal" class="modal">
+        <div class="modal-content" style="max-width: 90%; width: 900px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-video"></i> Trim Point Selection</h3>
+                <button class="modal-close" onclick="closeVideoTrimModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="video-container" style="position: relative;">
+                    <video id="trimVideo" controls style="width: 100%; max-height: 500px;"></video>
+                    <div class="video-controls" style="margin-top: 1rem;">
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label>Current Time</label>
+                                <div class="current-time-display">
+                                    <span id="currentTimeDisplay" style="font-family: monospace; font-size: 1.2rem;">00:00:00.0</span>
+                                    <span id="currentSecondsDisplay" style="color: #666; margin-left: 1rem;">0.0s</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <button class="button primary" onclick="setTrimPoint()" id="setTrimPointBtn">
+                                    <i class="fas fa-cut"></i> Set as Start Point
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label>Skip Controls</label>
+                                <div class="skip-buttons">
+                                    <button class="button small" onclick="skipVideo(-30)">-30s</button>
+                                    <button class="button small" onclick="skipVideo(-10)">-10s</button>
+                                    <button class="button small" onclick="skipVideo(-5)">-5s</button>
+                                    <button class="button small" onclick="skipVideo(5)">+5s</button>
+                                    <button class="button small" onclick="skipVideo(10)">+10s</button>
+                                    <button class="button small" onclick="skipVideo(30)">+30s</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Trim Settings Modal -->
     <div id="trimSettingsModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
@@ -1092,20 +1348,22 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label for="trimStartSeconds">Trim Start (seconds)</label>
-                    <input type="number" id="trimStartSeconds" class="form-control" min="0" value="30">
-                    <small>Amount of dead time to remove from the beginning of recordings</small>
+                    <label for="trimServer">Server</label>
+                    <select id="trimServer" class="form-control">
+                        <option value="source">Source Server</option>
+                        <option value="target" selected>Target Server</option>
+                    </select>
+                    <small>Select which server to scan for recordings</small>
                 </div>
                 <div class="form-group">
-                    <label for="trimEndSeconds">Trim End (seconds)</label>
-                    <input type="number" id="trimEndSeconds" class="form-control" min="0" value="60">
-                    <small>Amount of dead time to remove from the end of recordings</small>
+                    <label for="trimSourcePath">Recordings Path</label>
+                    <input type="text" id="trimSourcePath" class="form-control" value="/mnt/main/Recordings">
+                    <small>Path to scan for meeting recordings (searches subdirectories)</small>
                 </div>
                 <div class="form-group">
-                    <label for="autoTrimEnabled">
-                        <input type="checkbox" id="autoTrimEnabled">
-                        Enable automatic trimming for new recordings
-                    </label>
+                    <label for="trimDestPath">Destination Path</label>
+                    <input type="text" id="trimDestPath" class="form-control" value="/mnt/main/ATL26 On-Air Content/MEETINGS">
+                    <small>Where to copy trimmed files</small>
                 </div>
                 <div class="form-group">
                     <label for="keepOriginal">
@@ -1117,6 +1375,161 @@
             <div class="modal-footer">
                 <button class="button secondary" onclick="closeTrimSettingsModal()">Cancel</button>
                 <button class="button primary" onclick="saveTrimSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Meeting Modal -->
+    <div id="meetingModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="meetingModalTitle">Add Meeting</h2>
+                <button class="close-button" onclick="closeMeetingModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="meetingForm">
+                    <input type="hidden" id="meetingId" value="">
+                    <div class="form-group">
+                        <label for="meetingName">Meeting Name</label>
+                        <input type="text" id="meetingName" required placeholder="e.g., City Council Regular Meeting">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDate">Date</label>
+                            <input type="date" id="meetingDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingTime">Start Time</label>
+                            <input type="time" id="meetingTime" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDuration">Duration (hours)</label>
+                            <input type="number" id="meetingDuration" min="0.5" max="6" step="0.5" value="2" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingRoom">Room</label>
+                            <input type="text" id="meetingRoom" placeholder="e.g., Council Chamber">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="meetingBroadcast" checked>
+                            Broadcast on ATL26
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeMeetingModal()">Cancel</button>
+                <button class="button primary" onclick="saveMeeting()">Save Meeting</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Daily Meetings Modal -->
+    <div id="importDailyMeetingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Import Daily Meetings</h2>
+                <button class="close-button" onclick="closeImportDailyMeetingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="dailyMeetingDate">Select Date</label>
+                    <input type="date" id="dailyMeetingDate" required>
+                </div>
+                <div class="meetings-selection">
+                    <h3>Available Meetings</h3>
+                    <div id="dailyMeetingsList" class="meetings-checklist">
+                        <!-- Meetings will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeImportDailyMeetingsModal()">Cancel</button>
+                <button class="button primary" onclick="generateDailySchedule()">Import Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Weekly Meetings Modal -->
+    <div id="importWeeklyMeetingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Import Weekly Meetings</h2>
+                <button class="close-button" onclick="closeImportWeeklyMeetingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="weeklyMeetingYear">Year</label>
+                        <input type="number" id="weeklyMeetingYear" min="2025" max="2030" value="2025" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="weeklyMeetingWeek">Week Number</label>
+                        <input type="number" id="weeklyMeetingWeek" min="1" max="53" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <small id="weekDateRange" class="text-muted"></small>
+                </div>
+                <div class="meetings-selection">
+                    <h3>Available Meetings</h3>
+                    <div id="weeklyMeetingsList" class="meetings-checklist">
+                        <!-- Meetings will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeImportWeeklyMeetingsModal()">Cancel</button>
+                <button class="button primary" onclick="generateWeeklySchedule()">Import Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Monthly Meetings Modal -->
+    <div id="importMonthlyMeetingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Import Monthly Meetings</h2>
+                <button class="close-button" onclick="closeImportMonthlyMeetingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="monthlyMeetingYear">Year</label>
+                        <input type="number" id="monthlyMeetingYear" min="2025" max="2030" value="2025" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="monthlyMeetingMonth">Month</label>
+                        <select id="monthlyMeetingMonth" required>
+                            <option value="1">January</option>
+                            <option value="2">February</option>
+                            <option value="3">March</option>
+                            <option value="4">April</option>
+                            <option value="5">May</option>
+                            <option value="6">June</option>
+                            <option value="7">July</option>
+                            <option value="8">August</option>
+                            <option value="9">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="meetings-selection">
+                    <h3>Available Meetings</h3>
+                    <div id="monthlyMeetingsList" class="meetings-checklist">
+                        <!-- Meetings will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeImportMonthlyMeetingsModal()">Cancel</button>
+                <button class="button primary" onclick="generateMonthlySchedule()">Import Selected</button>
             </div>
         </div>
     </div>

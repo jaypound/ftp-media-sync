@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from typing import Dict, List, Any
-import openai
+from openai import OpenAI
 from anthropic import Anthropic
 import math
 
@@ -32,25 +32,23 @@ class AIAnalyzer:
             logger.debug(f"API key present: {bool(self.api_key)}")
             
             if self.api_provider == "openai":
-                # For OpenAI client initialization (v1.97.0+)
+                # For OpenAI client initialization (v1.0.0+)
                 try:
                     # Try new client initialization first
                     if self.api_key:
-                        self.client = openai.OpenAI(api_key=self.api_key)
+                        self.client = OpenAI(api_key=self.api_key)
                     else:
-                        self.client = openai.OpenAI()
+                        self.client = OpenAI()
                     logger.info(f"OpenAI client setup successful with model: {self.model}")
                 except TypeError as te:
                     # Handle older OpenAI library version or parameter issues
                     logger.warning(f"OpenAI client initialization failed with TypeError: {te}")
+                    # Remove proxies parameter and try again
                     try:
-                        # Fallback: set API key directly
-                        if self.api_key:
-                            openai.api_key = self.api_key
-                        self.client = None  # Use module-level functions
-                        logger.info("Using OpenAI module-level API (legacy mode)")
+                        self.client = OpenAI(api_key=self.api_key if self.api_key else None)
+                        logger.info("OpenAI client setup successful (without proxies)")
                     except Exception as fallback_error:
-                        logger.error(f"OpenAI fallback setup also failed: {fallback_error}")
+                        logger.error(f"OpenAI setup failed: {fallback_error}")
                         self.client = None
                 except Exception as openai_error:
                     logger.error(f"OpenAI client setup failed: {openai_error}")
@@ -125,31 +123,21 @@ Transcript:
             prompt = self.create_analysis_prompt(chunk)
             logger.debug(f"Sending prompt to OpenAI (length: {len(prompt)} chars)")
             
-            if self.client:
-                # Use the modern OpenAI client (v1.97.0+)
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "You are an expert content analyst. Provide detailed analysis in valid JSON format only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=1000
-                )
-                content = response.choices[0].message.content.strip()
-            else:
-                # Use legacy module-level API
-                logger.info("Using legacy OpenAI API")
-                response = openai.ChatCompletion.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "You are an expert content analyst. Provide detailed analysis in valid JSON format only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=1000
-                )
-                content = response['choices'][0]['message']['content'].strip()
+            if not self.client:
+                logger.error("OpenAI client not initialized")
+                return None
+                
+            # Use the modern OpenAI client (v1.0.0+)
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert content analyst. Provide detailed analysis in valid JSON format only."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1000
+            )
+            content = response.choices[0].message.content.strip()
             
             logger.info(f"OpenAI response received (length: {len(content)} chars)")
             logger.debug(f"OpenAI response: {content}")
@@ -221,12 +209,108 @@ Transcript:
     
     def analyze_chunk(self, chunk: str) -> Dict[str, Any]:
         """Analyze a text chunk using the configured AI provider"""
-        if self.api_provider == "openai":
-            return self.analyze_chunk_openai(chunk)
-        elif self.api_provider == "anthropic":
-            return self.analyze_chunk_anthropic(chunk)
+        # Check if this is already a custom prompt (for meeting boundaries)
+        if "start_time" in chunk and "end_time" in chunk:
+            # This is a meeting boundary detection prompt, use it directly
+            if self.api_provider == "openai":
+                return self.analyze_chunk_openai_direct(chunk)
+            elif self.api_provider == "anthropic":
+                return self.analyze_chunk_anthropic_direct(chunk)
         else:
-            logger.error(f"Unsupported AI provider: {self.api_provider}")
+            # Regular content analysis
+            if self.api_provider == "openai":
+                return self.analyze_chunk_openai(chunk)
+            elif self.api_provider == "anthropic":
+                return self.analyze_chunk_anthropic(chunk)
+        
+        logger.error(f"Unsupported AI provider: {self.api_provider}")
+        return None
+    
+    def analyze_chunk_openai_direct(self, prompt: str) -> Dict[str, Any]:
+        """Analyze using OpenAI with a direct prompt (no template)"""
+        try:
+            logger.debug(f"Sending direct prompt to OpenAI (length: {len(prompt)} chars)")
+            
+            if not self.client:
+                logger.error("OpenAI client not initialized")
+                return None
+                
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert at analyzing meeting recordings. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            content = response.choices[0].message.content.strip()
+            
+            logger.info(f"OpenAI response received (length: {len(content)} chars)")
+            logger.debug(f"OpenAI response: {content}")
+            
+            # Parse JSON response
+            try:
+                result = json.loads(content)
+                logger.info(f"Successfully parsed OpenAI JSON response")
+                return result
+            except json.JSONDecodeError:
+                logger.warning("AI response was not valid JSON, attempting to extract JSON")
+                # Try to extract JSON from response
+                start = content.find('{')
+                end = content.rfind('}') + 1
+                if start != -1 and end != -1:
+                    json_str = content[start:end]
+                    result = json.loads(json_str)
+                    return result
+                else:
+                    raise ValueError("No valid JSON found in response")
+                    
+        except Exception as e:
+            logger.error(f"Error in OpenAI direct analysis: {str(e)}")
+            return None
+    
+    def analyze_chunk_anthropic_direct(self, prompt: str) -> Dict[str, Any]:
+        """Analyze using Anthropic with a direct prompt (no template)"""
+        try:
+            logger.debug(f"Sending direct prompt to Anthropic (length: {len(prompt)} chars)")
+            
+            if not self.client:
+                logger.error("Anthropic client not initialized")
+                return None
+                
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=500,
+                temperature=0.3,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            content = response.content[0].text.strip()
+            logger.info(f"Anthropic response received (length: {len(content)} chars)")
+            logger.debug(f"Anthropic response: {content}")
+            
+            # Parse JSON response
+            try:
+                result = json.loads(content)
+                logger.info(f"Successfully parsed Anthropic JSON response")
+                return result
+            except json.JSONDecodeError:
+                logger.warning("AI response was not valid JSON, attempting to extract JSON")
+                # Try to extract JSON from response
+                start = content.find('{')
+                end = content.rfind('}') + 1
+                if start != -1 and end != -1:
+                    json_str = content[start:end]
+                    result = json.loads(json_str)
+                    return result
+                else:
+                    raise ValueError("No valid JSON found in response")
+                    
+        except Exception as e:
+            logger.error(f"Error in Anthropic direct analysis: {str(e)}")
             return None
     
     def merge_analyses(self, chunk_analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
