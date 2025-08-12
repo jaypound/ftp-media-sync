@@ -1697,6 +1697,9 @@ function showPanel(panelName) {
         activeNavItem.classList.add('active');
     }
     
+    // Dispatch custom event for panel change
+    window.dispatchEvent(new CustomEvent('panelChanged', { detail: { panel: panelName } }));
+    
     // Update dashboard stats when showing dashboard
     if (panelName === 'dashboard') {
         updateDashboardStats();
@@ -10060,11 +10063,15 @@ async function scanSelectedFolders() {
 
 // Meeting Trimmer functions
 let trimSettings = {
-    trim_start: 30,
-    trim_end: 60
+    server: 'target',
+    source_path: '/mnt/main/Recordings',
+    dest_path: '/mnt/main/ATL26 On-Air Content/MEETINGS',
+    keep_original: true
 };
 
+let currentTrimFile = null;
 let autoTrimInterval = null;
+let selectedFile = null; // For enhanced trim modal
 
 function showTrimSettings() {
     document.getElementById('trimSettingsModal').classList.add('show');
@@ -10075,8 +10082,10 @@ function closeTrimSettingsModal() {
 }
 
 function saveTrimSettings() {
-    trimSettings.trim_start = parseInt(document.getElementById('trimStartSeconds').value) || 30;
-    trimSettings.trim_end = parseInt(document.getElementById('trimEndSeconds').value) || 60;
+    trimSettings.server = document.getElementById('trimServer').value;
+    trimSettings.source_path = document.getElementById('trimSourcePath').value;
+    trimSettings.dest_path = document.getElementById('trimDestPath').value;
+    trimSettings.keep_original = document.getElementById('keepOriginal').checked;
     
     // Save to localStorage
     localStorage.setItem('trimSettings', JSON.stringify(trimSettings));
@@ -10087,12 +10096,26 @@ function saveTrimSettings() {
 
 async function refreshRecordingsList() {
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/meeting-recordings');
+        console.log('Refreshing recordings with settings:', trimSettings);
+        
+        const params = new URLSearchParams({
+            server: trimSettings.server,
+            source_path: trimSettings.source_path,
+            dest_path: trimSettings.dest_path
+        });
+        
+        console.log('Fetching from:', `http://127.0.0.1:5000/api/meeting-recordings?${params}`);
+        
+        const response = await fetch(`http://127.0.0.1:5000/api/meeting-recordings?${params}`);
         const data = await response.json();
         
+        console.log('Response data:', data);
+        
         if (data.status === 'success') {
+            console.log(`Found ${data.recordings.length} recordings`);
             displayRecordings(data.recordings);
         } else {
+            console.error('Failed to load recordings:', data.message);
             showNotification('Failed to load recordings: ' + data.message, 'error');
         }
     } catch (error) {
@@ -10122,8 +10145,8 @@ function displayRecordings(recordings) {
             <div class="recording-actions">
                 ${recording.is_trimmed 
                     ? '<span class="status-badge trimmed">Trimmed</span>' 
-                    : `<button class="button primary small" onclick="trimRecording('${recording.path}', '${recording.filename}')">
-                         <i class="fas fa-cut"></i> Trim
+                    : `<button class="button primary small" onclick='openTrimAnalysisModal(${JSON.stringify(recording)})'>
+                         <i class="fas fa-cut"></i> Analyze & Trim
                        </button>`
                 }
             </div>
@@ -10131,53 +10154,624 @@ function displayRecordings(recordings) {
     `).join('');
 }
 
-async function trimRecording(filePath, filename) {
+// Convert seconds to HH:MM:SS.S format
+function secondsToTimecode(seconds) {
+    if (!seconds && seconds !== 0) return 'Unknown';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = (seconds % 60).toFixed(1);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.padStart(4, '0')}`;
+}
+
+// Open enhanced trim analysis modal
+window.openTrimAnalysisModal = function(file) {
+    selectedFile = file;
+    selectedFile.server_type = trimSettings.server; // Add server type
+    currentTrimFile = file; // Keep for backward compatibility
+    
+    // Update modal content with file info
+    document.getElementById('trimAnalysisFilename').textContent = file.relative_path || file.path || file.filename;
+    
+    // Clear trim time inputs
+    document.getElementById('trimAnalysisStartTime').value = '';
+    document.getElementById('trimAnalysisEndTime').value = '';
+    document.getElementById('trimStartTimecode').value = '';
+    document.getElementById('trimEndTimecode').value = '';
+    document.getElementById('trimAnalysisNewDuration').textContent = '--:--:--';
+    
+    // Clear detected words
+    document.getElementById('startWords').textContent = 'No words detected yet';
+    document.getElementById('endWords').textContent = 'No words detected yet';
+    
+    // Reset button states
+    document.getElementById('downloadForTrimBtn').disabled = false;
+    document.getElementById('downloadForTrimBtn').innerHTML = '<i class="fas fa-download"></i> Download File';
+    document.getElementById('downloadForTrimBtn').classList.remove('success');
+    document.getElementById('viewOriginalBtn').disabled = true;
+    document.getElementById('previewStartBtn').disabled = true;
+    document.getElementById('previewEndBtn').disabled = true;
+    document.getElementById('executeTrimBtn').disabled = true;
+    document.getElementById('viewTrimmedGroup').style.display = 'none';
+    document.getElementById('copyCastus1Btn').disabled = true;
+    document.getElementById('copyCastus2Btn').disabled = true;
+    document.getElementById('deleteTrimmedBtn').disabled = true;
+    
+    // Clear any stored temp path
+    if (selectedFile) {
+        delete selectedFile.tempPath;
+        delete selectedFile.fileSize;
+    }
+    
+    // Hide any status messages
+    const statusDiv = document.getElementById('trimAnalysisStatus');
+    if (statusDiv) {
+        statusDiv.style.display = 'none';
+    }
+    
+    // Show modal
+    document.getElementById('trimAnalysisModal').classList.add('show');
+}
+
+// Download file for trim operations
+window.downloadForTrim = async function() {
+    if (!selectedFile) return;
+    
     try {
-        // Show progress
-        const recordingItem = event.target.closest('.recording-item');
-        const actionsDiv = recordingItem.querySelector('.recording-actions');
-        actionsDiv.innerHTML = '<div class="trim-progress">Trimming... <i class="fas fa-spinner fa-spin"></i></div>';
+        const downloadBtn = document.getElementById('downloadForTrimBtn');
+        const viewOriginalBtn = document.getElementById('viewOriginalBtn');
         
-        // Send trim request
-        const response = await fetch('http://127.0.0.1:5000/api/trim-recording', {
+        // Disable download button and show progress
+        downloadBtn.disabled = true;
+        downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
+        
+        showNotification('Downloading file for trim operations...', 'info');
+        
+        const response = await fetch('http://127.0.0.1:5000/api/download-for-trim', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                file_path: filePath,
-                trim_start: trimSettings.trim_start,
-                trim_end: trimSettings.trim_end
+                file_path: selectedFile.path,
+                server: trimSettings.server
             })
         });
         
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Copy to MEETINGS folder
-            const copyResponse = await fetch('http://127.0.0.1:5000/api/copy-trimmed-recording', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    source_path: data.output_path,
-                    filename: data.trimmed_name
-                })
-            });
+            // Store the temp path for later use
+            selectedFile.tempPath = data.temp_path;
+            selectedFile.fileSize = data.file_size;
             
-            const copyData = await copyResponse.json();
+            // Update UI
+            downloadBtn.innerHTML = '<i class="fas fa-check"></i> Downloaded';
+            downloadBtn.classList.add('success');
+            viewOriginalBtn.disabled = false;
             
-            if (copyData.status === 'success') {
-                showNotification(`Successfully trimmed ${filename}`, 'success');
-                refreshRecordingsList();
+            const sizeInMB = (data.file_size / (1024 * 1024)).toFixed(2);
+            
+            if (data.already_cached) {
+                showNotification(`File already downloaded (${sizeInMB} MB)`, 'success');
             } else {
-                showNotification('Failed to copy trimmed file: ' + copyData.message, 'error');
+                showNotification(`File downloaded successfully (${sizeInMB} MB)`, 'success');
             }
         } else {
-            showNotification('Failed to trim recording: ' + data.message, 'error');
-            refreshRecordingsList();
+            downloadBtn.disabled = false;
+            downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download File';
+            showNotification(`Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error downloading file:', error);
+        const downloadBtn = document.getElementById('downloadForTrimBtn');
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download File';
+        showNotification('Error downloading file', 'error');
+    }
+};
+
+// View original file
+window.viewOriginalFile = async function() {
+    if (!selectedFile) return;
+    
+    try {
+        // Check if file has been downloaded
+        if (!selectedFile.tempPath) {
+            showNotification('Please download the file first', 'warning');
+            return;
+        }
+        
+        showNotification('Opening file preview...', 'info');
+        
+        // Open the downloaded file via the backend
+        const filename = selectedFile.tempPath.split('/').pop();
+        const fileUrl = `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
+        window.open(fileUrl, '_blank');
+        
+    } catch (error) {
+        console.error('Error viewing original file:', error);
+        showNotification('Error viewing original file', 'error');
+    }
+};
+
+// Find trim points
+window.findTrimPoints = async function(useAI = false) {
+    if (!selectedFile) return;
+    
+    try {
+        const method = useAI ? 'Fast AI detection' : 'Transcription analysis';
+        showNotification(`Analyzing meeting boundaries using ${method}...`, 'info');
+        document.getElementById('trimStartTimecode').value = 'Analyzing...';
+        document.getElementById('trimEndTimecode').value = 'Analyzing...';
+        
+        const response = await fetch('http://127.0.0.1:5000/api/analyze-trim-points', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: selectedFile.path,
+                server: trimSettings.server,
+                use_ai: useAI
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            selectedFile.trimStart = data.start_time;
+            selectedFile.trimEnd = data.end_time;
+            selectedFile.originalDuration = data.duration;
+            
+            // Update UI
+            document.getElementById('trimStartTimecode').value = secondsToTimecode(data.start_time);
+            document.getElementById('trimEndTimecode').value = secondsToTimecode(data.end_time);
+            document.getElementById('trimAnalysisStartTime').value = data.start_time;
+            document.getElementById('trimAnalysisEndTime').value = data.end_time;
+            
+            // Update detected words
+            if (data.start_words) {
+                document.getElementById('startWords').textContent = data.start_words;
+            }
+            if (data.end_words) {
+                document.getElementById('endWords').textContent = data.end_words;
+            }
+            const trimmedDuration = data.end_time - data.start_time;
+            if (document.getElementById('trimmedDuration')) {
+                document.getElementById('trimmedDuration').textContent = secondsToTimecode(trimmedDuration);
+            }
+            
+            // Enable preview buttons
+            document.getElementById('previewStartBtn').disabled = false;
+            document.getElementById('previewEndBtn').disabled = false;
+            
+            // Update the new duration display and enable trim button
+            updateNewDuration();
+            if (data.end_time > data.start_time) {
+                document.getElementById('executeTrimBtn').disabled = false;
+            }
+            
+            showNotification('Trim points found successfully', 'success');
+        } else {
+            showNotification(`Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error analyzing trim points:', error);
+        showNotification('Error analyzing file', 'error');
+    }
+};
+
+// Preview trim start with interactive selection
+window.previewTrimStart = async function() {
+    if (!selectedFile) return;
+    
+    // Check if file has been downloaded
+    if (!selectedFile.tempPath) {
+        showNotification('Please download the file first', 'warning');
+        return;
+    }
+    
+    // Open interactive video modal
+    openVideoTrimModal('start');
+};
+
+// Preview trim end with interactive selection
+window.previewTrimEnd = async function() {
+    if (!selectedFile) return;
+    
+    // Check if file has been downloaded
+    if (!selectedFile.tempPath) {
+        showNotification('Please download the file first', 'warning');
+        return;
+    }
+    
+    // Open interactive video modal
+    openVideoTrimModal('end');
+};
+
+// Trim file
+window.trimFile = async function() {
+    if (!selectedFile || selectedFile.trimStart === undefined || selectedFile.trimEnd === undefined) {
+        showNotification('Please find trim points first', 'warning');
+        return;
+    }
+    
+    try {
+        showNotification('Trimming file...', 'info');
+        
+        // Generate trimmed filename
+        const originalName = selectedFile.relative_path || selectedFile.filename || 'recording.mp4';
+        const filename = originalName.split('/').pop();
+        
+        // Extract date from filename (format: YYYY-MM-DD at HHMMSS)
+        const dateMatch = filename.match(/(\d{4})-(\d{2})-(\d{2})\s+at\s+\d{6}\s+(.+)\.mp4$/i);
+        let dateStr, title;
+        
+        if (dateMatch) {
+            // Extract date parts and title
+            const year = dateMatch[1].substr(-2); // Last 2 digits of year
+            const month = dateMatch[2];
+            const day = dateMatch[3];
+            dateStr = `${year}${month}${day}`;
+            title = dateMatch[4].trim(); // The title after the timestamp
+        } else {
+            // Fallback to current date if pattern doesn't match
+            const date = new Date();
+            dateStr = `${date.getFullYear().toString().substr(-2)}${(date.getMonth() + 1).toString().padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}`;
+            title = filename.replace(/\.mp4$/i, '');
+        }
+        
+        const trimmedName = `${dateStr}_MTG_${title}.mp4`;
+        
+        const response = await fetch('http://localhost:5000/api/trim-recording', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: selectedFile.path,
+                server: trimSettings.server,
+                start_time: selectedFile.trimStart,
+                end_time: selectedFile.trimEnd,
+                new_filename: trimmedName
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            selectedFile.trimmedPath = data.output_path;
+            selectedFile.trimmedName = trimmedName;
+            
+            // Show view trimmed button and enable final step buttons
+            document.getElementById('viewTrimmedGroup').style.display = 'block';
+            document.getElementById('copyCastus1Btn').disabled = false;
+            document.getElementById('copyCastus2Btn').disabled = false;
+            document.getElementById('deleteTrimmedBtn').disabled = false;
+            
+            showNotification('File trimmed successfully', 'success');
+        } else {
+            showNotification(`Error: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error trimming file:', error);
+        showNotification('Error trimming file', 'error');
+    }
+};
+
+// View trimmed file
+window.viewTrimmedFile = async function() {
+    if (!selectedFile || !selectedFile.trimmedPath) return;
+    
+    try {
+        showNotification('Opening trimmed file preview...', 'info');
+        
+        // Open the trimmed file via the backend
+        const filename = selectedFile.trimmedPath.split('/').pop();
+        const fileUrl = `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
+        window.open(fileUrl, '_blank');
+    } catch (error) {
+        console.error('Error viewing trimmed file:', error);
+        showNotification('Error viewing trimmed file', 'error');
+    }
+};
+
+// Copy to destination
+window.copyToDestination = async function(targetServer) {
+    if (!selectedFile || !selectedFile.trimmedPath) return;
+    
+    try {
+        // Get the filename from the input field (user may have edited it)
+        const finalFilename = document.getElementById('trimAnalysisNewFilename').value;
+        
+        if (!finalFilename) {
+            showNotification('Please enter a filename', 'error');
+            return;
+        }
+        
+        // Show progress
+        const statusDiv = document.getElementById('trimAnalysisStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-info';
+        document.getElementById('trimAnalysisStatusText').textContent = `Copying to ${targetServer}...`;
+        
+        const response = await fetch('http://127.0.0.1:5000/api/copy-trimmed-recording', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_path: selectedFile.trimmedPath,
+                filename: finalFilename,
+                dest_folder: trimSettings.dest_path,
+                server: targetServer,
+                keep_original: trimSettings.keep_original
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            statusDiv.className = 'alert alert-success';
+            document.getElementById('trimAnalysisStatusText').textContent = `Successfully copied to: ${data.destination_path}`;
+            
+            // Close modal and refresh list after delay
+            setTimeout(() => {
+                closeTrimAnalysisModal();
+                refreshRecordingsList();
+            }, 2000);
+        } else {
+            statusDiv.className = 'alert alert-error';
+            document.getElementById('trimAnalysisStatusText').textContent = `Failed to copy: ${data.message}`;
+        }
+    } catch (error) {
+        console.error('Error copying to destination:', error);
+        const statusDiv = document.getElementById('trimAnalysisStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-error';
+        document.getElementById('trimAnalysisStatusText').textContent = 'Error copying to destination';
+    }
+};
+
+// Delete trimmed file
+window.deleteTrimmedFile = async function() {
+    if (!selectedFile || !selectedFile.trimmedPath) return;
+    
+    if (!confirm('Are you sure you want to delete the trimmed file? This will allow you to trim again with different settings.')) {
+        return;
+    }
+    
+    try {
+        // Show progress
+        const statusDiv = document.getElementById('trimAnalysisStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-info';
+        document.getElementById('trimAnalysisStatusText').textContent = 'Deleting trimmed file...';
+        
+        // For now, just reset the state since delete endpoint would need to be implemented
+        // In a full implementation, you would call a delete API endpoint here
+        selectedFile.trimmedPath = null;
+        selectedFile.trimmedName = null;
+        
+        // Hide view trimmed button and disable buttons that require trimmed file
+        document.getElementById('viewTrimmedGroup').style.display = 'none';
+        document.getElementById('copyCastus1Btn').disabled = true;
+        document.getElementById('copyCastus2Btn').disabled = true;
+        document.getElementById('deleteTrimmedBtn').disabled = true;
+        
+        statusDiv.className = 'alert alert-success';
+        document.getElementById('trimAnalysisStatusText').textContent = 'Trimmed file deleted - you can now trim again with different settings';
+        
+        // Clear the status after a delay
+        setTimeout(() => {
+            statusDiv.style.display = 'none';
+        }, 3000);
+    } catch (error) {
+        console.error('Error deleting trimmed file:', error);
+        const statusDiv = document.getElementById('trimAnalysisStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-error';
+        document.getElementById('trimAnalysisStatusText').textContent = 'Error deleting trimmed file';
+    }
+};
+
+// Legacy function for backward compatibility - now opens enhanced modal
+function analyzeAndTrim(recording) {
+    openTrimAnalysisModal(recording);
+}
+
+window.closeTrimAnalysisModal = function() {
+    document.getElementById('trimAnalysisModal').classList.remove('show');
+    selectedFile = null;
+    currentTrimFile = null;
+}
+
+// Video trim modal variables
+let trimMode = 'start'; // 'start' or 'end'
+let videoElement = null;
+
+// Open video trim modal
+function openVideoTrimModal(mode) {
+    trimMode = mode;
+    const modal = document.getElementById('videoTrimModal');
+    videoElement = document.getElementById('trimVideo');
+    
+    // Set video source
+    const filename = selectedFile.tempPath.split('/').pop();
+    const videoUrl = `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
+    videoElement.src = videoUrl;
+    
+    // Set initial time based on mode
+    videoElement.addEventListener('loadedmetadata', function() {
+        if (mode === 'start' && selectedFile.trimStart !== undefined) {
+            videoElement.currentTime = selectedFile.trimStart;
+        } else if (mode === 'end' && selectedFile.trimEnd !== undefined) {
+            videoElement.currentTime = Math.max(0, selectedFile.trimEnd - 5);
+        }
+    });
+    
+    // Update button text
+    document.getElementById('setTrimPointBtn').innerHTML = 
+        mode === 'start' 
+            ? '<i class="fas fa-cut"></i> Set as Start Point'
+            : '<i class="fas fa-cut"></i> Set as End Point';
+    
+    // Update time display
+    videoElement.addEventListener('timeupdate', updateVideoTimeDisplay);
+    
+    modal.classList.add('show');
+}
+
+// Close video trim modal
+window.closeVideoTrimModal = function() {
+    const modal = document.getElementById('videoTrimModal');
+    if (videoElement) {
+        videoElement.pause();
+        videoElement.removeEventListener('timeupdate', updateVideoTimeDisplay);
+        videoElement.src = '';
+    }
+    modal.classList.remove('show');
+}
+
+// Update video time display
+function updateVideoTimeDisplay() {
+    if (!videoElement) return;
+    const currentTime = videoElement.currentTime;
+    document.getElementById('currentTimeDisplay').textContent = secondsToTimecode(currentTime);
+    document.getElementById('currentSecondsDisplay').textContent = `${currentTime.toFixed(1)}s`;
+}
+
+// Skip video by seconds
+window.skipVideo = function(seconds) {
+    if (!videoElement) return;
+    videoElement.currentTime = Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + seconds));
+}
+
+// Set trim point from video
+window.setTrimPoint = function() {
+    if (!videoElement || !selectedFile) return;
+    
+    const currentTime = videoElement.currentTime;
+    
+    if (trimMode === 'start') {
+        selectedFile.trimStart = currentTime;
+        document.getElementById('trimAnalysisStartTime').value = currentTime;
+        document.getElementById('trimStartTimecode').value = secondsToTimecode(currentTime);
+        showNotification(`Start trim point set to ${secondsToTimecode(currentTime)}`, 'success');
+    } else {
+        selectedFile.trimEnd = currentTime;
+        document.getElementById('trimAnalysisEndTime').value = currentTime;
+        document.getElementById('trimEndTimecode').value = secondsToTimecode(currentTime);
+        showNotification(`End trim point set to ${secondsToTimecode(currentTime)}`, 'success');
+    }
+    
+    // Update duration
+    updateNewDuration();
+    
+    // Enable trim button if both points are set
+    if (selectedFile.trimStart !== undefined && selectedFile.trimEnd !== undefined && 
+        selectedFile.trimEnd > selectedFile.trimStart) {
+        document.getElementById('executeTrimBtn').disabled = false;
+    }
+    
+    // Close modal
+    closeVideoTrimModal();
+}
+
+function updateNewDuration() {
+    const startTime = parseFloat(document.getElementById('trimAnalysisStartTime').value) || 0;
+    const endTime = parseFloat(document.getElementById('trimAnalysisEndTime').value) || 0;
+    
+    if (endTime > startTime) {
+        const newDuration = endTime - startTime;
+        document.getElementById('trimAnalysisNewDuration').textContent = formatDuration(newDuration);
+    } else {
+        document.getElementById('trimAnalysisNewDuration').textContent = 'Invalid trim points';
+    }
+}
+
+async function executeTrim() {
+    if (!selectedFile && !currentTrimFile) return;
+    
+    // Use selectedFile if available, otherwise fall back to currentTrimFile
+    const file = selectedFile || currentTrimFile;
+    
+    const startTime = parseFloat(document.getElementById('trimAnalysisStartTime').value) || 0;
+    const endTime = parseFloat(document.getElementById('trimAnalysisEndTime').value) || 0;
+    
+    if (endTime <= startTime) {
+        showNotification('End time must be after start time', 'error');
+        return;
+    }
+    
+    // Generate filename if not provided
+    const originalName = file.relative_path || file.filename || 'recording.mp4';
+    const filename = originalName.split('/').pop();
+    
+    // Extract date from filename (format: YYYY-MM-DD at HHMMSS)
+    const dateMatch = filename.match(/(\d{4})-(\d{2})-(\d{2})\s+at\s+\d{6}\s+(.+)\.mp4$/i);
+    let dateStr, title;
+    
+    if (dateMatch) {
+        // Extract date parts and title
+        const year = dateMatch[1].substr(-2); // Last 2 digits of year
+        const month = dateMatch[2];
+        const day = dateMatch[3];
+        dateStr = `${year}${month}${day}`;
+        title = dateMatch[4].trim(); // The title after the timestamp
+    } else {
+        // Fallback to current date if pattern doesn't match
+        const date = new Date();
+        dateStr = `${date.getFullYear().toString().substr(-2)}${(date.getMonth() + 1).toString().padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}`;
+        title = filename.replace(/\.mp4$/i, '');
+    }
+    
+    const newFilename = `${dateStr}_MTG_${title}.mp4`;
+    
+    // Update the filename field
+    document.getElementById('trimAnalysisNewFilename').value = newFilename;
+    
+    // Show progress
+    const statusDiv = document.getElementById('trimAnalysisStatus');
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'alert alert-info';
+    document.getElementById('trimAnalysisStatusText').textContent = 'Trimming file...';
+    document.getElementById('executeTrimBtn').disabled = true;
+    
+    try {
+        // Send trim request
+        const response = await fetch('http://localhost:5000/api/trim-recording', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: file.path,
+                server: trimSettings.server,
+                start_time: startTime,
+                end_time: endTime,
+                new_filename: newFilename
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Store trimmed file info
+            if (selectedFile) {
+                selectedFile.trimmedPath = data.output_path;
+                selectedFile.trimmedName = newFilename;
+            }
+            
+            // Show view trimmed button and enable final step buttons
+            document.getElementById('viewTrimmedGroup').style.display = 'block';
+            document.getElementById('copyCastus1Btn').disabled = false;
+            document.getElementById('copyCastus2Btn').disabled = false;
+            document.getElementById('deleteTrimmedBtn').disabled = false;
+            
+            statusDiv.className = 'alert alert-success';
+            document.getElementById('trimAnalysisStatusText').textContent = 'File trimmed successfully! You can now view it or copy to destination.';
+            
+        } else {
+            statusDiv.className = 'alert alert-error';
+            document.getElementById('trimAnalysisStatusText').textContent = 'Failed to trim: ' + data.message;
         }
     } catch (error) {
         console.error('Error trimming recording:', error);
-        showNotification('Error trimming recording', 'error');
-        refreshRecordingsList();
+        statusDiv.className = 'alert alert-error';
+        document.getElementById('trimAnalysisStatusText').textContent = 'Error trimming recording';
+    } finally {
+        document.getElementById('executeTrimBtn').disabled = false;
     }
 }
 
@@ -10251,8 +10845,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const saved = localStorage.getItem('trimSettings');
     if (saved) {
         trimSettings = JSON.parse(saved);
-        document.getElementById('trimStartSeconds').value = trimSettings.trim_start;
-        document.getElementById('trimEndSeconds').value = trimSettings.trim_end;
+        // Update all form fields
+        document.getElementById('trimServer').value = trimSettings.server || 'target';
+        document.getElementById('trimSourcePath').value = trimSettings.source_path || '/mnt/main/Recordings';
+        document.getElementById('trimDestPath').value = trimSettings.dest_path || '/mnt/main/ATL26 On-Air Content/MEETINGS';
+        document.getElementById('keepOriginal').checked = trimSettings.keep_original !== false; // Default true
     }
     
     // Initial load of recordings
@@ -10267,4 +10864,692 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Add click handler for trim analysis modal
+    const analysisModal = document.getElementById('trimAnalysisModal');
+    if (analysisModal) {
+        analysisModal.addEventListener('click', (e) => {
+            if (e.target === analysisModal) {
+                closeTrimAnalysisModal();
+            }
+        });
+    }
+    
+    // Add event listeners for trim time inputs
+    document.getElementById('trimAnalysisStartTime').addEventListener('input', updateNewDuration);
+    document.getElementById('trimAnalysisEndTime').addEventListener('input', updateNewDuration);
 });
+
+// Meetings Schedule Functions
+let meetings = [];
+let editingMeetingId = null;
+
+// Load meetings when panel is shown
+window.addEventListener('panelChanged', (e) => {
+    if (e.detail.panel === 'meetings') {
+        loadMeetings();
+    }
+});
+
+// Load meetings from backend
+async function loadMeetings() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/meetings');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            meetings = data.meetings;
+            renderMeetingsTable();
+        } else {
+            showNotification('Error loading meetings', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading meetings:', error);
+        showNotification('Error loading meetings', 'error');
+    }
+}
+
+// Render meetings table
+function renderMeetingsTable() {
+    const tbody = document.getElementById('meetingsTableBody');
+    const noMeetingsMsg = document.getElementById('noMeetingsMessage');
+    
+    if (meetings.length === 0) {
+        tbody.innerHTML = '';
+        noMeetingsMsg.style.display = 'block';
+        return;
+    }
+    
+    noMeetingsMsg.style.display = 'none';
+    tbody.innerHTML = meetings.map(meeting => {
+        const broadcastBadge = meeting.atl26_broadcast 
+            ? '<span class="broadcast-badge">ATL26</span>'
+            : '<span class="broadcast-badge no-broadcast">No</span>';
+        
+        return `
+            <tr>
+                <td>${meeting.meeting_name}</td>
+                <td>${formatMeetingDate(meeting.meeting_date)}</td>
+                <td>${meeting.start_time}</td>
+                <td>${meeting.duration_hours} hours</td>
+                <td>${meeting.room || ''}</td>
+                <td>${broadcastBadge}</td>
+                <td>
+                    <div class="meeting-actions">
+                        <button class="button secondary small" onclick="editMeeting(${meeting.id})">
+                            <i class="fas fa-edit"></i> Edit
+                        </button>
+                        <button class="button danger small" onclick="deleteMeeting(${meeting.id})">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Format meeting date
+function formatMeetingDate(dateStr) {
+    // Parse date components to avoid timezone issues
+    const [year, month, day] = dateStr.split('-').map(num => parseInt(num));
+    // Create date using local timezone (month is 0-indexed in JS)
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+    });
+}
+
+// Open add meeting modal
+window.openAddMeetingModal = function() {
+    editingMeetingId = null;
+    document.getElementById('meetingModalTitle').textContent = 'Add Meeting';
+    document.getElementById('meetingForm').reset();
+    document.getElementById('meetingBroadcast').checked = true;
+    document.getElementById('meetingRoom').value = '';
+    document.getElementById('meetingModal').classList.add('show');
+};
+
+// Open edit meeting modal
+window.editMeeting = function(meetingId) {
+    const meeting = meetings.find(m => m.id === meetingId);
+    if (!meeting) return;
+    
+    editingMeetingId = meetingId;
+    document.getElementById('meetingModalTitle').textContent = 'Edit Meeting';
+    document.getElementById('meetingId').value = meetingId;
+    document.getElementById('meetingName').value = meeting.meeting_name;
+    document.getElementById('meetingDate').value = meeting.meeting_date;
+    document.getElementById('meetingTime').value = meeting.start_time;
+    document.getElementById('meetingDuration').value = meeting.duration_hours;
+    document.getElementById('meetingRoom').value = meeting.room || '';
+    document.getElementById('meetingBroadcast').checked = meeting.atl26_broadcast;
+    document.getElementById('meetingModal').classList.add('show');
+};
+
+// Close meeting modal
+window.closeMeetingModal = function() {
+    document.getElementById('meetingModal').classList.remove('show');
+    editingMeetingId = null;
+};
+
+// Save meeting
+window.saveMeeting = async function() {
+    const formData = {
+        meeting_name: document.getElementById('meetingName').value,
+        meeting_date: document.getElementById('meetingDate').value,
+        start_time: document.getElementById('meetingTime').value,
+        duration_hours: parseFloat(document.getElementById('meetingDuration').value),
+        room: document.getElementById('meetingRoom').value || null,
+        atl26_broadcast: document.getElementById('meetingBroadcast').checked
+    };
+    
+    if (!formData.meeting_name || !formData.meeting_date || !formData.start_time) {
+        showNotification('Please fill in all required fields', 'error');
+        return;
+    }
+    
+    try {
+        const url = editingMeetingId 
+            ? `http://127.0.0.1:5000/api/meetings/${editingMeetingId}`
+            : 'http://127.0.0.1:5000/api/meetings';
+        
+        const method = editingMeetingId ? 'PUT' : 'POST';
+        
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            showNotification(editingMeetingId ? 'Meeting updated' : 'Meeting created', 'success');
+            closeMeetingModal();
+            loadMeetings();
+        } else {
+            showNotification(data.message || 'Error saving meeting', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving meeting:', error);
+        showNotification('Error saving meeting', 'error');
+    }
+};
+
+// Delete meeting
+window.deleteMeeting = async function(meetingId) {
+    if (!confirm('Are you sure you want to delete this meeting?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/${meetingId}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            showNotification('Meeting deleted', 'success');
+            loadMeetings();
+        } else {
+            showNotification(data.message || 'Error deleting meeting', 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting meeting:', error);
+        showNotification('Error deleting meeting', 'error');
+    }
+};
+
+// Import meetings from web
+window.importMeetingsFromWeb = async function() {
+    const importBtn = event.target;
+    const importStatus = document.getElementById('importStatus');
+    
+    importBtn.disabled = true;
+    importBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
+    importStatus.textContent = 'Fetching meetings from Atlanta City Council website...';
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/meetings/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                year: 2025,
+                months: [8, 9, 10, 11, 12]
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            showNotification(data.message, 'success');
+            importStatus.textContent = `Imported ${data.imported} of ${data.total} meetings`;
+            loadMeetings();
+        } else {
+            showNotification(data.message || 'Error importing meetings', 'error');
+            importStatus.textContent = 'Import failed';
+        }
+    } catch (error) {
+        console.error('Error importing meetings:', error);
+        showNotification('Error importing meetings', 'error');
+        importStatus.textContent = 'Import failed';
+    } finally {
+        importBtn.disabled = false;
+        importBtn.innerHTML = '<i class="fas fa-download"></i> Import from City Council Website';
+        
+        // Clear status after 5 seconds
+        setTimeout(() => {
+            importStatus.textContent = '';
+        }, 5000);
+    }
+};
+
+// Import Meetings to Schedule Templates Functions
+// Room to SDI mapping
+const ROOM_TO_SDI_MAPPING = {
+    'Council Chambers': '/mnt/main/tv/inputs/1-SDI in',
+    'Committee Room 1': '/mnt/main/tv/inputs/2-SDI in',
+    'Committee Room 2': '/mnt/main/tv/inputs/3-SDI in'
+};
+
+// Import Daily Meetings Modal Functions
+window.importDailyMeetings = function() {
+    console.log('Opening import daily meetings modal');
+    const modal = document.getElementById('importDailyMeetingsModal');
+    if (modal) {
+        modal.style.display = 'block';
+        // Set today's date as default
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('dailyMeetingDate').value = today;
+        // Attach event handler
+        attachDailyHandlers();
+        loadDailyMeetings();
+    }
+};
+
+window.closeImportDailyMeetingsModal = function() {
+    document.getElementById('importDailyMeetingsModal').style.display = 'none';
+};
+
+async function loadDailyMeetings() {
+    const date = document.getElementById('dailyMeetingDate').value;
+    if (!date) return;
+    
+    console.log('Loading meetings for date:', date);
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/by-date?date=${date}`);
+        const data = await response.json();
+        console.log('Response data:', data);
+        
+        const container = document.getElementById('dailyMeetingsList');
+        if (data.status === 'success' && data.meetings.length > 0) {
+            container.innerHTML = data.meetings.map(meeting => `
+                <div class="meeting-selection-item">
+                    <label>
+                        <input type="checkbox" name="dailyMeeting" value="${meeting.id}" checked>
+                        ${meeting.start_time} - ${meeting.meeting_name}${meeting.room ? ` (${meeting.room})` : ''}
+                    </label>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<p>No meetings found for this date.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading daily meetings:', error);
+        document.getElementById('dailyMeetingsList').innerHTML = '<p>Error loading meetings.</p>';
+    }
+}
+
+window.generateDailySchedule = async function() {
+    const selectedMeetings = Array.from(document.querySelectorAll('input[name="dailyMeeting"]:checked'))
+        .map(cb => cb.value);
+    
+    if (selectedMeetings.length === 0) {
+        showNotification('Please select at least one meeting', 'warning');
+        return;
+    }
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-daily-schedule-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting_ids: selectedMeetings })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Close import modal
+            closeImportDailyMeetingsModal();
+            
+            // Process the template content to extract items
+            const templateItems = parseScheduleTemplate(data.template);
+            
+            // Create a template object similar to what loadSelectedTemplate creates
+            currentTemplate = {
+                type: 'daily',
+                filename: `daily_meetings_${new Date().toISOString().split('T')[0]}.sch`,
+                items: templateItems,
+                raw_content: data.template
+            };
+            
+            // Display the template in the current panel
+            const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+            if (activePanel && activePanel.id === 'dashboard') {
+                displayDashboardTemplate();
+            } else {
+                displayTemplate();
+            }
+            
+            // Save to template library
+            savedTemplates.push(JSON.parse(JSON.stringify(currentTemplate)));
+            localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
+            
+            log(`✅ Imported daily meetings schedule with ${templateItems.length} items`, 'success');
+            showNotification(`Schedule imported successfully with ${templateItems.length} meetings`, 'success');
+        } else {
+            showNotification(data.message || 'Error generating schedule', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating daily schedule:', error);
+        showNotification('Error generating schedule', 'error');
+    }
+};
+
+// Import Weekly Meetings Modal Functions
+window.importWeeklyMeetings = function() {
+    console.log('Opening import weekly meetings modal');
+    const modal = document.getElementById('importWeeklyMeetingsModal');
+    if (modal) {
+        modal.style.display = 'block';
+        // Set current year and week as default
+        const today = new Date();
+        document.getElementById('weeklyMeetingYear').value = today.getFullYear();
+        document.getElementById('weeklyMeetingWeek').value = getWeekNumber(today);
+        loadWeeklyMeetings();
+    }
+};
+
+window.closeImportWeeklyMeetingsModal = function() {
+    document.getElementById('importWeeklyMeetingsModal').style.display = 'none';
+};
+
+function getWeekNumber(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+async function loadWeeklyMeetings() {
+    const year = document.getElementById('weeklyMeetingYear').value;
+    const week = document.getElementById('weeklyMeetingWeek').value;
+    
+    if (!year || !week) return;
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/by-week?year=${year}&week=${week}`);
+        const data = await response.json();
+        
+        const container = document.getElementById('weeklyMeetingsList');
+        if (data.status === 'success' && data.meetings.length > 0) {
+            // Group meetings by day
+            const meetingsByDay = {};
+            data.meetings.forEach(meeting => {
+                const date = new Date(meeting.meeting_date);
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+                if (!meetingsByDay[dayName]) meetingsByDay[dayName] = [];
+                meetingsByDay[dayName].push(meeting);
+            });
+            
+            container.innerHTML = Object.entries(meetingsByDay).map(([day, meetings]) => `
+                <div class="day-group">
+                    <h4>${day}</h4>
+                    ${meetings.map(meeting => `
+                        <div class="meeting-selection-item">
+                            <label>
+                                <input type="checkbox" name="weeklyMeeting" value="${meeting.id}" checked>
+                                ${meeting.start_time} - ${meeting.meeting_name}${meeting.room ? ` (${meeting.room})` : ''}
+                            </label>
+                        </div>
+                    `).join('')}
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<p>No meetings found for this week.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading weekly meetings:', error);
+        document.getElementById('weeklyMeetingsList').innerHTML = '<p>Error loading meetings.</p>';
+    }
+}
+
+window.generateWeeklySchedule = async function() {
+    const selectedMeetings = Array.from(document.querySelectorAll('input[name="weeklyMeeting"]:checked'))
+        .map(cb => cb.value);
+    
+    if (selectedMeetings.length === 0) {
+        showNotification('Please select at least one meeting', 'warning');
+        return;
+    }
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-weekly-schedule-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting_ids: selectedMeetings })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            closeImportWeeklyMeetingsModal();
+            
+            // Process the template content to extract items
+            const templateItems = parseScheduleTemplate(data.template);
+            
+            // Create a template object
+            currentTemplate = {
+                type: 'weekly',
+                filename: `weekly_meetings_${new Date().toISOString().split('T')[0]}.sch`,
+                items: templateItems,
+                raw_content: data.template
+            };
+            
+            // Display the template
+            const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+            if (activePanel && activePanel.id === 'dashboard') {
+                displayDashboardTemplate();
+            } else {
+                displayTemplate();
+            }
+            
+            // Save to template library
+            savedTemplates.push(JSON.parse(JSON.stringify(currentTemplate)));
+            localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
+            
+            log(`✅ Imported weekly meetings schedule with ${templateItems.length} items`, 'success');
+            showNotification(`Schedule imported successfully with ${templateItems.length} meetings`, 'success');
+        } else {
+            showNotification(data.message || 'Error generating schedule', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating weekly schedule:', error);
+        showNotification('Error generating schedule', 'error');
+    }
+};
+
+// Import Monthly Meetings Modal Functions
+window.importMonthlyMeetings = function() {
+    console.log('Opening import monthly meetings modal');
+    const modal = document.getElementById('importMonthlyMeetingsModal');
+    if (modal) {
+        modal.style.display = 'block';
+        // Set current year and month as default
+        const today = new Date();
+        document.getElementById('monthlyMeetingYear').value = today.getFullYear();
+        document.getElementById('monthlyMeetingMonth').value = today.getMonth() + 1;
+        loadMonthlyMeetings();
+    }
+};
+
+window.closeImportMonthlyMeetingsModal = function() {
+    document.getElementById('importMonthlyMeetingsModal').style.display = 'none';
+};
+
+async function loadMonthlyMeetings() {
+    const year = document.getElementById('monthlyMeetingYear').value;
+    const month = document.getElementById('monthlyMeetingMonth').value;
+    
+    if (!year || !month) return;
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/by-month?year=${year}&month=${month}`);
+        const data = await response.json();
+        
+        const container = document.getElementById('monthlyMeetingsList');
+        if (data.status === 'success' && data.meetings.length > 0) {
+            container.innerHTML = data.meetings.map(meeting => {
+                const date = new Date(meeting.meeting_date);
+                const dayOfMonth = date.getDate();
+                return `
+                    <div class="meeting-selection-item">
+                        <label>
+                            <input type="checkbox" name="monthlyMeeting" value="${meeting.id}" checked>
+                            Day ${dayOfMonth} - ${meeting.start_time} - ${meeting.meeting_name}${meeting.room ? ` (${meeting.room})` : ''}
+                        </label>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            container.innerHTML = '<p>No meetings found for this month.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading monthly meetings:', error);
+        document.getElementById('monthlyMeetingsList').innerHTML = '<p>Error loading meetings.</p>';
+    }
+}
+
+window.generateMonthlySchedule = async function() {
+    const selectedMeetings = Array.from(document.querySelectorAll('input[name="monthlyMeeting"]:checked'))
+        .map(cb => cb.value);
+    
+    if (selectedMeetings.length === 0) {
+        showNotification('Please select at least one meeting', 'warning');
+        return;
+    }
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-monthly-schedule-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting_ids: selectedMeetings })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            closeImportMonthlyMeetingsModal();
+            
+            // Process the template content to extract items
+            const templateItems = parseScheduleTemplate(data.template);
+            
+            // Create a template object
+            currentTemplate = {
+                type: 'monthly',
+                filename: `monthly_meetings_${new Date().toISOString().split('T')[0]}.sch`,
+                items: templateItems,
+                raw_content: data.template
+            };
+            
+            // Display the template
+            const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+            if (activePanel && activePanel.id === 'dashboard') {
+                displayDashboardTemplate();
+            } else {
+                displayTemplate();
+            }
+            
+            // Save to template library
+            savedTemplates.push(JSON.parse(JSON.stringify(currentTemplate)));
+            localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
+            
+            log(`✅ Imported monthly meetings schedule with ${templateItems.length} items`, 'success');
+            showNotification(`Schedule imported successfully with ${templateItems.length} meetings`, 'success');
+        } else {
+            showNotification(data.message || 'Error generating schedule', 'error');
+        }
+    } catch (error) {
+        console.error('Error generating monthly schedule:', error);
+        showNotification('Error generating schedule', 'error');
+    }
+};
+
+// Helper function to parse schedule template content into items
+function parseScheduleTemplate(templateContent) {
+    const items = [];
+    const lines = templateContent.split('\n');
+    let currentItem = null;
+    
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        if (trimmedLine.startsWith('item=')) {
+            if (currentItem) {
+                items.push(currentItem);
+            }
+            currentItem = {
+                file_path: trimmedLine.substring(5),
+                title: 'Live Input',
+                duration_seconds: 0
+            };
+        } else if (currentItem && trimmedLine.startsWith('start=')) {
+            currentItem.start_time = trimmedLine.substring(6);
+        } else if (currentItem && trimmedLine.startsWith('end=')) {
+            currentItem.end_time = trimmedLine.substring(4);
+            // Calculate duration from start and end times
+            const start = parseTimeString(currentItem.start_time);
+            const end = parseTimeString(currentItem.end_time);
+            if (start && end) {
+                currentItem.duration_seconds = (end - start);
+            }
+        } else if (trimmedLine === '}' && currentItem) {
+            items.push(currentItem);
+            currentItem = null;
+        }
+    }
+    
+    return items;
+}
+
+// Helper function to parse time string to seconds
+function parseTimeString(timeStr) {
+    if (!timeStr) return null;
+    
+    // Handle weekly format (e.g., "mon 10:00 am")
+    if (timeStr.includes(' ')) {
+        const parts = timeStr.split(' ');
+        if (parts.length >= 3) {
+            // Extract just the time part
+            timeStr = parts.slice(1).join(' ');
+        }
+    }
+    
+    // Handle different time formats
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+    if (match) {
+        let hours = parseInt(match[1]);
+        const minutes = parseInt(match[2]);
+        const isPM = match[3].toLowerCase() === 'pm';
+        
+        if (isPM && hours !== 12) hours += 12;
+        if (!isPM && hours === 12) hours = 0;
+        
+        return hours * 3600 + minutes * 60;
+    }
+    
+    return null;
+}
+
+// Helper function to download template
+window.downloadTemplate = function(filename, content) {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+};
+
+// Helper function to copy template to clipboard
+window.copyTemplateToClipboard = function(content) {
+    navigator.clipboard.writeText(content).then(() => {
+        showNotification('Template copied to clipboard', 'success');
+    }).catch(err => {
+        console.error('Error copying to clipboard:', err);
+        showNotification('Error copying to clipboard', 'error');
+    });
+};
+
+// Update date/week/month change handlers - attach them when modals are opened
+window.attachDailyHandlers = function() {
+    document.getElementById('dailyMeetingDate')?.addEventListener('change', loadDailyMeetings);
+};
+
+window.attachWeeklyHandlers = function() {
+    document.getElementById('weeklyMeetingYear')?.addEventListener('change', loadWeeklyMeetings);
+    document.getElementById('weeklyMeetingWeek')?.addEventListener('change', loadWeeklyMeetings);
+};
+
+window.attachMonthlyHandlers = function() {
+    document.getElementById('monthlyMeetingYear')?.addEventListener('change', loadMonthlyMeetings);
+    document.getElementById('monthlyMeetingMonth')?.addEventListener('change', loadMonthlyMeetings);
+};

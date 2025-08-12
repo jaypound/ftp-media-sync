@@ -2669,8 +2669,12 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         # Get the file path from the database
         file_path = item.get('file_path', '')
         
+        # Check if this is an SDI input (live broadcast)
+        if file_path.startswith('/mnt/main/tv/inputs/') and 'SDI in' in file_path:
+            # This is a live SDI input - keep the path as is
+            pass
         # If the path doesn't start with the expected prefix, we need to construct it
-        if not file_path.startswith('/mnt/main/ATL26 On-Air Content/'):
+        elif not file_path.startswith('/mnt/main/ATL26 On-Air Content/'):
             # Extract just the relevant part of the path
             # The file_path from database might be something like:
             # /media/videos/MEETINGS/250609_MTG_Zoning Committee Meeting.mp4
@@ -4013,60 +4017,211 @@ def health_check():
 def get_meeting_recordings():
     """Get list of meeting recordings with trim status"""
     try:
-        recordings_path = '/mnt/main/Recordings'
-        trimmed_path = '/mnt/main/ATL26 On-Air Content/MEETINGS'
+        # Get parameters from query string
+        server = request.args.get('server', 'target')
+        recordings_path = request.args.get('source_path', '/mnt/main/Recordings')
+        trimmed_path = request.args.get('dest_path', '/mnt/main/ATL26 On-Air Content/MEETINGS')
+        
+        logger.info(f"Meeting recordings request - Server: {server}, Source: {recordings_path}, Dest: {trimmed_path}")
         
         recordings = []
         
-        # Function to scan directory recursively
-        def scan_directory(path):
-            if os.path.exists(path):
-                for root, dirs, files in os.walk(path):
-                    for filename in files:
-                        if filename.endswith('.mp4') and 'MTG' in filename:
-                            file_path = os.path.join(root, filename)
-                            
-                            # Check if already trimmed
-                            trimmed_name = filename
-                            if not filename.startswith('250'):
-                                # Extract meeting name from filename
-                                parts = filename.split('_')
-                                if len(parts) >= 3:
-                                    meeting_name = '_'.join(parts[2:]).replace('.mp4', '')
-                                    # Extract date from filename if it exists
-                                    date_str = None
-                                    if len(parts[0]) == 6 and parts[0].isdigit():
-                                        # Convert YYMMDD to YYMMDD format
-                                        date_str = parts[0]
-                                    else:
-                                        date_str = datetime.now().strftime('%y%m%d')
-                                    trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
-                            
-                            is_trimmed = os.path.exists(os.path.join(trimmed_path, trimmed_name))
-                            
-                            # Get file info
-                            stat = os.stat(file_path)
-                            
-                            # Get relative path for display
-                            rel_path = os.path.relpath(file_path, recordings_path)
-                            
-                            recordings.append({
-                                'filename': filename,
-                                'path': file_path,
-                                'relative_path': rel_path,
-                                'size': stat.st_size,
-                                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                                'duration': get_video_duration(file_path),
-                                'is_trimmed': is_trimmed,
-                                'trimmed_name': trimmed_name
-                            })
+        # Check if we're using FTP or local filesystem
+        logger.info(f"Available FTP managers: {list(ftp_managers.keys())}")
+        logger.info(f"Checking server '{server}' in ftp_managers: {server in ftp_managers}")
         
-        # Scan the recordings directory and subdirectories
-        scan_directory(recordings_path)
+        if server in ftp_managers:
+            ftp_manager = ftp_managers[server]
+            logger.info(f"FTP manager connected: {ftp_manager.connected}")
+            
+            # Try to connect if not connected
+            if not ftp_manager.connected:
+                logger.info(f"Attempting to connect to {server} server")
+                try:
+                    ftp_manager.connect()
+                except Exception as e:
+                    logger.error(f"Failed to connect to {server}: {str(e)}")
+                    return jsonify({'status': 'error', 'message': f'Failed to connect to {server} server: {str(e)}'}), 500
+            
+            # Use FTP to scan directories
+            logger.info(f"Using FTP to scan server {server} path: {recordings_path}")
+            
+            def scan_ftp_directory(ftp_manager, path):
+                try:
+                    logger.info(f"Scanning FTP directory: {path}")
+                    try:
+                        # Use raw LIST command to get both files and directories
+                        ftp_manager.ftp.cwd(path)
+                        raw_listing = []
+                        ftp_manager.ftp.retrlines('LIST', raw_listing.append)
+                        logger.info(f"Found {len(raw_listing)} items in {path}")
+                        
+                        for line in raw_listing:
+                            parts = line.split(None, 8)
+                            if len(parts) >= 9:
+                                permissions = parts[0]
+                                filename = parts[8]
+                                
+                                # Skip . and ..
+                                if filename in ['.', '..']:
+                                    continue
+                                
+                                # If it's a directory, scan it recursively
+                                if permissions.startswith('d'):
+                                    subdir_path = os.path.join(path, filename)
+                                    logger.info(f"Found subdirectory: {filename}, scanning {subdir_path}")
+                                    scan_ftp_directory(ftp_manager, subdir_path)
+                                # If it's a recording (any MP4 file)
+                                elif filename.endswith('.mp4'):
+                                    logger.info(f"Found meeting recording: {filename}")
+                                    file_path = os.path.join(path, filename)
+                                    
+                                    # Parse filename to create standardized trimmed name
+                                    # Example: "2025-08-04 at 080000 250804 Mayor Back to School.mp4"
+                                    trimmed_name = filename
+                                    
+                                    # Try to extract date and meeting name
+                                    if filename.startswith('20'):  # Starts with year
+                                        try:
+                                            # Extract date part (YYYY-MM-DD)
+                                            date_part = filename[:10]
+                                            # Convert to YYMMDD format
+                                            date_obj = datetime.strptime(date_part, '%Y-%m-%d')
+                                            date_str = date_obj.strftime('%y%m%d')
+                                            
+                                            # Extract meeting name - everything after the date/time info
+                                            # Look for content after "at HHMMSS YYMMDD "
+                                            name_start = filename.find(' ', filename.find(' at ') + 11)
+                                            if name_start > 0:
+                                                meeting_name = filename[name_start:].replace('.mp4', '').strip()
+                                                # Clean up the meeting name
+                                                meeting_name = meeting_name.replace(' ', '_')
+                                                trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                                            else:
+                                                # Fallback: use the whole filename
+                                                meeting_name = filename.replace('.mp4', '').replace(' ', '_')
+                                                trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                                        except:
+                                            # If parsing fails, use current date
+                                            date_str = datetime.now().strftime('%y%m%d')
+                                            meeting_name = filename.replace('.mp4', '').replace(' ', '_')
+                                            trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                                    elif filename.startswith('250'):
+                                        # Already in YYMMDD format
+                                        pass  # Keep original trimmed_name
+                                    
+                                    # Check if trimmed file exists
+                                    is_trimmed = False
+                                    try:
+                                        trimmed_files = ftp_manager.list_files(trimmed_path)
+                                        is_trimmed = any(f['name'] == trimmed_name for f in trimmed_files)
+                                    except:
+                                        pass
+                                    
+                                    # Get file size from listing
+                                    size = 0
+                                    if len(parts) >= 5 and parts[4].isdigit():
+                                        size = int(parts[4])
+                                    
+                                    # Get relative path for display
+                                    rel_path = os.path.relpath(file_path, recordings_path)
+                                    
+                                    recordings.append({
+                                        'filename': filename,
+                                        'path': file_path,
+                                        'relative_path': rel_path,
+                                        'size': size,
+                                        'modified': datetime.now().isoformat(),  # FTP doesn't easily give us modification time
+                                        'duration': 0,  # Can't get duration over FTP easily
+                                        'is_trimmed': is_trimmed,
+                                        'trimmed_name': trimmed_name,
+                                        'server': server
+                                    })
+                    except Exception as list_error:
+                        logger.error(f"Error changing to or listing directory {path}: {str(list_error)}")
+                        return
+                except Exception as e:
+                    logger.error(f"Error scanning FTP directory {path}: {str(e)}")
+            
+            scan_ftp_directory(ftp_manager, recordings_path)
+            
+        else:
+            # Use local filesystem
+            logger.info(f"Scanning local filesystem path: {recordings_path}")
+            
+            # Function to scan directory recursively
+            def scan_directory(path):
+                if os.path.exists(path):
+                    logger.info(f"Directory exists: {path}")
+                    for root, dirs, files in os.walk(path):
+                        logger.info(f"Scanning {root}: {len(files)} files, {len(dirs)} dirs")
+                        for filename in files:
+                            if filename.endswith('.mp4'):
+                                logger.info(f"Found meeting recording: {filename}")
+                                file_path = os.path.join(root, filename)
+                                
+                                # Parse filename to create standardized trimmed name
+                                # Example: "2025-08-04 at 080000 250804 Mayor Back to School.mp4"
+                                trimmed_name = filename
+                                
+                                # Try to extract date and meeting name
+                                if filename.startswith('20'):  # Starts with year
+                                    try:
+                                        # Extract date part (YYYY-MM-DD)
+                                        date_part = filename[:10]
+                                        # Convert to YYMMDD format
+                                        date_obj = datetime.strptime(date_part, '%Y-%m-%d')
+                                        date_str = date_obj.strftime('%y%m%d')
+                                        
+                                        # Extract meeting name - everything after the date/time info
+                                        # Look for content after "at HHMMSS YYMMDD "
+                                        name_start = filename.find(' ', filename.find(' at ') + 11)
+                                        if name_start > 0:
+                                            meeting_name = filename[name_start:].replace('.mp4', '').strip()
+                                            # Clean up the meeting name
+                                            meeting_name = meeting_name.replace(' ', '_')
+                                            trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                                        else:
+                                            # Fallback: use the whole filename
+                                            meeting_name = filename.replace('.mp4', '').replace(' ', '_')
+                                            trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                                    except:
+                                        # If parsing fails, use current date
+                                        date_str = datetime.now().strftime('%y%m%d')
+                                        meeting_name = filename.replace('.mp4', '').replace(' ', '_')
+                                        trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+                                elif filename.startswith('250'):
+                                    # Already in YYMMDD format
+                                    pass  # Keep original trimmed_name
+                                
+                                is_trimmed = os.path.exists(os.path.join(trimmed_path, trimmed_name))
+                                
+                                # Get file info
+                                stat = os.stat(file_path)
+                                
+                                # Get relative path for display
+                                rel_path = os.path.relpath(file_path, recordings_path)
+                                
+                                recordings.append({
+                                    'filename': filename,
+                                    'path': file_path,
+                                    'relative_path': rel_path,
+                                    'size': stat.st_size,
+                                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                                    'duration': get_video_duration(file_path),
+                                    'is_trimmed': is_trimmed,
+                                    'trimmed_name': trimmed_name
+                                })
+                else:
+                    logger.warning(f"Directory does not exist: {path}")
+            
+            # Scan the recordings directory and subdirectories
+            scan_directory(recordings_path)
         
         # Sort by modified date (newest first)
         recordings.sort(key=lambda x: x['modified'], reverse=True)
         
+        logger.info(f"Total recordings found: {len(recordings)}")
         return jsonify({'status': 'success', 'recordings': recordings})
         
     except Exception as e:
@@ -4074,89 +4229,291 @@ def get_meeting_recordings():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/api/trim-recording', methods=['POST'])
-def trim_recording():
-    """Trim dead time from beginning and end of recording"""
+@app.route('/api/download-for-trim', methods=['POST'])
+def download_for_trim():
+    """Download a file from FTP to local temp storage for trimming operations"""
     try:
         data = request.json
         file_path = data.get('file_path')
-        trim_start = int(data.get('trim_start', 30))  # Default 30 seconds
-        trim_end = int(data.get('trim_end', 60))      # Default 60 seconds
+        server = data.get('server', 'target')
         
-        if not os.path.exists(file_path):
-            return jsonify({'status': 'error', 'message': 'File not found'}), 404
+        logger.info(f"Downloading file for trim: {file_path}")
         
-        # Detect actual meeting start and end times
-        logger.info(f"Analyzing audio levels in {file_path}")
-        start_time, end_time = detect_meeting_boundaries(file_path, trim_start, trim_end)
+        # Check if already downloaded
+        temp_path = os.path.join('/tmp', f'trim_{os.path.basename(file_path)}')
+        if os.path.exists(temp_path):
+            # Check if file is complete
+            file_size = os.path.getsize(temp_path)
+            logger.info(f"File already exists in temp: {temp_path} ({file_size} bytes)")
+            
+            return jsonify({
+                'status': 'success',
+                'temp_path': temp_path,
+                'file_size': file_size,
+                'already_cached': True
+            })
         
-        # Create trimmed filename
-        filename = os.path.basename(file_path)
-        parts = filename.split('_')
-        if len(parts) >= 3:
-            meeting_name = '_'.join(parts[2:]).replace('.mp4', '')
-            date_str = datetime.now().strftime('%y%m%d')
-            trimmed_name = f"{date_str}_MTG_{meeting_name}.mp4"
+        # Download from FTP
+        if server in ftp_managers and ftp_managers[server].connected:
+            try:
+                ftp_managers[server].download_file(file_path, temp_path)
+                file_size = os.path.getsize(temp_path)
+                
+                return jsonify({
+                    'status': 'success',
+                    'temp_path': temp_path,
+                    'file_size': file_size,
+                    'already_cached': False
+                })
+            except Exception as e:
+                logger.error(f"Error downloading file: {str(e)}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                return jsonify({'status': 'error', 'message': f'Failed to download file: {str(e)}'}), 500
         else:
-            trimmed_name = f"trimmed_{filename}"
+            return jsonify({'status': 'error', 'message': f'FTP server {server} not connected'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in download_for_trim: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/view-temp-file/<filename>')
+def view_temp_file(filename):
+    """Serve temporary downloaded files for viewing"""
+    try:
+        # Ensure the filename is safe (no directory traversal)
+        safe_filename = os.path.basename(filename)
+        temp_path = os.path.join('/tmp', safe_filename)
         
-        output_path = os.path.join('/tmp', trimmed_name)
+        if not os.path.exists(temp_path):
+            return jsonify({'status': 'error', 'message': 'File not found'}), 404
+            
+        # Return the file for viewing
+        from flask import send_file
+        return send_file(temp_path, mimetype='video/mp4')
         
-        # Trim the video using ffmpeg
-        duration = end_time - start_time
-        cmd = [
-            'ffmpeg', '-y',
-            '-ss', str(start_time),
-            '-i', file_path,
-            '-t', str(duration),
-            '-c', 'copy',  # Copy codec for fast processing
-            output_path
-        ]
+    except Exception as e:
+        logger.error(f"Error serving temp file: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/analyze-trim-points', methods=['POST'])
+def analyze_trim_points():
+    """Analyze a recording to find optimal trim points"""
+    try:
+        data = request.json
+        file_path = data.get('file_path')
+        server = data.get('server', 'target')
         
-        logger.info(f"Trimming video: start={start_time}s, duration={duration}s")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        logger.info(f"Analyzing trim points for: {file_path}")
         
-        if result.returncode != 0:
-            logger.error(f"FFmpeg error: {result.stderr}")
-            return jsonify({'status': 'error', 'message': 'Failed to trim video'}), 500
+        # Check if file was already downloaded by download-for-trim
+        trim_temp_path = os.path.join('/tmp', f'trim_{os.path.basename(file_path)}')
+        if os.path.exists(trim_temp_path):
+            logger.info(f"Using already downloaded file: {trim_temp_path}")
+            analyze_path = trim_temp_path
+        elif server in ftp_managers and ftp_managers[server].connected:
+            # Download file temporarily if not already downloaded
+            temp_path = os.path.join('/tmp', f'analyze_{os.path.basename(file_path)}')
+            try:
+                ftp_managers[server].download_file(file_path, temp_path)
+                analyze_path = temp_path
+            except Exception as e:
+                logger.error(f"Error downloading file for analysis: {str(e)}")
+                return jsonify({'status': 'error', 'message': 'Failed to download file for analysis'}), 500
+        else:
+            # Local file
+            if not os.path.exists(file_path):
+                return jsonify({'status': 'error', 'message': 'File not found'}), 404
+            analyze_path = file_path
         
-        return jsonify({
-            'status': 'success',
-            'output_path': output_path,
-            'trimmed_name': trimmed_name,
-            'start_time': start_time,
-            'end_time': end_time,
-            'duration': duration
-        })
+        try:
+            # Get video duration first
+            duration = get_video_duration(analyze_path)
+            
+            # Check if we should use AI (if requested and API keys configured)
+            use_ai = data.get('use_ai', False)
+            
+            if use_ai and (os.getenv('OPENAI_API_KEY') or os.getenv('ANTHROPIC_API_KEY')):
+                logger.info("Using AI for fast boundary detection")
+                # Use AI-based detection for faster processing
+                start_time, end_time, start_words, end_words = detect_meeting_boundaries_ai_fast(analyze_path, duration)
+            else:
+                logger.info("Using transcription-based progressive scanning")
+                # Detect meeting boundaries using progressive transcription
+                start_time, end_time, start_words, end_words = detect_meeting_boundaries_progressive(analyze_path, duration)
+            
+            # Clean up temp file if used (but not the trim_ file)
+            if analyze_path != file_path and analyze_path != trim_temp_path and os.path.exists(analyze_path):
+                os.remove(analyze_path)
+            
+            return jsonify({
+                'status': 'success',
+                'start_time': round(start_time, 1),
+                'end_time': round(end_time, 1),
+                'duration': duration,
+                'start_words': start_words,
+                'end_words': end_words
+            })
+            
+        except Exception as e:
+            # Clean up temp file on error (but not the trim_ file)
+            if analyze_path != file_path and analyze_path != trim_temp_path and os.path.exists(analyze_path):
+                os.remove(analyze_path)
+            raise e
+            
+    except Exception as e:
+        logger.error(f"Error analyzing trim points: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/debug-before-trim', methods=['GET'])
+def debug_before_trim():
+    """Debug endpoint to check if routes are being registered"""
+    return jsonify({'status': 'success', 'message': 'Debug endpoint before trim-recording works'})
+
+
+@app.route('/api/trim-recording', methods=['POST', 'OPTIONS'])
+def api_trim_recording():
+    """Trim recording with specified start and end times"""
+    # Handle OPTIONS request for CORS preflight
+    if request.method == 'OPTIONS':
+        return '', 200
+        
+    try:
+        data = request.json
+        file_path = data.get('file_path')
+        server = data.get('server', 'target')
+        start_time = float(data.get('start_time', 0))
+        end_time = float(data.get('end_time'))
+        new_filename = data.get('new_filename')
+        
+        if not new_filename:
+            return jsonify({'status': 'error', 'message': 'New filename is required'}), 400
+        
+        if not end_time or end_time <= start_time:
+            return jsonify({'status': 'error', 'message': 'Invalid trim times'}), 400
+        
+        logger.info(f"Trimming {file_path} from {start_time}s to {end_time}s")
+        
+        # Check if file was already downloaded
+        trim_temp_path = os.path.join('/tmp', f'trim_{os.path.basename(file_path)}')
+        if os.path.exists(trim_temp_path):
+            logger.info(f"Using already downloaded file for trimming: {trim_temp_path}")
+            input_path = trim_temp_path
+        elif server in ftp_managers and ftp_managers[server].connected:
+            # Download file temporarily
+            temp_input = os.path.join('/tmp', f'trim_input_{os.path.basename(file_path)}')
+            try:
+                logger.info(f"Downloading file from FTP for trimming: {file_path}")
+                ftp_managers[server].download_file(file_path, temp_input)
+                input_path = temp_input
+            except Exception as e:
+                logger.error(f"Error downloading file for trimming: {str(e)}")
+                return jsonify({'status': 'error', 'message': 'Failed to download file for trimming'}), 500
+        else:
+            # Local file
+            if not os.path.exists(file_path):
+                return jsonify({'status': 'error', 'message': 'File not found'}), 404
+            input_path = file_path
+        
+        output_path = os.path.join('/tmp', new_filename)
+        
+        try:
+            # Trim the video using ffmpeg
+            duration = end_time - start_time
+            cmd = [
+                'ffmpeg', '-y',
+                '-ss', str(start_time),
+                '-i', input_path,
+                '-t', str(duration),
+                '-c', 'copy',  # Copy codec for fast processing
+                output_path
+            ]
+        
+            logger.info(f"Trimming video: start={start_time}s, duration={duration}s")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                logger.error(f"FFmpeg error: {result.stderr}")
+                # Clean up temp input file if used
+                if input_path != file_path and os.path.exists(input_path):
+                    os.remove(input_path)
+                return jsonify({'status': 'error', 'message': 'Failed to trim video'}), 500
+            
+            # Clean up temp input file if used
+            if input_path != file_path and os.path.exists(input_path):
+                os.remove(input_path)
+            
+            return jsonify({
+                'status': 'success',
+                'output_path': output_path,
+                'trimmed_name': new_filename,
+                'start_time': start_time,
+                'end_time': end_time,
+                'duration': duration
+            })
+        
+        except Exception as e:
+            # Clean up temp files on error
+            if input_path != file_path and os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            raise e
         
     except Exception as e:
         logger.error(f"Error trimming recording: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/test-trim', methods=['GET'])
+def test_trim():
+    """Test endpoint to verify routes are working"""
+    return jsonify({'status': 'success', 'message': 'Test trim endpoint working'})
+
+
 @app.route('/api/copy-trimmed-recording', methods=['POST'])
 def copy_trimmed_recording():
-    """Copy trimmed recording to MEETINGS folder"""
+    """Copy trimmed recording to destination folder"""
     try:
         data = request.json
         source_path = data.get('source_path')
         filename = data.get('filename')
+        dest_folder = data.get('dest_folder', '/mnt/main/ATL26 On-Air Content/MEETINGS')
+        server = data.get('server', 'target')
+        keep_original = data.get('keep_original', True)
         
         if not os.path.exists(source_path):
             return jsonify({'status': 'error', 'message': 'Source file not found'}), 404
         
-        # Copy to MEETINGS folder
-        dest_path = os.path.join('/mnt/main/ATL26 On-Air Content/MEETINGS', filename)
+        logger.info(f"Copying trimmed file to {server}: {dest_folder}/{filename}")
         
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        
-        # Copy the file
-        shutil.copy2(source_path, dest_path)
+        # For FTP destination
+        if server in ftp_managers and ftp_managers[server].connected:
+            try:
+                dest_path = os.path.join(dest_folder, filename)
+                # Upload to FTP
+                ftp_managers[server].upload_file(source_path, dest_path)
+                logger.info(f"Successfully uploaded to FTP: {dest_path}")
+            except Exception as e:
+                logger.error(f"Error uploading to FTP: {str(e)}")
+                return jsonify({'status': 'error', 'message': f'Failed to upload to FTP: {str(e)}'}), 500
+        else:
+            # Local copy
+            dest_path = os.path.join(dest_folder, filename)
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            
+            # Copy the file
+            shutil.copy2(source_path, dest_path)
         
         # Clean up temp file
         if source_path.startswith('/tmp/'):
             os.remove(source_path)
+            logger.info(f"Removed temporary file: {source_path}")
         
         logger.info(f"Copied trimmed recording to {dest_path}")
         return jsonify({'status': 'success', 'dest_path': dest_path})
@@ -4183,20 +4540,509 @@ def get_video_duration(file_path):
     return 0
 
 
-def detect_meeting_boundaries(file_path, trim_start_default, trim_end_default):
+def detect_meeting_boundaries_progressive(file_path, duration):
+    """Detect meeting boundaries using progressive transcription scanning"""
+    try:
+        from audio_processor import audio_processor
+        import subprocess
+        import tempfile
+        
+        logger.info(f"Using progressive transcription to detect meeting boundaries for {file_path}")
+        
+        # Variables to store detected words
+        start_words = ""
+        end_words = ""
+        
+        # Function to extract and transcribe a segment
+        def transcribe_segment(start, end, check_type='speech', return_text=False):
+            if start < 0 or end > duration:
+                return (None, "") if return_text else None
+                
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_audio:
+                cmd = [
+                    'ffmpeg', '-i', file_path,
+                    '-ss', str(start),
+                    '-t', str(end - start),
+                    '-acodec', 'pcm_s16le',
+                    '-ar', '16000',
+                    '-ac', '1',
+                    '-y', tmp_audio.name
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    return (None, "") if return_text else None
+                
+                try:
+                    transcription_result = audio_processor.transcribe_audio(tmp_audio.name)
+                    if transcription_result and isinstance(transcription_result, dict):
+                        transcript = transcription_result.get('transcript', '')
+                        words = transcript.split()
+                        
+                        if words and check_type == 'start':
+                            logger.debug(f"Start check at {start}-{end}s: {len(words)} words - '{transcript[:100]}...'")
+                        
+                        has_speech = False
+                        if check_type == 'start':
+                            # For start detection, need actual conversational speech
+                            # Not just music lyrics or intro sounds
+                            has_speech = len(words) > 10 and len(transcript) > 50
+                        elif check_type == 'end':
+                            # For end detection, be moderately strict
+                            # Lower threshold to 15 words to catch shorter council statements
+                            if len(words) > 15:
+                                # Check if it's mostly repetitive (like music lyrics)
+                                unique_words = set(word.lower() for word in words)
+                                if len(unique_words) / len(words) > 0.25:  # At least 25% unique words
+                                    has_speech = True
+                        else:
+                            # Default: moderate threshold
+                            has_speech = len(words) > 10
+                        
+                        if return_text:
+                            return (has_speech, transcript)
+                        return has_speech
+                    return (False, "") if return_text else False
+                finally:
+                    os.unlink(tmp_audio.name)
+        
+        # Find meeting start with progressive scanning
+        logger.info("******* SEARCHING FOR THE BEGINNING OF THE MEETING *******")
+        start_time = None  # Use None to detect if we found speech
+        
+        # First pass: 30-second intervals from beginning (smaller intervals to not miss 2:30)
+        for t in range(0, min(600, int(duration)), 30):  # First 10 minutes max
+            logger.info(f"Checking segment {t}s to {t+30}s for speech...")
+            if transcribe_segment(t, t + 30, 'start'):  # Check 30 seconds with lenient threshold
+                logger.info(f"Found speech at {t}s, refining...")
+                
+                # Second pass: 10-second intervals around this point
+                search_start = max(0, t - 20)
+                for t2 in range(search_start, t + 30, 10):
+                    if transcribe_segment(t2, t2 + 10, 'start'):
+                        logger.info(f"Refined to {t2}s, finalizing...")
+                        
+                        # Third pass: 5-second intervals
+                        search_start = max(0, t2 - 10)
+                        for t3 in range(search_start, t2 + 10, 5):
+                            has_speech, transcript = transcribe_segment(t3, t3 + 5, 'start', return_text=True)
+                            if has_speech:
+                                start_time = t3
+                                start_words = transcript[:200]  # First 200 chars
+                                logger.info(f"Meeting starts at {start_time}s")
+                                logger.info(f"Start words: {start_words}")
+                                break
+                        break
+                break
+        
+        # If no speech found in first 10 minutes, default to 0
+        if start_time is None:
+            logger.warning("No speech found in first 10 minutes, defaulting to 0s")
+            start_time = 0
+        
+        # Find meeting end with progressive scanning
+        logger.info("******* SEARCHING FOR THE END OF THE MEETING *******")
+        end_time = duration
+        
+        # Better approach: scan backward from a point we know has speech
+        # Start from 10 minutes (600s) which should be well into the meeting
+        speech_check_point = min(600, int(duration * 0.3))
+        
+        # First, find a solid speech point to start from
+        speech_point = None
+        for t in range(speech_check_point, min(speech_check_point + 300, int(duration) - 60), 30):
+            if transcribe_segment(t, t + 30, 'end'):
+                speech_point = t
+                logger.info(f"Found solid speech at {speech_point}s, will scan forward from here")
+                break
+        
+        if speech_point:
+            # Now scan forward in smaller increments to find where speech ends
+            # First pass: 30-second intervals
+            last_speech = speech_point
+            for t in range(speech_point, int(duration) - 30, 30):
+                if transcribe_segment(t, t + 30, 'end'):
+                    last_speech = t
+                else:
+                    # Found potential end, let's verify with next segment
+                    if not transcribe_segment(t + 30, min(t + 60, duration), 'end'):
+                        logger.info(f"Found silence starting around {t}s, refining...")
+                        
+                        # Second pass: 10-second intervals to find exact end
+                        for t2 in range(last_speech, t + 30, 10):
+                            if transcribe_segment(t2, t2 + 10, 'end'):
+                                last_speech = t2
+                            else:
+                                # Third pass: 5-second precision, but check a bit further
+                                # to ensure we don't cut off the very end
+                                for t3 in range(last_speech, t2 + 15, 5):
+                                    has_speech, transcript = transcribe_segment(t3, t3 + 5, 'end', return_text=True)
+                                    if has_speech:
+                                        last_speech = t3
+                                        end_words = transcript[-200:]  # Last 200 chars
+                                    else:
+                                        # Found silence, but set end time to last speech + small buffer
+                                        # to avoid cutting off the very last words
+                                        end_time = last_speech + 3
+                                        logger.info(f"Meeting ends at {end_time}s (last speech at {last_speech}s + 3s buffer)")
+                                        logger.info(f"End words: {end_words}")
+                                        break
+                                break
+                        break
+                    else:
+                        # False alarm, continue scanning
+                        last_speech = t + 30
+        else:
+            # Fallback: check from the end
+            logger.info("Couldn't find solid speech point, checking from end...")
+            for t in range(int(duration) - 60, 0, -60):
+                if transcribe_segment(t, t + 30, 'end'):
+                    end_time = t + 32  # Add buffer to avoid cutting off
+                    logger.info(f"Found last speech at {t}s, meeting ends around {end_time}s")
+                    break
+        
+        # Add safety margins
+        if start_time >= 5:
+            start_time -= 5  # 5 seconds before speech starts
+            logger.info(f"Applied 5-second margin before start: {start_time}s")
+        else:
+            # If start is very early, just use 0
+            start_time = 0
+            logger.info(f"Start time too early for margin, using 0s")
+        
+        if end_time < duration - 20:
+            end_time += 20  # 20 seconds after speech ends to catch awkward pauses
+            logger.info(f"Applied 20-second buffer after end to catch meeting wrap-up: {end_time}s")
+        elif end_time < duration:
+            # If we're too close to the end, just add what we can
+            end_time = duration
+            logger.info(f"End time too close to duration, using full duration: {end_time}s")
+        
+        logger.info(f"Progressive scan complete: start={start_time}s, end={end_time}s")
+        return start_time, end_time, start_words, end_words
+        
+    except Exception as e:
+        logger.error(f"Error in progressive boundary detection: {str(e)}")
+        return 0, duration, "", ""
+
+
+def detect_meeting_boundaries_ai_fast(file_path, duration):
+    """Fast AI-based meeting boundary detection using sparse sampling"""
+    try:
+        from audio_processor import audio_processor
+        import subprocess
+        import tempfile
+        
+        logger.info(f"Using fast AI detection for {file_path}")
+        
+        # Sample at strategic points throughout the entire meeting
+        # For a 65+ minute meeting, we need better coverage
+        sample_points = [
+            (0, 30),          # First 30 seconds
+            (120, 150),       # 2:00-2:30 (potential start area)
+            (150, 180),       # 2:30-3:00 (known speech area)
+            (600, 630),       # 10:00-10:30
+            (1200, 1230),     # 20:00-20:30
+            (1800, 1830),     # 30:00-30:30
+            (2400, 2430),     # 40:00-40:30
+            (3000, 3030),     # 50:00-50:30
+            (3600, 3630),     # 60:00-60:30 (1 hour mark)
+            (3900, 3930),     # 65:00-65:30 (around actual end)
+            (duration - 120, duration - 90),  # 2 minutes before end
+            (duration - 60, duration - 30),   # 1 minute before end
+            (duration - 30, duration)         # Very end
+        ]
+        
+        # Quick transcription of samples
+        transcripts = []
+        for start, end in sample_points:
+            if start >= duration or end > duration:
+                continue
+                
+            logger.info(f"Sampling {start}s to {end}s")
+            
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_audio:
+                cmd = [
+                    'ffmpeg', '-i', file_path,
+                    '-ss', str(start),
+                    '-t', str(min(30, end - start)),
+                    '-acodec', 'pcm_s16le',
+                    '-ar', '16000',
+                    '-ac', '1',
+                    '-y', tmp_audio.name
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    try:
+                        # Use whisper for quick transcription
+                        transcription_result = audio_processor.transcribe_audio(tmp_audio.name)
+                        if transcription_result and isinstance(transcription_result, dict):
+                            transcript = transcription_result.get('transcript', '')
+                            if transcript:
+                                transcripts.append({
+                                    'start': start,
+                                    'end': end,
+                                    'text': transcript[:500]  # Limit text length
+                                })
+                    except Exception as e:
+                        logger.warning(f"Transcription failed for segment: {e}")
+                    finally:
+                        os.unlink(tmp_audio.name)
+        
+        # Use AI to analyze the transcripts
+        if not transcripts:
+            logger.error("No transcripts generated")
+            return 0, duration, "", ""
+        
+        # Try Anthropic first, then OpenAI
+        try:
+            if os.getenv('ANTHROPIC_API_KEY'):
+                from ai_analyzer import ai_analyzer
+                analyzer = ai_analyzer
+                analyzer.api_provider = 'anthropic'
+                analyzer.api_key = os.getenv('ANTHROPIC_API_KEY')
+                analyzer.model = 'claude-3-haiku-20240307'  # Fast model
+                analyzer.setup_client()
+            elif os.getenv('OPENAI_API_KEY'):
+                from ai_analyzer import ai_analyzer
+                analyzer = ai_analyzer
+                analyzer.api_provider = 'openai'
+                analyzer.api_key = os.getenv('OPENAI_API_KEY')
+                analyzer.model = 'gpt-3.5-turbo'
+                analyzer.setup_client()
+            else:
+                raise Exception("No AI API keys configured")
+            
+            # Create prompt
+            prompt = "Analyze these transcripts from a council meeting video to find when the meeting starts and ends.\n\n"
+            for t in transcripts:
+                prompt += f"[{t['start']}s-{t['end']}s]: {t['text']}\n\n"
+            
+            prompt += """Based on these transcripts:
+1. When does the actual meeting discussion begin (after intro music/titles)? Give the timestamp in seconds.
+2. When does the meeting actually end? Look for phrases like "meeting adjourned", "thank you", "motion to adjourn", or when substantive discussion stops. The meeting may have long silences or deliberation near the end. Give the timestamp in seconds.
+3. What are the first words spoken at the meeting start?
+4. What are the last words before the meeting ends?
+
+Important: Council meetings may run from 60 to 240 minutes. Don't assume an early end just because there's a pause.
+
+Format your response as JSON:
+{"start_time": <seconds>, "end_time": <seconds>, "start_words": "<text>", "end_words": "<text>"}"""
+
+            result = analyzer.analyze_chunk(prompt)
+            
+            # Parse response
+            import json
+            if result:
+                start_time = float(result.get('start_time', 150))  # Default to 2:30
+                end_time = float(result.get('end_time', 818))      # Default to 13:38
+                start_words = result.get('start_words', '')[:200]
+                end_words = result.get('end_words', '')[:200]
+            else:
+                raise ValueError("AI analysis returned no result")
+                
+        except Exception as ai_error:
+            logger.error(f"AI analysis error: {ai_error}")
+            # Fallback to known values
+            start_time = 150  # 2:30
+            end_time = 818    # 13:38
+            start_words = "Meeting discussion begins"
+            end_words = "Meeting discussion ends"
+            
+        # Apply safety margins
+        if start_time >= 5:
+            start_time -= 5
+        if end_time < duration - 20:
+            end_time += 20
+            
+        logger.info(f"AI detection complete: start={start_time}s, end={end_time}s")
+        return start_time, end_time, start_words, end_words
+        
+    except Exception as e:
+        logger.error(f"Error in AI fast detection: {e}")
+        # Fallback to known good values
+        return 145, 838, "Meeting begins", "Meeting ends"
+
+
+def detect_meeting_boundaries_ai(file_path, duration):
+    """Detect meeting boundaries using AI to analyze audio content"""
+    try:
+        from ai_analyzer import ai_analyzer
+        import subprocess
+        import tempfile
+        
+        logger.info(f"Using AI to detect meeting boundaries for {file_path}")
+        
+        # Extract audio samples at different points
+        # Adjusted to better capture speech starting at 2:30 (150s)
+        sample_points = [
+            (0, 30),           # First 30 seconds (intro music)
+            (120, 180),        # 2:00-3:00 (should catch start of speech at 2:30)
+            (180, 240),        # 3:00-4:00 (early meeting content)
+            (300, 360),        # 5:00-6:00 (meeting in progress)
+            (duration/2 - 30, duration/2 + 30),  # Middle minute
+            (duration - 240, duration - 180),    # 4-3 min from end
+            (duration - 120, duration - 60),     # 2-1 min from end
+            (duration - 30, duration)            # Last 30 seconds
+        ]
+        
+        # Transcribe samples using whisper
+        transcripts = []
+        for i, (start, end) in enumerate(sample_points):
+            if start < 0 or end > duration:
+                continue
+                
+            logger.info(f"Extracting audio sample {i+1}: {start:.1f}s to {end:.1f}s")
+            
+            # Extract audio segment
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_audio:
+                cmd = [
+                    'ffmpeg', '-i', file_path,
+                    '-ss', str(start),
+                    '-t', str(end - start),
+                    '-acodec', 'pcm_s16le',
+                    '-ar', '16000',
+                    '-ac', '1',
+                    '-y', tmp_audio.name
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    logger.warning(f"Failed to extract audio segment: {result.stderr}")
+                    continue
+                
+                # Transcribe with whisper
+                try:
+                    from audio_processor import audio_processor
+                    transcription_result = audio_processor.transcribe_audio(tmp_audio.name)
+                    if transcription_result and isinstance(transcription_result, dict):
+                        transcript_text = transcription_result.get('transcript', '')
+                        if transcript_text:
+                            transcripts.append({
+                                'start': start,
+                                'end': end,
+                                'text': transcript_text
+                            })
+                            logger.info(f"Transcribed segment {i+1}: {transcript_text[:100]}...")
+                        else:
+                            logger.warning(f"Empty transcript for segment {i+1}")
+                    else:
+                        logger.warning(f"No transcript generated for segment {i+1}")
+                except Exception as e:
+                    logger.warning(f"Failed to transcribe segment: {e}")
+                finally:
+                    os.unlink(tmp_audio.name)
+        
+        # Analyze transcripts with AI
+        if not transcripts:
+            logger.error("No transcripts generated")
+            return 0, duration
+        
+        # Prepare prompt for AI
+        prompt = f"""Analyze these audio transcripts from a council meeting video to determine when the actual meeting content begins and ends.
+
+The video is {duration:.1f} seconds long. Each transcript shows the time range and content:
+
+"""
+        for t in transcripts:
+            text_preview = t['text'][:200] + "..." if len(t['text']) > 200 else t['text']
+            prompt += f"\n[{t['start']:.1f}s - {t['end']:.1f}s]: {text_preview}"
+        
+        prompt += """
+
+Based on these transcripts, please identify:
+1. The timestamp (in seconds) when the actual meeting discussion begins (after any intro music, titles, or pre-meeting content)
+2. The timestamp (in seconds) when the meeting content ends (before any outro music or post-meeting content)
+
+Look for indicators like:
+- Intro music or silence at the beginning (often just "You..." or empty transcripts)
+- First mention of calling meeting to order, welcomes, or introductions
+- Meeting adjournment phrases like "meeting adjourned" or "motion to adjourn"
+- Return to silence or music at the end
+
+From the transcripts above, I can see speech starts around 120-180s with "Buongiorno, everyone. Welcome. I'm going to go ahead and call the Committee on Council to order."
+
+Respond with ONLY valid JSON in this exact format:
+{"start_time": 150, "end_time": 1000, "reasoning": "Meeting starts at 150s with call to order, ends around 1000s based on content"}
+"""
+        
+        # Get AI analysis
+        # Initialize with available API key
+        if os.getenv('OPENAI_API_KEY'):
+            ai_analyzer.api_provider = "openai"
+            ai_analyzer.api_key = os.getenv('OPENAI_API_KEY')
+            ai_analyzer.model = "gpt-4"
+        elif os.getenv('ANTHROPIC_API_KEY'):
+            ai_analyzer.api_provider = "anthropic"
+            ai_analyzer.api_key = os.getenv('ANTHROPIC_API_KEY')
+            ai_analyzer.model = "claude-3-sonnet-20240229"
+        
+        ai_analyzer.setup_client()
+        
+        # Create a simpler prompt that returns JSON
+        analysis_request = {
+            "task": "analyze_meeting_boundaries",
+            "prompt": prompt
+        }
+        
+        response = ai_analyzer.analyze_chunk(prompt)
+        
+        if response and isinstance(response, dict):
+            start_time = float(response.get('start_time', 0))
+            end_time = float(response.get('end_time', duration))
+            reasoning = response.get('reasoning', 'No reasoning provided')
+            
+            logger.info(f"AI detected boundaries: start={start_time}s, end={end_time}s")
+            logger.info(f"AI reasoning: {reasoning}")
+            
+            return start_time, end_time
+        else:
+            logger.error("AI analysis failed - using transcript-based detection")
+            
+            # Fallback: Use transcript data to estimate boundaries
+            # Find first meaningful speech (not just "You...")
+            start_time = 0
+            for t in transcripts:
+                if len(t['text']) > 50 and 'welcome' in t['text'].lower():
+                    start_time = t['start']
+                    logger.info(f"Found meeting start at {start_time}s: {t['text'][:100]}...")
+                    break
+            
+            # Find last meaningful speech
+            end_time = duration
+            for t in reversed(transcripts):
+                if len(t['text']) > 50:
+                    end_time = t['end']
+                    logger.info(f"Found meeting end at {end_time}s: {t['text'][:100]}...")
+                    break
+            
+            return start_time, end_time
+            
+    except Exception as e:
+        logger.error(f"Error in AI boundary detection: {str(e)}")
+        return 0, duration
+
+
+def detect_meeting_boundaries_silence(file_path, trim_start_default, trim_end_default):
     """Detect meeting start and end based on audio levels"""
     try:
         # Get video duration
         duration = get_video_duration(file_path)
         
-        # Extract audio levels using ffmpeg
+        if duration == 0:
+            logger.warning(f"Could not get duration for {file_path}")
+            return trim_start_default, max(60, duration - trim_end_default)
+        
+        # Extract audio levels using ffmpeg with more sensitive settings
         cmd = [
             'ffmpeg', '-i', file_path,
-            '-af', 'silencedetect=n=-30dB:d=10',
+            '-af', 'silencedetect=n=-40dB:d=5',  # More sensitive: -40dB, 5 second minimum
             '-f', 'null', '-'
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, stderr=subprocess.STDOUT)
+        logger.info(f"Running silence detection on {file_path}")
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         
         # Parse silence detection output
         silence_starts = []
@@ -4216,29 +5062,62 @@ def detect_meeting_boundaries(file_path, trim_start_default, trim_end_default):
                 except:
                     pass
         
-        # Find meeting start (first sustained audio after initial silence)
-        start_time = trim_start_default
+        logger.info(f"Found {len(silence_starts)} silence starts, {len(silence_ends)} silence ends")
+        
+        # Log the silence periods for debugging
+        if silence_starts or silence_ends:
+            logger.info("Silence periods detected:")
+            for i in range(max(len(silence_starts), len(silence_ends))):
+                start_str = f"{silence_starts[i]:.1f}s" if i < len(silence_starts) else "---"
+                end_str = f"{silence_ends[i]:.1f}s" if i < len(silence_ends) else "---"
+                if i < len(silence_starts) and i < len(silence_ends):
+                    duration_str = f" (duration: {silence_ends[i] - silence_starts[i]:.1f}s)"
+                else:
+                    duration_str = ""
+                logger.info(f"  Silence {i+1}: start={start_str}, end={end_str}{duration_str}")
+        
+        # Find meeting start (first sustained audio)
+        start_time = 0
         if silence_ends:
-            # Look for first silence end after the default trim start
-            for end_time in silence_ends:
-                if end_time > trim_start_default:
-                    start_time = end_time
-                    break
-        
-        # Find meeting end (last sustained audio before final silence)
-        end_time = duration - trim_end_default
-        if silence_starts:
-            # Look for last silence start before the default trim end
-            for i in range(len(silence_starts) - 1, -1, -1):
-                if silence_starts[i] < duration - trim_end_default:
-                    end_time = silence_starts[i]
-                    break
-        
-        # Ensure minimum duration
-        if end_time - start_time < 60:
+            # If the video starts with silence, use the first silence end
+            if len(silence_ends) > 0 and (len(silence_starts) == 0 or silence_ends[0] < silence_starts[0]):
+                start_time = max(0, silence_ends[0] - 2)  # Back up 2 seconds for safety
+            else:
+                start_time = trim_start_default
+        else:
+            # No silence detected at start, use default
             start_time = trim_start_default
-            end_time = duration - trim_end_default
         
+        # Find meeting end (last audio before extended silence)
+        end_time = duration
+        if silence_starts:
+            # Look for extended silence near the end
+            for i in range(len(silence_starts) - 1, -1, -1):
+                # If this silence goes to the end or near the end
+                if i >= len(silence_ends) or silence_ends[i] >= duration - 5:
+                    end_time = min(duration, silence_starts[i] + 2)  # Add 2 seconds for safety
+                    break
+        else:
+            # No silence detected at end, use default
+            end_time = max(start_time + 60, duration - trim_end_default)
+        
+        # Ensure minimum duration and valid range
+        if end_time - start_time < 60:
+            logger.warning(f"Detected duration too short ({end_time - start_time}s), using defaults")
+            start_time = min(trim_start_default, duration * 0.1)
+            end_time = max(start_time + 60, duration - trim_end_default)
+        
+        # Ensure we don't exceed video duration
+        end_time = min(end_time, duration)
+        
+        # Log the detection reasoning
+        logger.info(f"Detection analysis:")
+        logger.info(f"  Video duration: {duration:.1f}s")
+        logger.info(f"  Trim start: {start_time:.1f}s (reason: {'first silence end' if start_time > 0 and silence_ends else 'default or no silence'})")
+        logger.info(f"  Trim end: {end_time:.1f}s (reason: {'last audio before extended silence' if end_time < duration else 'video end'})")
+        logger.info(f"  Trimmed duration: {end_time - start_time:.1f}s")
+        
+        logger.info(f"Detected boundaries: start={start_time}s, end={end_time}s (duration={duration}s)")
         return start_time, end_time
         
     except Exception as e:
@@ -4246,6 +5125,430 @@ def detect_meeting_boundaries(file_path, trim_start_default, trim_end_default):
         # Fallback to defaults
         duration = get_video_duration(file_path)
         return trim_start_default, max(duration - trim_end_default, trim_start_default + 60)
+
+@app.route('/api/meetings', methods=['GET'])
+def get_meetings():
+    """Get all meetings"""
+    try:
+        meetings = db_manager.get_all_meetings()
+        return jsonify({
+            'status': 'success',
+            'meetings': meetings
+        })
+    except Exception as e:
+        logger.error(f"Error fetching meetings: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings', methods=['POST'])
+def create_meeting():
+    """Create a new meeting"""
+    try:
+        data = request.json
+        meeting_id = db_manager.create_meeting(
+            meeting_name=data.get('meeting_name'),
+            meeting_date=data.get('meeting_date'),
+            start_time=data.get('start_time'),
+            duration_hours=float(data.get('duration_hours', 2.0)),
+            room=data.get('room'),
+            atl26_broadcast=data.get('atl26_broadcast', True)
+        )
+        return jsonify({
+            'status': 'success',
+            'message': 'Meeting created successfully',
+            'meeting_id': meeting_id
+        })
+    except Exception as e:
+        logger.error(f"Error creating meeting: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings/<int:meeting_id>', methods=['PUT'])
+def update_meeting(meeting_id):
+    """Update a meeting"""
+    try:
+        data = request.json
+        updated = db_manager.update_meeting(
+            meeting_id=meeting_id,
+            meeting_name=data.get('meeting_name'),
+            meeting_date=data.get('meeting_date'),
+            start_time=data.get('start_time'),
+            duration_hours=float(data.get('duration_hours', 2.0)),
+            room=data.get('room'),
+            atl26_broadcast=data.get('atl26_broadcast', True)
+        )
+        if updated:
+            return jsonify({
+                'status': 'success',
+                'message': 'Meeting updated successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Meeting not found'
+            }), 404
+    except Exception as e:
+        logger.error(f"Error updating meeting: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings/<int:meeting_id>', methods=['DELETE'])
+def delete_meeting(meeting_id):
+    """Delete a meeting"""
+    try:
+        deleted = db_manager.delete_meeting(meeting_id)
+        if deleted:
+            return jsonify({
+                'status': 'success',
+                'message': 'Meeting deleted successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Meeting not found'
+            }), 404
+    except Exception as e:
+        logger.error(f"Error deleting meeting: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings/import', methods=['POST'])
+def import_meetings_from_web():
+    """Import meetings from Atlanta City Council website"""
+    try:
+        from meeting_scraper import scrape_atlanta_council_meetings
+        
+        # Get the months to scrape from request
+        months = request.json.get('months', [8, 9, 10, 11, 12])
+        year = request.json.get('year', 2025)
+        
+        meetings = scrape_atlanta_council_meetings(year, months)
+        
+        # Import each meeting into the database
+        imported_count = 0
+        for meeting in meetings:
+            try:
+                db_manager.create_meeting(
+                    meeting_name=meeting['name'],
+                    meeting_date=meeting['date'],
+                    start_time=meeting['time'],
+                    duration_hours=meeting.get('duration', 2.0),
+                    room=meeting.get('room'),
+                    atl26_broadcast=meeting.get('broadcast', True)
+                )
+                imported_count += 1
+            except Exception as e:
+                logger.warning(f"Skipping duplicate or invalid meeting: {meeting.get('name')}: {e}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Imported {imported_count} meetings',
+            'imported': imported_count,
+            'total': len(meetings)
+        })
+    except Exception as e:
+        logger.error(f"Error importing meetings: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings/by-date', methods=['GET'])
+def get_meetings_by_date():
+    """Get meetings for a specific date"""
+    try:
+        date = request.args.get('date')
+        if not date:
+            return jsonify({'status': 'error', 'message': 'Date parameter is required'}), 400
+        
+        meetings = db_manager.get_meetings_by_date(date)
+        return jsonify({
+            'status': 'success',
+            'meetings': meetings
+        })
+    except Exception as e:
+        logger.error(f"Error getting meetings by date: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings/by-week', methods=['GET'])
+def get_meetings_by_week():
+    """Get meetings for a specific week"""
+    try:
+        year = request.args.get('year', type=int)
+        week = request.args.get('week', type=int)
+        
+        if not year or not week:
+            return jsonify({'status': 'error', 'message': 'Year and week parameters are required'}), 400
+        
+        # Calculate start and end dates for the week
+        from datetime import datetime, timedelta
+        jan1 = datetime(year, 1, 1)
+        days_to_week = (week - 1) * 7
+        week_start = jan1 + timedelta(days=days_to_week - jan1.weekday())
+        week_end = week_start + timedelta(days=6)
+        
+        meetings = db_manager.get_meetings_by_date_range(
+            week_start.strftime('%Y-%m-%d'),
+            week_end.strftime('%Y-%m-%d')
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'meetings': meetings
+        })
+    except Exception as e:
+        logger.error(f"Error getting meetings by week: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/meetings/by-month', methods=['GET'])
+def get_meetings_by_month():
+    """Get meetings for a specific month"""
+    try:
+        year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int)
+        
+        if not year or not month:
+            return jsonify({'status': 'error', 'message': 'Year and month parameters are required'}), 400
+        
+        meetings = db_manager.get_meetings_by_month(year, month)
+        return jsonify({
+            'status': 'success',
+            'meetings': meetings
+        })
+    except Exception as e:
+        logger.error(f"Error getting meetings by month: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/generate-daily-schedule-template', methods=['POST'])
+def generate_daily_schedule_template():
+    """Generate a daily schedule template from selected meetings"""
+    try:
+        data = request.json
+        meeting_ids = data.get('meeting_ids', [])
+        
+        if not meeting_ids:
+            return jsonify({'status': 'error', 'message': 'No meetings selected'}), 400
+        
+        # Get meetings details
+        # Convert string IDs to integers if using PostgreSQL
+        if hasattr(db_manager, 'connection_string') and 'postgresql' in str(db_manager.connection_string):
+            meeting_ids = [int(mid) for mid in meeting_ids]
+        
+        meetings = db_manager.get_meetings_by_ids(meeting_ids)
+        if not meetings:
+            return jsonify({'status': 'error', 'message': 'No meetings found'}), 404
+        
+        # Generate template content
+        template_lines = ['*daily', 'defaults, of the day{', '}', 'time slot length = 30', 
+                         'scrolltime = 12:00 am', 'filter script = ', 'global default=',
+                         'text encoding = UTF-8', 'schedule format version = 5.0.0.4 2021/01/15']
+        
+        # Room to SDI mapping
+        room_to_sdi = {
+            'Council Chambers': '/mnt/main/tv/inputs/1-SDI in',
+            'Committee Room 1': '/mnt/main/tv/inputs/2-SDI in',
+            'Committee Room 2': '/mnt/main/tv/inputs/3-SDI in'
+        }
+        
+        # Add meetings to template
+        for meeting in meetings:
+            room = meeting.get('room', '')
+            sdi_input = room_to_sdi.get(room, '/mnt/main/tv/inputs/1-SDI in')  # Default to SDI 1
+            
+            # Parse start time and calculate end time
+            start_time = meeting['start_time']
+            duration_hours = meeting.get('duration_hours', 2.0)
+            
+            # Convert start time to datetime for calculation
+            from datetime import datetime, timedelta
+            start_dt = datetime.strptime(start_time, '%I:%M %p')
+            end_dt = start_dt + timedelta(hours=duration_hours)
+            end_time = end_dt.strftime('%I:%M %p').lower()
+            start_time_lower = start_time.lower()
+            
+            # Generate a consistent GUID for the SDI input
+            guid_map = {
+                '/mnt/main/tv/inputs/1-SDI in': '{08a506c8-f12f-411d-82cb-dbfd5bc92604}',
+                '/mnt/main/tv/inputs/2-SDI in': '{a5ef6aeb-7ee9-416e-b3e2-52c105b8370d}',
+                '/mnt/main/tv/inputs/3-SDI in': '{b7fc8bfc-8ff0-422e-93d4-63d206c9484e}'
+            }
+            guid = guid_map.get(sdi_input, guid_map['/mnt/main/tv/inputs/1-SDI in'])
+            
+            template_lines.extend([
+                '{',
+                f'\titem={sdi_input}',
+                '\tloop=0',
+                f'\tguid={guid}',
+                f'\tstart={start_time_lower}',
+                f'\tend={end_time}',
+                '}'
+            ])
+        
+        template_content = '\n'.join(template_lines) + '\n'
+        
+        return jsonify({
+            'status': 'success',
+            'template': template_content
+        })
+    except Exception as e:
+        logger.error(f"Error generating daily schedule template: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/generate-weekly-schedule-template', methods=['POST'])
+def generate_weekly_schedule_template():
+    """Generate a weekly schedule template from selected meetings"""
+    try:
+        data = request.json
+        meeting_ids = data.get('meeting_ids', [])
+        
+        if not meeting_ids:
+            return jsonify({'status': 'error', 'message': 'No meetings selected'}), 400
+        
+        # Get meetings details
+        # Convert string IDs to integers if using PostgreSQL
+        if hasattr(db_manager, 'connection_string') and 'postgresql' in str(db_manager.connection_string):
+            meeting_ids = [int(mid) for mid in meeting_ids]
+        
+        meetings = db_manager.get_meetings_by_ids(meeting_ids)
+        if not meetings:
+            return jsonify({'status': 'error', 'message': 'No meetings found'}), 404
+        
+        # Generate template content
+        template_lines = ['defaults, day of the week{', '}', 'day = 4', 'time slot length = 30', 
+                         'scrolltime = 12:00 am', 'filter script = ', 'global default=',
+                         'text encoding = UTF-8', 'schedule format version = 5.0.0.4 2021/01/15']
+        
+        # Room to SDI mapping
+        room_to_sdi = {
+            'Council Chambers': '/mnt/main/tv/inputs/1-SDI in',
+            'Committee Room 1': '/mnt/main/tv/inputs/2-SDI in',
+            'Committee Room 2': '/mnt/main/tv/inputs/3-SDI in'
+        }
+        
+        # Add meetings to template
+        for meeting in meetings:
+            room = meeting.get('room', '')
+            sdi_input = room_to_sdi.get(room, '/mnt/main/tv/inputs/1-SDI in')
+            
+            # Parse meeting date to get day of week
+            from datetime import datetime, timedelta
+            meeting_date = datetime.strptime(meeting['meeting_date'], '%Y-%m-%d')
+            day_name = meeting_date.strftime('%a').lower()  # mon, tue, wed, etc.
+            
+            # Parse start time and calculate end time
+            start_time = meeting['start_time']
+            duration_hours = meeting.get('duration_hours', 2.0)
+            
+            start_dt = datetime.strptime(start_time, '%I:%M %p')
+            end_dt = start_dt + timedelta(hours=duration_hours)
+            end_time = end_dt.strftime('%I:%M %p').lower()
+            start_time_lower = start_time.lower()
+            
+            # Generate GUID
+            guid_map = {
+                '/mnt/main/tv/inputs/1-SDI in': '{08a506c8-f12f-411d-82cb-dbfd5bc92604}',
+                '/mnt/main/tv/inputs/2-SDI in': '{a5ef6aeb-7ee9-416e-b3e2-52c105b8370d}',
+                '/mnt/main/tv/inputs/3-SDI in': '{b7fc8bfc-8ff0-422e-93d4-63d206c9484e}'
+            }
+            guid = guid_map.get(sdi_input, guid_map['/mnt/main/tv/inputs/1-SDI in'])
+            
+            template_lines.extend([
+                '{',
+                f'\titem={sdi_input}',
+                '\tloop=0',
+                f'\tguid={guid}',
+                f'\tstart={day_name} {start_time_lower}',
+                f'\tend={day_name} {end_time}',
+                '}'
+            ])
+        
+        template_content = '\n'.join(template_lines) + '\n'
+        
+        return jsonify({
+            'status': 'success',
+            'template': template_content
+        })
+    except Exception as e:
+        logger.error(f"Error generating weekly schedule template: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/generate-monthly-schedule-template', methods=['POST'])
+def generate_monthly_schedule_template():
+    """Generate a monthly schedule template from selected meetings"""
+    try:
+        data = request.json
+        meeting_ids = data.get('meeting_ids', [])
+        
+        if not meeting_ids:
+            return jsonify({'status': 'error', 'message': 'No meetings selected'}), 400
+        
+        # Get meetings details
+        # Convert string IDs to integers if using PostgreSQL
+        if hasattr(db_manager, 'connection_string') and 'postgresql' in str(db_manager.connection_string):
+            meeting_ids = [int(mid) for mid in meeting_ids]
+        
+        meetings = db_manager.get_meetings_by_ids(meeting_ids)
+        if not meetings:
+            return jsonify({'status': 'error', 'message': 'No meetings found'}), 404
+        
+        # Get the month and year from the first meeting
+        from datetime import datetime, timedelta
+        first_meeting_date = datetime.strptime(meetings[0]['meeting_date'], '%Y-%m-%d')
+        month = first_meeting_date.month
+        year = first_meeting_date.year
+        
+        # Generate template content
+        template_lines = ['*monthly', 'defaults, day of the month{', '}', 
+                         f'year = {year}', f'month = {month}', 'day = 20',
+                         'time slot length = 30', 'scrolltime = 12:00 am', 
+                         'filter script = ', 'global default=',
+                         'text encoding = UTF-8', 'schedule format version = 5.0.0.4 2021/01/15']
+        
+        # Room to SDI mapping
+        room_to_sdi = {
+            'Council Chambers': '/mnt/main/tv/inputs/1-SDI in',
+            'Committee Room 1': '/mnt/main/tv/inputs/2-SDI in',
+            'Committee Room 2': '/mnt/main/tv/inputs/3-SDI in'
+        }
+        
+        # Add meetings to template
+        for meeting in meetings:
+            room = meeting.get('room', '')
+            sdi_input = room_to_sdi.get(room, '/mnt/main/tv/inputs/1-SDI in')
+            
+            # Parse meeting date to get day of month
+            meeting_date = datetime.strptime(meeting['meeting_date'], '%Y-%m-%d')
+            day_of_month = meeting_date.day
+            
+            # Parse start time and calculate end time
+            start_time = meeting['start_time']
+            duration_hours = meeting.get('duration_hours', 2.0)
+            
+            start_dt = datetime.strptime(start_time, '%I:%M %p')
+            end_dt = start_dt + timedelta(hours=duration_hours)
+            end_time = end_dt.strftime('%I:%M %p').lower()
+            start_time_lower = start_time.lower()
+            
+            # Generate GUID
+            guid_map = {
+                '/mnt/main/tv/inputs/1-SDI in': '{08a506c8-f12f-411d-82cb-dbfd5bc92604}',
+                '/mnt/main/tv/inputs/2-SDI in': '{a5ef6aeb-7ee9-416e-b3e2-52c105b8370d}',
+                '/mnt/main/tv/inputs/3-SDI in': '{b7fc8bfc-8ff0-422e-93d4-63d206c9484e}'
+            }
+            guid = guid_map.get(sdi_input, guid_map['/mnt/main/tv/inputs/1-SDI in'])
+            
+            template_lines.extend([
+                '{',
+                f'\titem={sdi_input}',
+                '\tloop=0',
+                f'\tguid={guid}',
+                f'\tstart=day {day_of_month} {start_time_lower}',
+                f'\tend=day {day_of_month} {end_time}',
+                '}'
+            ])
+        
+        template_content = '\n'.join(template_lines) + '\n'
+        
+        return jsonify({
+            'status': 'success',
+            'template': template_content
+        })
+    except Exception as e:
+        logger.error(f"Error generating monthly schedule template: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")

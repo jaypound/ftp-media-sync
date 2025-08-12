@@ -5,6 +5,7 @@ from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 import uuid
 from datetime import datetime
 from bson import ObjectId
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,255 @@ class DatabaseManager:
                 "message": error_msg,
                 "deleted_count": 0
             }
+    
+    def get_all_meetings(self) -> List[Dict[str, Any]]:
+        """Get all meetings from the database"""
+        if self.db is None:
+            return []
+        
+        try:
+            meetings_collection = self.db['meetings']
+            meetings = list(meetings_collection.find().sort([
+                ('meeting_date', 1),
+                ('start_time', 1)
+            ]))
+            
+            # Convert ObjectId to string
+            for meeting in meetings:
+                meeting['id'] = str(meeting.pop('_id'))
+            
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings: {str(e)}")
+            return []
+    
+    def create_meeting(self, meeting_name: str, meeting_date: str, start_time: str, 
+                      duration_hours: float = 2.0, room: str = None, atl26_broadcast: bool = True) -> Optional[str]:
+        """Create a new meeting"""
+        if self.db is None:
+            return None
+        
+        # Validate that meeting is not on Sunday
+        from datetime import datetime as dt
+        meeting_datetime = dt.strptime(meeting_date, '%Y-%m-%d')
+        if meeting_datetime.weekday() == 6:  # Sunday
+            raise ValueError(f"Cannot create meeting on Sunday ({meeting_date})")
+        
+        try:
+            meetings_collection = self.db['meetings']
+            result = meetings_collection.insert_one({
+                'meeting_name': meeting_name,
+                'meeting_date': meeting_date,
+                'start_time': start_time,
+                'duration_hours': duration_hours,
+                'room': room,
+                'atl26_broadcast': atl26_broadcast,
+                'created_at': datetime.now(),
+                'updated_at': datetime.now()
+            })
+            
+            logger.info(f"Created meeting: {meeting_name} on {meeting_date}")
+            return str(result.inserted_id)
+            
+        except Exception as e:
+            logger.error(f"Error creating meeting: {str(e)}")
+            raise
+    
+    def update_meeting(self, meeting_id: str, meeting_name: str, meeting_date: str, 
+                      start_time: str, duration_hours: float = 2.0, room: str = None, atl26_broadcast: bool = True) -> bool:
+        """Update an existing meeting"""
+        if self.db is None:
+            return False
+        
+        try:
+            from bson import ObjectId
+            meetings_collection = self.db['meetings']
+            
+            # Handle both string IDs and integer IDs for compatibility
+            if isinstance(meeting_id, int):
+                filter_query = {'id': meeting_id}
+            else:
+                filter_query = {'_id': ObjectId(meeting_id)}
+            
+            result = meetings_collection.update_one(
+                filter_query,
+                {
+                    '$set': {
+                        'meeting_name': meeting_name,
+                        'meeting_date': meeting_date,
+                        'start_time': start_time,
+                        'duration_hours': duration_hours,
+                        'room': room,
+                        'atl26_broadcast': atl26_broadcast,
+                        'updated_at': datetime.now()
+                    }
+                }
+            )
+            
+            if result.modified_count > 0:
+                logger.info(f"Updated meeting {meeting_id}")
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error updating meeting: {str(e)}")
+            raise
+    
+    def delete_meeting(self, meeting_id: str) -> bool:
+        """Delete a meeting"""
+        if self.db is None:
+            return False
+        
+        try:
+            from bson import ObjectId
+            meetings_collection = self.db['meetings']
+            
+            # Handle both string IDs and integer IDs for compatibility
+            if isinstance(meeting_id, int):
+                filter_query = {'id': meeting_id}
+            else:
+                filter_query = {'_id': ObjectId(meeting_id)}
+            
+            result = meetings_collection.delete_one(filter_query)
+            
+            if result.deleted_count > 0:
+                logger.info(f"Deleted meeting {meeting_id}")
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error deleting meeting: {str(e)}")
+            raise
+    
+    def get_meetings_by_date(self, date: str) -> List[Dict[str, Any]]:
+        """Get meetings for a specific date"""
+        if self.db is None:
+            return []
+        
+        try:
+            meetings_collection = self.db['meetings']
+            meetings = list(meetings_collection.find(
+                {'meeting_date': date}
+            ).sort([('start_time', 1)]))
+            
+            # Convert ObjectId to string
+            for meeting in meetings:
+                meeting['id'] = str(meeting.pop('_id'))
+            
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by date: {str(e)}")
+            return []
+    
+    def get_meetings_by_date_range(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """Get meetings within a date range"""
+        if self.db is None:
+            return []
+        
+        try:
+            meetings_collection = self.db['meetings']
+            meetings = list(meetings_collection.find({
+                'meeting_date': {
+                    '$gte': start_date,
+                    '$lte': end_date
+                }
+            }).sort([
+                ('meeting_date', 1),
+                ('start_time', 1)
+            ]))
+            
+            # Convert ObjectId to string
+            for meeting in meetings:
+                meeting['id'] = str(meeting.pop('_id'))
+            
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by date range: {str(e)}")
+            return []
+    
+    def get_meetings_by_month(self, year: int, month: int) -> List[Dict[str, Any]]:
+        """Get meetings for a specific month"""
+        if self.db is None:
+            return []
+        
+        try:
+            # Calculate date range for the month
+            from datetime import datetime, timedelta
+            import calendar
+            
+            # First day of the month
+            start_date = datetime(year, month, 1).strftime('%Y-%m-%d')
+            
+            # Last day of the month
+            last_day = calendar.monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day).strftime('%Y-%m-%d')
+            
+            meetings_collection = self.db['meetings']
+            meetings = list(meetings_collection.find({
+                'meeting_date': {
+                    '$gte': start_date,
+                    '$lte': end_date
+                }
+            }).sort([
+                ('meeting_date', 1),
+                ('start_time', 1)
+            ]))
+            
+            # Convert ObjectId to string
+            for meeting in meetings:
+                meeting['id'] = str(meeting.pop('_id'))
+            
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by month: {str(e)}")
+            return []
+    
+    def get_meetings_by_ids(self, meeting_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get meetings by their IDs"""
+        if self.db is None or not meeting_ids:
+            return []
+        
+        try:
+            from bson import ObjectId
+            meetings_collection = self.db['meetings']
+            
+            # Convert string IDs to ObjectIds
+            object_ids = []
+            for mid in meeting_ids:
+                try:
+                    # Handle both string MongoDB IDs and numeric IDs
+                    if len(str(mid)) == 24:  # MongoDB ObjectId length
+                        object_ids.append(ObjectId(mid))
+                    else:
+                        # For numeric IDs, we need to search by a different field
+                        # This is a fallback for compatibility
+                        object_ids.append(ObjectId(mid))
+                except:
+                    logger.warning(f"Invalid meeting ID format: {mid}")
+            
+            if not object_ids:
+                return []
+            
+            meetings = list(meetings_collection.find({
+                '_id': {'$in': object_ids}
+            }).sort([
+                ('meeting_date', 1),
+                ('start_time', 1)
+            ]))
+            
+            # Convert ObjectId to string
+            for meeting in meetings:
+                meeting['id'] = str(meeting.pop('_id'))
+            
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by IDs: {str(e)}")
+            return []
 
 # Global database manager instance
 db_manager = DatabaseManager()

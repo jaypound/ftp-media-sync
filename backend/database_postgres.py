@@ -1016,6 +1016,351 @@ class PostgreSQLDatabaseManager:
             return []
         finally:
             self._put_connection(conn)
+    
+    def get_all_meetings(self) -> List[Dict[str, Any]]:
+        """Get all meetings from the database"""
+        if not self.connected:
+            return []
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    id,
+                    meeting_name,
+                    meeting_date,
+                    start_time,
+                    duration_hours,
+                    room,
+                    atl26_broadcast,
+                    created_at,
+                    updated_at
+                FROM meetings
+                ORDER BY meeting_date ASC, start_time ASC
+            """)
+            
+            meetings = cursor.fetchall()
+            cursor.close()
+            
+            # Convert to proper format
+            result = []
+            for meeting in meetings:
+                result.append({
+                    'id': meeting['id'],
+                    'meeting_name': meeting['meeting_name'],
+                    'meeting_date': meeting['meeting_date'].isoformat() if meeting['meeting_date'] else None,
+                    'start_time': meeting['start_time'].strftime('%I:%M %p') if meeting['start_time'] else None,
+                    'duration_hours': float(meeting['duration_hours']) if meeting['duration_hours'] else 2.0,
+                    'room': meeting['room'],
+                    'atl26_broadcast': meeting['atl26_broadcast'],
+                    'created_at': meeting['created_at'].isoformat() if meeting['created_at'] else None,
+                    'updated_at': meeting['updated_at'].isoformat() if meeting['updated_at'] else None
+                })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def create_meeting(self, meeting_name: str, meeting_date: str, start_time: str, 
+                      duration_hours: float = 2.0, room: str = None, atl26_broadcast: bool = True) -> Optional[int]:
+        """Create a new meeting"""
+        if not self.connected:
+            return None
+        
+        # Validate that meeting is not on Sunday
+        from datetime import datetime
+        meeting_datetime = datetime.strptime(meeting_date, '%Y-%m-%d')
+        if meeting_datetime.weekday() == 6:  # Sunday
+            raise ValueError(f"Cannot create meeting on Sunday ({meeting_date})")
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO meetings (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast))
+            
+            meeting_id = cursor.fetchone()['id']
+            conn.commit()
+            cursor.close()
+            
+            logger.info(f"Created meeting: {meeting_name} on {meeting_date}")
+            return meeting_id
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error creating meeting: {str(e)}")
+            raise
+        finally:
+            self._put_connection(conn)
+    
+    def update_meeting(self, meeting_id: int, meeting_name: str, meeting_date: str, 
+                      start_time: str, duration_hours: float = 2.0, room: str = None, atl26_broadcast: bool = True) -> bool:
+        """Update an existing meeting"""
+        if not self.connected:
+            return False
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE meetings 
+                SET meeting_name = %s, 
+                    meeting_date = %s, 
+                    start_time = %s, 
+                    duration_hours = %s, 
+                    room = %s,
+                    atl26_broadcast = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast, meeting_id))
+            
+            affected = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            
+            if affected > 0:
+                logger.info(f"Updated meeting {meeting_id}")
+                return True
+            return False
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error updating meeting: {str(e)}")
+            raise
+        finally:
+            self._put_connection(conn)
+    
+    def delete_meeting(self, meeting_id: int) -> bool:
+        """Delete a meeting"""
+        if not self.connected:
+            return False
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM meetings WHERE id = %s", (meeting_id,))
+            
+            affected = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            
+            if affected > 0:
+                logger.info(f"Deleted meeting {meeting_id}")
+                return True
+            return False
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error deleting meeting: {str(e)}")
+            raise
+        finally:
+            self._put_connection(conn)
+    
+    def get_meetings_by_date(self, date: str) -> List[Dict[str, Any]]:
+        """Get meetings for a specific date"""
+        if not self.connected:
+            logger.warning("Database not connected in get_meetings_by_date")
+            return []
+        
+        conn = self._get_connection()
+        try:
+            # Use default cursor (RealDictCursor)
+            cursor = conn.cursor()
+            logger.info(f"Querying meetings for date: {date}")
+            cursor.execute("""
+                SELECT 
+                    id,
+                    meeting_name,
+                    meeting_date,
+                    start_time,
+                    duration_hours,
+                    room,
+                    atl26_broadcast,
+                    created_at,
+                    updated_at
+                FROM meetings
+                WHERE meeting_date = %s
+                ORDER BY start_time ASC
+            """, (date,))
+            
+            meetings = []
+            for row in cursor.fetchall():
+                meetings.append({
+                    'id': row['id'],
+                    'meeting_name': row['meeting_name'],
+                    'meeting_date': str(row['meeting_date']),
+                    'start_time': row['start_time'].strftime('%I:%M %p') if row['start_time'] else '',
+                    'duration_hours': float(row['duration_hours']),
+                    'room': row['room'],
+                    'atl26_broadcast': row['atl26_broadcast'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                })
+            
+            cursor.close()
+            logger.info(f"Found {len(meetings)} meetings for date {date}")
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by date: {str(e)}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def get_meetings_by_date_range(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """Get meetings within a date range"""
+        if not self.connected:
+            return []
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    id,
+                    meeting_name,
+                    meeting_date,
+                    start_time,
+                    duration_hours,
+                    room,
+                    atl26_broadcast,
+                    created_at,
+                    updated_at
+                FROM meetings
+                WHERE meeting_date >= %s AND meeting_date <= %s
+                ORDER BY meeting_date ASC, start_time ASC
+            """, (start_date, end_date))
+            
+            meetings = []
+            for row in cursor.fetchall():
+                meetings.append({
+                    'id': row['id'],
+                    'meeting_name': row['meeting_name'],
+                    'meeting_date': str(row['meeting_date']),
+                    'start_time': row['start_time'].strftime('%I:%M %p') if row['start_time'] else '',
+                    'duration_hours': float(row['duration_hours']),
+                    'room': row['room'],
+                    'atl26_broadcast': row['atl26_broadcast'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                })
+            
+            cursor.close()
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by date range: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def get_meetings_by_month(self, year: int, month: int) -> List[Dict[str, Any]]:
+        """Get meetings for a specific month"""
+        if not self.connected:
+            return []
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    id,
+                    meeting_name,
+                    meeting_date,
+                    start_time,
+                    duration_hours,
+                    room,
+                    atl26_broadcast,
+                    created_at,
+                    updated_at
+                FROM meetings
+                WHERE EXTRACT(YEAR FROM meeting_date) = %s 
+                AND EXTRACT(MONTH FROM meeting_date) = %s
+                ORDER BY meeting_date ASC, start_time ASC
+            """, (year, month))
+            
+            meetings = []
+            for row in cursor.fetchall():
+                meetings.append({
+                    'id': row['id'],
+                    'meeting_name': row['meeting_name'],
+                    'meeting_date': str(row['meeting_date']),
+                    'start_time': row['start_time'].strftime('%I:%M %p') if row['start_time'] else '',
+                    'duration_hours': float(row['duration_hours']),
+                    'room': row['room'],
+                    'atl26_broadcast': row['atl26_broadcast'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                })
+            
+            cursor.close()
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by month: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def get_meetings_by_ids(self, meeting_ids: List[int]) -> List[Dict[str, Any]]:
+        """Get meetings by their IDs"""
+        if not self.connected or not meeting_ids:
+            return []
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            # Create placeholders for the query
+            placeholders = ','.join(['%s'] * len(meeting_ids))
+            cursor.execute(f"""
+                SELECT 
+                    id,
+                    meeting_name,
+                    meeting_date,
+                    start_time,
+                    duration_hours,
+                    room,
+                    atl26_broadcast,
+                    created_at,
+                    updated_at
+                FROM meetings
+                WHERE id IN ({placeholders})
+                ORDER BY meeting_date ASC, start_time ASC
+            """, meeting_ids)
+            
+            meetings = []
+            for row in cursor.fetchall():
+                meetings.append({
+                    'id': row['id'],
+                    'meeting_name': row['meeting_name'],
+                    'meeting_date': str(row['meeting_date']),
+                    'start_time': row['start_time'].strftime('%I:%M %p') if row['start_time'] else '',
+                    'duration_hours': float(row['duration_hours']),
+                    'room': row['room'],
+                    'atl26_broadcast': row['atl26_broadcast'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                })
+            
+            cursor.close()
+            return meetings
+            
+        except Exception as e:
+            logger.error(f"Error getting meetings by IDs: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
 
 
 # Global database manager instance - will be replaced in database.py
