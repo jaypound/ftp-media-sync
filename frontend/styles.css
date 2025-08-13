@@ -197,6 +197,42 @@ body {
     color: var(--primary-color);
 }
 
+/* Template buttons container */
+.template-buttons {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Template button rows */
+.template-buttons-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Action button rows - used in File Analysis and other panels */
+.action-buttons-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Ensure all buttons in action rows have consistent height */
+.action-buttons-row .button {
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Remove the small class effect in action rows */
+.action-buttons-row .button.small {
+    font-size: inherit;
+    padding: 0.5rem 1rem;
+}
+
 /* Forms */
 .form-group {
     margin-bottom: 1.25rem;
@@ -1832,7 +1868,7 @@ select.form-control {
 /* Scanned files section */
 .scanned-files-container {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 45% 55%;
     gap: 1.5rem;
     margin-top: 1.5rem;
 }
@@ -1869,6 +1905,104 @@ select.form-control {
     font-size: 0.8125rem;
     color: var(--text-secondary);
     margin-top: 0.25rem;
+}
+
+/* Scanned file items */
+.scanned-file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.5rem;
+    background: var(--background-color);
+    transition: all 0.2s ease;
+}
+
+.scanned-file-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.scanned-file-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0; /* Allow text truncation */
+}
+
+.scanned-file-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.scanned-file-details {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.scanned-file-details span {
+    white-space: nowrap;
+}
+
+.scanned-file-path {
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.scanned-file-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-left: 1rem;
+    flex-shrink: 0;
+}
+
+.analyzed-status {
+    font-size: 0.875rem;
+    color: #4caf50;
+    white-space: nowrap;
+}
+
+.analyze-btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    border: 1px solid var(--border-color);
+    background: var(--surface-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.analyze-btn:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.analyze-btn.analyzed {
+    background: var(--surface-dark);
+    color: var(--text-secondary);
+}
+
+.analyze-btn.analyzed:hover {
+    background: var(--secondary-color);
+    color: white;
+    border-color: var(--secondary-color);
 }
 
 /* Range input styles */

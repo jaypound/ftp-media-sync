@@ -3420,12 +3420,22 @@ def fill_template_gaps():
         scheduler._reset_rotation()
         
         # Convert available content to the format expected by scheduler
+        # Filter out content from /mnt/main/Recordings
         content_by_id = {}
+        filtered_count = 0
         for content in available_content:
+            # Check if this content is from Recordings folder
+            file_path = content.get('file_path', '')
+            if '/mnt/main/Recordings' in file_path:
+                filtered_count += 1
+                continue  # Skip content from Recordings folder
             content_by_id[content.get('id')] = content
         
         # Debug: Log available content info
         logger.info(f"Available content count: {len(available_content)}")
+        if filtered_count > 0:
+            logger.info(f"Filtered out {filtered_count} items from /mnt/main/Recordings")
+        logger.info(f"Content available for scheduling: {len(content_by_id)}")
         if available_content:
             # Check a sample item
             sample = available_content[0]
@@ -3530,6 +3540,11 @@ def fill_template_gaps():
                 replay_delay_seconds = replay_delay_hours * 3600
                 
                 for content in available_content:
+                    # Skip content from Recordings folder
+                    file_path = content.get('file_path', '')
+                    if '/mnt/main/Recordings' in file_path:
+                        continue
+                    
                     # Check duration category
                     if content.get('duration_category') != duration_category:
                         wrong_category += 1
@@ -3563,6 +3578,11 @@ def fill_template_gaps():
                     logger.info(f"Trying category {duration_category} without replay delays")
                     # Try again without checking delays
                     for content in available_content:
+                        # Skip content from Recordings folder
+                        file_path = content.get('file_path', '')
+                        if '/mnt/main/Recordings' in file_path:
+                            continue
+                        
                         if content.get('duration_category') == duration_category:
                             category_content.append(content)
                     

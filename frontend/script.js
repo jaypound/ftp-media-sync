@@ -501,21 +501,20 @@ function displayScannedFiles() {
                 <div class="scanned-file-name">${file.name}</div>
                 <div class="scanned-file-details">
                     <span>Size: ${formatFileSize(file.size)}</span>
-                    <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
-                    ${isAnalyzed ? '<span style="color: #4caf50;">✅ Analyzed</span>' : ''}
+                    <span class="scanned-file-path">${file.path || file.name}</span>
                 </div>
-                <div class="scanned-file-path">${file.path || file.name}</div>
             </div>
-            ${isVideoFile ? `
-                <div class="scanned-file-actions">
+            <div class="scanned-file-actions">
+                ${isAnalyzed ? '<span class="analyzed-status">✅ Analyzed</span>' : ''}
+                ${isVideoFile ? `
                     <button class="analyze-btn ${isAnalyzed ? 'analyzed' : ''}" 
                             onclick="addToAnalysisQueue('${btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '')}')" 
                             data-file-path="${file.path || file.name}"
                             data-is-analyzed="${isAnalyzed}">
                         <i class="fas fa-${isAnalyzed ? 'redo' : 'brain'}"></i> ${isAnalyzed ? 'Reanalyze' : 'Analyze'}
                     </button>
-                </div>
-            ` : ''}
+                ` : ''}
+            </div>
         `;
         sourceFilesList.appendChild(fileItem);
     });
@@ -526,12 +525,13 @@ function displayScannedFiles() {
         const fileItem = document.createElement('div');
         fileItem.className = 'scanned-file-item';
         fileItem.innerHTML = `
-            <div class="scanned-file-name">${file.name}</div>
-            <div class="scanned-file-details">
-                <span>Size: ${formatFileSize(file.size)}</span>
-                <span>Type: ${getFileExtension(file.name).toUpperCase()}</span>
+            <div class="scanned-file-content">
+                <div class="scanned-file-name">${file.name}</div>
+                <div class="scanned-file-details">
+                    <span>Size: ${formatFileSize(file.size)}</span>
+                    <span class="scanned-file-path">${file.path || file.name}</span>
+                </div>
             </div>
-            <div class="scanned-file-path">${file.path || file.name}</div>
         `;
         targetFilesList.appendChild(fileItem);
     });
@@ -8819,9 +8819,6 @@ function loadTemplateLibrary() {
                     <button class="button secondary small" onclick="loadSavedTemplate(${index})">
                         <i class="fas fa-upload"></i> Load
                     </button>
-                    <button class="button info small" onclick="exportTemplate(${index})">
-                        <i class="fas fa-file-export"></i> Export
-                    </button>
                     <button class="button danger small" onclick="deleteTemplate(${index})">
                         <i class="fas fa-trash"></i> Delete
                     </button>
@@ -9891,26 +9888,11 @@ function updateTargetPath() {
     input.value = select.value;
 }
 
-// Scanning configuration functions
-function selectAllFolders() {
-    document.getElementById('scanOnAirContent').checked = true;
-    document.getElementById('scanRecordings').checked = true;
-}
-
-function deselectAllFolders() {
-    document.getElementById('scanOnAirContent').checked = false;
-    document.getElementById('scanRecordings').checked = false;
-}
+// Scanning configuration functions (removed - no longer needed)
 
 async function scanSelectedFolders() {
-    // Check which folders are selected
-    const scanOnAir = document.getElementById('scanOnAirContent').checked;
-    const scanRecordings = document.getElementById('scanRecordings').checked;
-    
-    if (!scanOnAir && !scanRecordings) {
-        log('Please select at least one folder to scan', 'error');
-        return;
-    }
+    // Always scan only the On-Air Content folder
+    const scanOnAir = true;
     
     // Clear previous results
     sourceFiles = [];
@@ -9990,60 +9972,7 @@ async function scanSelectedFolders() {
             });
         }
         
-        // Scan Recordings folder if selected
-        if (scanRecordings) {
-            log('Scanning Recordings folder...');
-            
-            // Scan source
-            const sourceResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    server_type: 'source',
-                    path: '/mnt/main/Recordings',
-                    filters: filters
-                })
-            });
-            
-            const sourceResult = await sourceResponse.json();
-            if (!sourceResult.success) {
-                throw new Error(sourceResult.message);
-            }
-            
-            const recordingsSourceFiles = sourceResult.files;
-            log(`Found ${recordingsSourceFiles.length} files in Recordings (source)`);
-            
-            // Scan target
-            const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    server_type: 'target',
-                    path: '/mnt/main/Recordings',
-                    filters: filters
-                })
-            });
-            
-            const targetResult = await targetResponse.json();
-            if (!targetResult.success) {
-                throw new Error(targetResult.message);
-            }
-            
-            const recordingsTargetFiles = targetResult.files;
-            log(`Found ${recordingsTargetFiles.length} files in Recordings (target)`);
-            
-            // Add to main arrays with folder info
-            recordingsSourceFiles.forEach(file => {
-                file.folder = 'recordings';
-                file.isBidirectional = true;
-                sourceFiles.push(file);
-            });
-            recordingsTargetFiles.forEach(file => {
-                file.folder = 'recordings';
-                file.isBidirectional = true;
-                targetFiles.push(file);
-            });
-        }
+        // We no longer scan the Recordings folder
         
         log(`Total files found: ${sourceFiles.length} source, ${targetFiles.length} target`);
         
