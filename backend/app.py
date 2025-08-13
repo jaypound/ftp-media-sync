@@ -5570,6 +5570,294 @@ def generate_monthly_schedule_template():
         logger.error(f"Error generating monthly schedule template: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/list-graphics-files', methods=['POST'])
+def list_graphics_files():
+    """List graphics files from specified directory"""
+    try:
+        data = request.json
+        server_type = data.get('server_type')
+        path = data.get('path')
+        extensions = data.get('extensions', ['.jpg', '.png'])
+        
+        logger.info(f"Listing graphics files - Server: {server_type}, Path: {path}")
+        
+        if server_type not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{server_type} server not connected'
+            })
+        
+        ftp = ftp_managers[server_type]
+        
+        try:
+            files = ftp.list_files(path)
+            
+            # Filter by extensions
+            graphics_files = []
+            for file in files:
+                # Check if it's a file (FTPManager doesn't include 'type' field)
+                # Files from FTPManager don't have 'type' but do have 'permissions'
+                # that don't start with 'd' for directories
+                filename = file['name'].lower()
+                if any(filename.endswith(ext) for ext in extensions):
+                    graphics_files.append({
+                        'name': file['name'],
+                        'size': file['size'],
+                        'path': f"{path}/{file['name']}"
+                    })
+            
+            graphics_files.sort(key=lambda x: x['name'])
+            
+            return jsonify({
+                'success': True,
+                'files': graphics_files
+            })
+            
+        except Exception as e:
+            logger.error(f"Error listing graphics files: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': str(e)
+            })
+            
+    except Exception as e:
+        logger.error(f"List graphics files error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/generate-prj-file', methods=['POST'])
+def generate_prj_file():
+    """Generate and export a .prj project file"""
+    try:
+        data = request.json
+        project_name = data.get('project_name')
+        export_path = data.get('export_path', '/mnt/main/Projects/')
+        export_server = data.get('export_server', 'source')
+        region1_files = data.get('region1_files', [])
+        region2_file = data.get('region2_file')
+        region3_files = data.get('region3_files', [])
+        
+        logger.info(f"Generating PRJ file: {project_name}")
+        logger.info(f"Region 1 files: {len(region1_files)}")
+        logger.info(f"Region 2 file: {region2_file}")
+        logger.info(f"Region 3 files: {len(region3_files)}")
+        
+        # Build the PRJ content in JSON format
+        import json
+        import uuid
+        
+        # Calculate total duration based on Region 1 files (5 seconds per image)
+        duration_per_image = 5.005005005005006  # ~5 seconds at 29.97 fps
+        frame_rate_n = 30000
+        frame_rate_d = 1001
+        frames_per_image = 150  # 5 seconds at 29.97 fps
+        
+        total_frames = len(region1_files) * frames_per_image
+        total_duration = len(region1_files) * duration_per_image
+        
+        prj_data = {
+            "multiregion playlist description": {
+                "title": "",
+                "author": "",
+                "play mode": "sequential",
+                "auto remove": True,
+                "override cun": False,
+                "editor view": {
+                    "cursor frame": 0,
+                    "view start": 0,
+                    "view end": total_duration
+                },
+                "aspect ratio": {
+                    "n": 16,
+                    "d": 9,
+                    "enforce": False
+                },
+                "timeline rate": {
+                    "n": frame_rate_n,
+                    "d": frame_rate_d
+                },
+                "sections": [],
+                "duration": total_duration
+            }
+        }
+        
+        # Region 1 - Upper graphics slideshow
+        region1_items = []
+        current_frame = 0
+        current_time = 0.0
+        
+        for idx, file_path in enumerate(region1_files):
+            item = {
+                "startFrame": current_frame,
+                "endFrame": current_frame + frames_per_image,
+                "offsetFrame": None,
+                "start": current_time,
+                "end": current_time + duration_per_image,
+                "offset": None,
+                "durationFrame": frames_per_image,
+                "duration": duration_per_image,
+                "isSelected": False,
+                "path": file_path,
+                "guid": "{" + str(uuid.uuid4()) + "}",
+                "file type": "image/jpeg",
+                "item duration": 0
+            }
+            region1_items.append(item)
+            current_frame += frames_per_image
+            current_time += duration_per_image
+        
+        region1 = {
+            "mute": False,
+            "invisible": False,
+            "name": "Region 1",
+            "region": {
+                "left": -1.0203083511776277e-16,
+                "top": -0.07007479322904887,
+                "width": 99.99999999999993,
+                "height": 74.50745162653122
+            },
+            "main": False,
+            "list": region1_items,
+            "durationFrames": total_frames,
+            "duration": total_duration
+        }
+        prj_data["multiregion playlist description"]["sections"].append(region1)
+        
+        # Region 2 - Lower static graphic
+        if region2_file:
+            region2 = {
+                "mute": False,
+                "invisible": False,
+                "name": "Region 2",
+                "region": {
+                    "left": 0,
+                    "top": 0,
+                    "width": 100,
+                    "height": 100
+                },
+                "main": False,
+                "list": [{
+                    "startFrame": 0,
+                    "endFrame": total_frames,
+                    "offsetFrame": None,
+                    "start": 0,
+                    "end": total_duration,
+                    "offset": None,
+                    "durationFrame": total_frames,
+                    "duration": total_duration,
+                    "isSelected": False,
+                    "path": region2_file,
+                    "guid": "{" + str(uuid.uuid4()) + "}",
+                    "file type": "image/png",
+                    "item duration": 0
+                }],
+                "durationFrames": total_frames,
+                "duration": total_duration
+            }
+            prj_data["multiregion playlist description"]["sections"].append(region2)
+        
+        # Region 3 - Music (invisible audio track)
+        if region3_files:
+            # For simplicity, just use the first music file
+            music_file = region3_files[0] if region3_files else None
+            if music_file:
+                region3 = {
+                    "mute": False,
+                    "invisible": True,  # Audio region is invisible
+                    "name": "Region 3",
+                    "region": {
+                        "left": -1.8705653104923163e-16,
+                        "top": -0.0695861153525056,
+                        "width": 99.99999999999987,
+                        "height": 74.50647427077814
+                    },
+                    "main": False,
+                    "list": [{
+                        "startFrame": 0,
+                        "endFrame": total_frames,
+                        "offsetFrame": None,
+                        "start": 0,
+                        "end": total_duration,
+                        "offset": None,
+                        "durationFrame": total_frames,
+                        "duration": total_duration,
+                        "isSelected": False,
+                        "path": music_file,
+                        "guid": "{" + str(uuid.uuid4()) + "}",
+                        "file type": "video/quicktime",  # MP4 files show as quicktime
+                        "item duration": 145.749333  # Placeholder duration
+                    }],
+                    "durationFrames": total_frames,
+                    "duration": total_duration
+                }
+                prj_data["multiregion playlist description"]["sections"].append(region3)
+        
+        # Convert to JSON string but remove outer braces for Castus format
+        json_str = json.dumps(prj_data, indent=2)
+        # Remove the outer curly braces
+        lines = json_str.split('\n')
+        if lines[0] == '{' and lines[-1] == '}':
+            lines = lines[1:-1]
+            # Remove one level of indentation from all lines
+            lines = [line[2:] if line.startswith('  ') else line for line in lines]
+        prj_content = '\n'.join(lines)
+        
+        # Write to FTP
+        if export_server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{export_server} server not connected'
+            })
+        
+        ftp = ftp_managers[export_server]
+        
+        # Create temporary file
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.prj', delete=False) as tmp:
+            tmp.write(prj_content)
+            tmp_path = tmp.name
+        
+        try:
+            # Ensure filename has .prj extension
+            if not project_name.endswith('.prj'):
+                project_name += '.prj'
+            
+            # Ensure path ends with /
+            if not export_path.endswith('/'):
+                export_path += '/'
+            
+            remote_path = export_path + project_name
+            
+            # Upload file
+            success = ftp.upload_file(tmp_path, remote_path)
+            
+            if success:
+                logger.info(f"Successfully exported PRJ file to {remote_path}")
+                return jsonify({
+                    'success': True,
+                    'message': f'Project file exported to {remote_path}',
+                    'path': remote_path
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to upload project file'
+                })
+                
+        finally:
+            # Clean up temp file
+            import os
+            os.unlink(tmp_path)
+            
+    except Exception as e:
+        logger.error(f"Generate PRJ file error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")
     print("Backend will be available at: http://127.0.0.1:5000")

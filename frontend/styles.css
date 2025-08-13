@@ -211,6 +211,71 @@ body {
     align-items: center;
 }
 
+/* Fill Graphics styles */
+.graphics-list,
+.music-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
+    margin-top: 1rem;
+    background: var(--background-color);
+}
+
+.graphics-item,
+.music-item {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.25rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.graphics-item:hover,
+.music-item:hover {
+    background: var(--surface-color);
+}
+
+.graphics-item input[type="checkbox"],
+.music-item input[type="checkbox"],
+.graphics-item input[type="radio"],
+.music-item input[type="radio"] {
+    margin-right: 0.75rem;
+}
+
+.graphics-item label,
+.music-item label {
+    cursor: pointer;
+    flex: 1;
+    font-size: 0.875rem;
+}
+
+.project-summary {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--surface-color);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.project-summary h4 {
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+.project-summary-item {
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.project-summary-item strong {
+    color: var(--text-primary);
+}
+
 /* Action button rows - used in File Analysis and other panels */
 .action-buttons-row {
     display: flex;
@@ -884,6 +949,7 @@ select.form-control {
 
 .scheduling-card > h3 {
     padding: 1.25rem 1.5rem;
+    padding-right: 3.5rem; /* Make room for the arrow */
     border-bottom: 1px solid var(--border-color);
     font-size: 1.125rem;
     font-weight: 600;
@@ -929,11 +995,71 @@ select.form-control {
     background: var(--background-color);
 }
 
-.content-item {
+/* Content filters */
+.content-filters {
+    margin-bottom: 1rem;
+}
+
+.filter-row {
     display: flex;
+    gap: 0.75rem;
     align-items: center;
-    justify-content: space-between;
-    padding: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.filter-row select,
+.filter-row input {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+.filter-row select {
+    min-width: 180px;
+}
+
+.filter-row input[type="text"] {
+    flex: 1;
+}
+
+.filter-row button {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+/* Content table header */
+.content-header {
+    display: grid;
+    grid-template-columns: 1fr 100px 100px 100px 80px 120px 150px;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 2px solid var(--border-color);
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.content-header .sort-field {
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s ease;
+}
+
+.content-header .sort-field:hover {
+    color: var(--primary-color);
+}
+
+.content-item {
+    display: grid;
+    grid-template-columns: 1fr 100px 100px 100px 80px 120px 150px;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border-color);
     transition: background 0.2s ease;
 }
@@ -944,6 +1070,58 @@ select.form-control {
 
 .content-item:last-child {
     border-bottom: none;
+}
+
+.content-item .content-title {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.content-item .content-type {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8125rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--surface-color);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.content-item .content-duration {
+    font-family: monospace;
+    font-size: 0.875rem;
+    text-align: center;
+}
+
+.content-item .content-category {
+    text-align: center;
+    font-size: 0.875rem;
+}
+
+.content-item .content-score {
+    text-align: center;
+    font-size: 0.875rem;
+}
+
+.content-item .content-last-scheduled {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.content-item .content-actions {
+    display: flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+}
+
+.content-item .content-actions button {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
 }
 
 .content-info {
@@ -1093,14 +1271,18 @@ select.form-control {
     }
     
     .content-item {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.75rem;
+        display: block;
+        padding: 1rem;
     }
     
-    .content-actions {
+    .content-item > * {
+        margin-bottom: 0.5rem;
+    }
+    
+    .content-item .content-actions {
         width: 100%;
         justify-content: flex-end;
+        margin-top: 0.5rem;
     }
     
     .schedule-buttons {
@@ -1204,6 +1386,79 @@ select.form-control {
 .schedule-item-actions {
     display: flex;
     gap: 0.5rem;
+}
+
+/* Schedule table formatting */
+.schedule-table-header {
+    display: grid;
+    grid-template-columns: 100px 100px 1fr 120px 100px 120px 200px;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 2px solid var(--border-color);
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.schedule-item-row {
+    display: grid;
+    grid-template-columns: 100px 100px 1fr 120px 100px 120px 200px;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    align-items: center;
+    transition: background 0.2s ease;
+}
+
+.schedule-item-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.schedule-item-row.day-header {
+    background: rgba(74, 144, 226, 0.1);
+    border: 1px solid rgba(74, 144, 226, 0.3);
+    margin: 0.5rem 0;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.schedule-item-row .col-start-time,
+.schedule-item-row .col-end-time {
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+.schedule-item-row .col-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.schedule-item-row .col-category {
+    text-align: center;
+}
+
+.schedule-item-row .col-duration {
+    font-family: monospace;
+    font-size: 0.875rem;
+    text-align: center;
+}
+
+.schedule-item-row .col-last-scheduled {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.schedule-item-row .col-actions {
+    display: flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+}
+
+.schedule-item-row .col-actions button {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
 }
 
 .schedule-list-header {
