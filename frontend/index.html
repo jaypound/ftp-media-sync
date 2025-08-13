@@ -44,6 +44,10 @@
                     <i class="fas fa-calendar-check"></i>
                     Meetings Schedule
                 </button>
+                <button class="nav-item" onclick="showPanel('fill-graphics')">
+                    <i class="fas fa-image"></i>
+                    Fill Graphics
+                </button>
                 <button class="nav-item dark-mode-toggle" onclick="toggleDarkMode()" id="darkModeToggle">
                     <i class="fas fa-moon"></i>
                     Dark
@@ -485,7 +489,7 @@
             <div class="scheduling-grid">
                 <!-- Available Content Section -->
                 <div class="scheduling-card collapsed">
-                    <h3><i class="fas fa-video"></i> <span style="position: absolute; left: 50%; transform: translateX(-50%);">Available Content</span> <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d; margin-left: auto;"></span></h3>
+                    <h3><i class="fas fa-video"></i> Available Content <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d; margin-left: 0.5rem;"></span></h3>
                     <div class="card-content">
                         <div class="content-filters">
                         <div class="filter-row">
@@ -607,40 +611,6 @@
                     </div>
                     </div>
                 </div>
-                
-                <!-- Schedule Template Editor -->
-                <div class="scheduling-card collapsed">
-                    <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
-                    <div class="card-content">
-                        <div class="template-editor">
-                            <div class="template-controls">
-                                <button class="button primary" onclick="showLoadTemplateModal()">
-                                    <i class="fas fa-file-import"></i> Load Daily Schedule
-                                </button>
-                                <button class="button primary" onclick="showLoadWeeklyTemplateModal()">
-                                    <i class="fas fa-calendar-week"></i> Load Weekly Schedule
-                                </button>
-                                <button class="button secondary" onclick="clearTemplate()">
-                                    <i class="fas fa-eraser"></i> Clear Template
-                                </button>
-                                <button class="button success" onclick="saveTemplateAsSchedule()">
-                                    <i class="fas fa-calendar-plus"></i> Create Schedule
-                                </button>
-                                <button class="button warning" onclick="exportTemplate()">
-                                    <i class="fas fa-file-export"></i> Export Template
-                                </button>
-                            </div>
-                            <div id="templateInfo" class="template-info" style="display: none;">
-                                <p><strong>Template:</strong> <span id="templateName">Untitled</span></p>
-                                <p><strong>Items:</strong> <span id="templateItemCount">0</span> | <strong>Duration:</strong> <span id="templateDuration">00:00:00</span></p>
-                            </div>
-                            <div id="templateDisplay" class="template-display">
-                                <p>Load a template file to begin editing</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
             </div>
             
             <!-- Configuration Modals -->
@@ -819,6 +789,98 @@
             </div>
         </div>
 
+        <!-- Fill Graphics Panel -->
+        <div id="fill-graphics" class="panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-image"></i> Fill Graphics Generator</h2>
+                <p>Create slideshow project files (.prj) with graphics and music for Castus servers</p>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-layer-group"></i> Region 1 - Upper Graphics</h3>
+                </div>
+                <div class="card-content">
+                    <p class="info-text">Select graphics (*.jpg, *.png) for slideshow</p>
+                    <div class="form-group">
+                        <label for="region1Path">Folder Path</label>
+                        <input type="text" id="region1Path" class="form-control" value="/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION" onchange="loadRegion1Graphics()">
+                    </div>
+                    <div class="form-group">
+                        <label for="region1Server">Server</label>
+                        <select id="region1Server" class="form-control" onchange="loadRegion1Graphics()">
+                            <option value="">Select server...</option>
+                            <option value="source">Source Server</option>
+                            <option value="target">Target Server</option>
+                        </select>
+                    </div>
+                    <div class="graphics-list" id="region1GraphicsList">
+                        <!-- Graphics will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-layer-group"></i> Region 2 - Lower Graphics</h3>
+                </div>
+                <div class="card-content">
+                    <p class="info-text">Select one static graphic (*.png or *.jpg)</p>
+                    <div class="form-group">
+                        <label for="region2Path">Folder Path</label>
+                        <input type="text" id="region2Path" class="form-control" value="/mnt/main/Graphics" onchange="loadRegion2Graphics()">
+                    </div>
+                    <div class="form-group">
+                        <label for="region2Server">Server</label>
+                        <select id="region2Server" class="form-control" onchange="loadRegion2Graphics()">
+                            <option value="">Select server...</option>
+                            <option value="source">Source Server</option>
+                            <option value="target">Target Server</option>
+                        </select>
+                    </div>
+                    <div class="graphics-list" id="region2GraphicsList">
+                        <!-- Graphics will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-music"></i> Region 3 - Music</h3>
+                </div>
+                <div class="card-content">
+                    <p class="info-text">Select music files (*.mp4 or *.wav)</p>
+                    <div class="form-group">
+                        <label for="region3Path">Folder Path</label>
+                        <input type="text" id="region3Path" class="form-control" value="/mnt/main/Music" onchange="loadMusicFiles()">
+                    </div>
+                    <div class="form-group">
+                        <label for="region3Server">Server</label>
+                        <select id="region3Server" class="form-control" onchange="loadMusicFiles()">
+                            <option value="">Select server...</option>
+                            <option value="source">Source Server</option>
+                            <option value="target">Target Server</option>
+                        </select>
+                    </div>
+                    <div class="music-list" id="musicFilesList">
+                        <!-- Music files will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-file-export"></i> Generate Project</h3>
+                </div>
+                <div class="card-content">
+                    <button class="button primary large" onclick="showGenerateProjectModal()" id="generateProjectBtn" disabled>
+                        <i class="fas fa-magic"></i> Generate .PRJ File
+                    </button>
+                    <p class="help-text">Select files from all three regions to enable project generation</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Scanned Files Display -->
         <div class="card" id="scannedFilesCard" style="display: none;">
             <div class="card-header">
@@ -848,7 +910,7 @@
         </div>
 
         <!-- Schedule Templates Panel -->
-        <div class="card" id="scheduleTemplatesCard">
+        <div class="card" id="scheduleTemplatesCard" style="margin-top: 1.5rem;">
             <div class="card-header">
                 <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
                 <div class="template-buttons">
@@ -909,6 +971,9 @@
                     </button>
                     <button class="button secondary small" onclick="refreshRecordingsList()">
                         <i class="fas fa-sync"></i> Refresh List
+                    </button>
+                    <button class="button secondary small" onclick="toggleRecordingsList()">
+                        <i class="fas fa-eye-slash"></i> Hide List
                     </button>
                     <button class="button info small" id="autoTrimToggle" onclick="toggleAutoTrim()">
                         <i class="fas fa-robot"></i> Auto-Trim: OFF
@@ -1509,6 +1574,45 @@
             <div class="modal-footer">
                 <button class="button secondary" onclick="closeImportMonthlyMeetingsModal()">Cancel</button>
                 <button class="button primary" onclick="generateMonthlySchedule()">Import Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generate Project Modal -->
+    <div id="generateProjectModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Generate Project File</h2>
+                <button class="close-button" onclick="closeGenerateProjectModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="projectFileName">Project File Name</label>
+                    <input type="text" id="projectFileName" class="form-control" placeholder="Enter project name (without .prj extension)" required>
+                </div>
+                <div class="form-group">
+                    <label for="projectExportPath">Export Path</label>
+                    <input type="text" id="projectExportPath" class="form-control" value="/mnt/main/Projects/" required>
+                </div>
+                <div class="form-group">
+                    <label for="projectExportServer">Export to Server</label>
+                    <select id="projectExportServer" class="form-control">
+                        <option value="source">Source Server</option>
+                        <option value="target">Target Server</option>
+                    </select>
+                </div>
+                <div class="project-summary">
+                    <h4>Selected Files Summary:</h4>
+                    <div id="projectSummary">
+                        <!-- Summary will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeGenerateProjectModal()">Cancel</button>
+                <button class="button primary" onclick="generateProjectFile()">
+                    <i class="fas fa-file-export"></i> Generate & Export
+                </button>
             </div>
         </div>
     </div>

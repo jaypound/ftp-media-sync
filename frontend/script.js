@@ -1703,6 +1703,17 @@ function showPanel(panelName) {
     // Update dashboard stats when showing dashboard
     if (panelName === 'dashboard') {
         updateDashboardStats();
+        // Hide Schedule Templates card on dashboard
+        const scheduleTemplatesCard = document.getElementById('scheduleTemplatesCard');
+        if (scheduleTemplatesCard) {
+            scheduleTemplatesCard.style.display = 'none';
+        }
+    } else if (panelName === 'scheduling') {
+        // Show Schedule Templates card on scheduling tab
+        const scheduleTemplatesCard = document.getElementById('scheduleTemplatesCard');
+        if (scheduleTemplatesCard) {
+            scheduleTemplatesCard.style.display = 'block';
+        }
     }
     
     // Load AI settings when showing AI settings panel
@@ -4041,7 +4052,7 @@ function displayAvailableContent() {
     
     // Add sort header
     let html = `
-        <div class="content-sort-header">
+        <div class="content-header">
             <span class="sort-field" data-field="title" onclick="sortContent('title')">
                 Title ${getSortIcon('title')}
             </span>
@@ -4086,29 +4097,27 @@ function displayAvailableContent() {
         
         html += `
             <div class="content-item" data-content-id="${contentId}">
-                <div class="content-info">
-                    <span class="content-title" title="${content.file_name}">${content.content_title || content.file_name}</span>
-                    <select class="content-type-dropdown" onchange="updateContentType('${contentId}', this.value)" data-original="${content.content_type ? content.content_type.toUpperCase() : ''}">
-                        <option value="AN" ${content.content_type && content.content_type.toUpperCase() === 'AN' ? 'selected' : ''}>Atlanta Now</option>
-                        <option value="BMP" ${content.content_type && content.content_type.toUpperCase() === 'BMP' ? 'selected' : ''}>Bump</option>
-                        <option value="IMOW" ${content.content_type && content.content_type.toUpperCase() === 'IMOW' ? 'selected' : ''}>In My Own Words</option>
-                        <option value="IM" ${content.content_type && content.content_type.toUpperCase() === 'IM' ? 'selected' : ''}>Inclusion Months</option>
-                        <option value="IA" ${content.content_type && content.content_type.toUpperCase() === 'IA' ? 'selected' : ''}>Inside Atlanta</option>
-                        <option value="LM" ${content.content_type && content.content_type.toUpperCase() === 'LM' ? 'selected' : ''}>Legislative Minute</option>
-                        <option value="MTG" ${content.content_type && content.content_type.toUpperCase() === 'MTG' ? 'selected' : ''}>Meeting</option>
-                        <option value="MAF" ${content.content_type && content.content_type.toUpperCase() === 'MAF' ? 'selected' : ''}>Moving Atlanta Forward</option>
-                        <option value="PKG" ${content.content_type && content.content_type.toUpperCase() === 'PKG' ? 'selected' : ''}>Package</option>
-                        <option value="PMO" ${content.content_type && content.content_type.toUpperCase() === 'PMO' ? 'selected' : ''}>Promo</option>
-                        <option value="PSA" ${content.content_type && content.content_type.toUpperCase() === 'PSA' ? 'selected' : ''}>PSA</option>
-                        <option value="SZL" ${content.content_type && content.content_type.toUpperCase() === 'SZL' ? 'selected' : ''}>Sizzle</option>
-                        <option value="SPP" ${content.content_type && content.content_type.toUpperCase() === 'SPP' ? 'selected' : ''}>Special Projects</option>
-                        <option value="OTHER" ${content.content_type && content.content_type.toUpperCase() === 'OTHER' ? 'selected' : ''}>Other</option>
-                    </select>
-                    <span class="content-duration">${durationTimecode}</span>
-                    <span class="content-category">${durationCategory.toUpperCase()}</span>
-                    <span class="engagement-score">${engagementScore}%</span>
-                    <span class="content-last-scheduled">${lastScheduledDisplay}</span>
-                </div>
+                <span class="content-title" title="${content.file_name}">${content.file_name ? content.file_name.replace(/\.[^/.]+$/, '') : (content.content_title || 'Unknown')}</span>
+                <select class="content-type" onchange="updateContentType('${contentId}', this.value)" data-original="${content.content_type ? content.content_type.toUpperCase() : ''}">
+                    <option value="PSA" ${content.content_type && content.content_type.toUpperCase() === 'PSA' ? 'selected' : ''}>PSA</option>
+                    <option value="AN" ${content.content_type && content.content_type.toUpperCase() === 'AN' ? 'selected' : ''}>AN</option>
+                    <option value="BMP" ${content.content_type && content.content_type.toUpperCase() === 'BMP' ? 'selected' : ''}>BMP</option>
+                    <option value="IMOW" ${content.content_type && content.content_type.toUpperCase() === 'IMOW' ? 'selected' : ''}>IMOW</option>
+                    <option value="IM" ${content.content_type && content.content_type.toUpperCase() === 'IM' ? 'selected' : ''}>IM</option>
+                    <option value="IA" ${content.content_type && content.content_type.toUpperCase() === 'IA' ? 'selected' : ''}>IA</option>
+                    <option value="LM" ${content.content_type && content.content_type.toUpperCase() === 'LM' ? 'selected' : ''}>LM</option>
+                    <option value="MTG" ${content.content_type && content.content_type.toUpperCase() === 'MTG' ? 'selected' : ''}>MTG</option>
+                    <option value="MAF" ${content.content_type && content.content_type.toUpperCase() === 'MAF' ? 'selected' : ''}>MAF</option>
+                    <option value="PKG" ${content.content_type && content.content_type.toUpperCase() === 'PKG' ? 'selected' : ''}>PKG</option>
+                    <option value="PMO" ${content.content_type && content.content_type.toUpperCase() === 'PMO' ? 'selected' : ''}>PMO</option>
+                    <option value="SZL" ${content.content_type && content.content_type.toUpperCase() === 'SZL' ? 'selected' : ''}>SZL</option>
+                    <option value="SPP" ${content.content_type && content.content_type.toUpperCase() === 'SPP' ? 'selected' : ''}>SPP</option>
+                    <option value="OTHER" ${content.content_type && content.content_type.toUpperCase() === 'OTHER' ? 'selected' : ''}>OTHER</option>
+                </select>
+                <span class="content-duration">${durationTimecode}</span>
+                <span class="content-category">${durationCategory.toUpperCase()}</span>
+                <span class="content-score">${engagementScore}%</span>
+                <span class="content-last-scheduled">${lastScheduledDisplay}</span>
                 <div class="content-actions">
                     <button class="button small primary" onclick="addToSchedule('${contentId}')" title="Add to Schedule">
                         <i class="fas fa-calendar-plus"></i>
@@ -10724,6 +10733,19 @@ function toggleAutoTrim() {
     }
 }
 
+function toggleRecordingsList() {
+    const recordingsList = document.getElementById('recordingsList');
+    const toggleBtn = event.target.closest('button');
+    
+    if (recordingsList.style.display === 'none') {
+        recordingsList.style.display = 'block';
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide List';
+    } else {
+        recordingsList.style.display = 'none';
+        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show List';
+    }
+}
+
 async function autoTrimCheck() {
     try {
         const response = await fetch('http://127.0.0.1:5000/api/meeting-recordings');
@@ -10781,8 +10803,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keepOriginal').checked = trimSettings.keep_original !== false; // Default true
     }
     
-    // Initial load of recordings
-    refreshRecordingsList();
+    // Initial load of recordings is commented out to prevent auto-refresh
+    // refreshRecordingsList();
     
     // Add click handler for trim settings modal
     const trimModal = document.getElementById('trimSettingsModal');
@@ -11482,3 +11504,289 @@ window.attachMonthlyHandlers = function() {
     document.getElementById('monthlyMeetingYear')?.addEventListener('change', loadMonthlyMeetings);
     document.getElementById('monthlyMeetingMonth')?.addEventListener('change', loadMonthlyMeetings);
 };
+
+// Fill Graphics Functions
+let selectedRegion1Files = [];
+let selectedRegion2File = null;
+let selectedRegion3Files = [];
+
+async function loadRegion1Graphics() {
+    const server = document.getElementById('region1Server').value;
+    const path = document.getElementById('region1Path').value;
+    const listDiv = document.getElementById('region1GraphicsList');
+    
+    if (!server) {
+        listDiv.innerHTML = '<p class="info-text">Select a server to load graphics</p>';
+        return;
+    }
+    
+    if (!path) {
+        listDiv.innerHTML = '<p class="info-text">Enter a folder path</p>';
+        return;
+    }
+    
+    listDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading graphics...</p>';
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/list-graphics-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                server_type: server,
+                path: path,
+                extensions: ['.jpg', '.png']
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (result.files.length === 0) {
+                listDiv.innerHTML = '<p class="info-text">No graphics files found</p>';
+                return;
+            }
+            
+            let html = '';
+            result.files.forEach(file => {
+                const isChecked = selectedRegion1Files.includes(file.path) ? 'checked' : '';
+                html += `
+                    <div class="graphics-item">
+                        <input type="checkbox" id="r1_${btoa(file.path)}" value="${file.path}" ${isChecked} onchange="updateRegion1Selection(this)">
+                        <label for="r1_${btoa(file.path)}">${file.name}</label>
+                    </div>
+                `;
+            });
+            
+            listDiv.innerHTML = html;
+        } else {
+            listDiv.innerHTML = `<p class="error-text">Error: ${result.message}</p>`;
+        }
+    } catch (error) {
+        listDiv.innerHTML = `<p class="error-text">Error loading graphics: ${error.message}</p>`;
+    }
+}
+
+async function loadRegion2Graphics() {
+    const server = document.getElementById('region2Server').value;
+    const path = document.getElementById('region2Path').value;
+    const listDiv = document.getElementById('region2GraphicsList');
+    
+    if (!server) {
+        listDiv.innerHTML = '<p class="info-text">Select a server to load graphics</p>';
+        return;
+    }
+    
+    if (!path) {
+        listDiv.innerHTML = '<p class="info-text">Enter a folder path</p>';
+        return;
+    }
+    
+    listDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading graphics...</p>';
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/list-graphics-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                server_type: server,
+                path: path,
+                extensions: ['.jpg', '.png']
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (result.files.length === 0) {
+                listDiv.innerHTML = '<p class="info-text">No graphics files found</p>';
+                return;
+            }
+            
+            let html = '';
+            result.files.forEach(file => {
+                const isChecked = selectedRegion2File === file.path ? 'checked' : '';
+                html += `
+                    <div class="graphics-item">
+                        <input type="radio" name="region2" id="r2_${btoa(file.path)}" value="${file.path}" ${isChecked} onchange="updateRegion2Selection(this)">
+                        <label for="r2_${btoa(file.path)}">${file.name}</label>
+                    </div>
+                `;
+            });
+            
+            listDiv.innerHTML = html;
+        } else {
+            listDiv.innerHTML = `<p class="error-text">Error: ${result.message}</p>`;
+        }
+    } catch (error) {
+        listDiv.innerHTML = `<p class="error-text">Error loading graphics: ${error.message}</p>`;
+    }
+}
+
+async function loadMusicFiles() {
+    const server = document.getElementById('region3Server').value;
+    const path = document.getElementById('region3Path').value;
+    const listDiv = document.getElementById('musicFilesList');
+    
+    if (!server) {
+        listDiv.innerHTML = '<p class="info-text">Select a server to load music files</p>';
+        return;
+    }
+    
+    if (!path) {
+        listDiv.innerHTML = '<p class="info-text">Enter a folder path</p>';
+        return;
+    }
+    
+    listDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading music files...</p>';
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/list-graphics-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                server_type: server,
+                path: path,
+                extensions: ['.mp4', '.wav']
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (result.files.length === 0) {
+                listDiv.innerHTML = '<p class="info-text">No music files found</p>';
+                return;
+            }
+            
+            let html = '';
+            result.files.forEach(file => {
+                const isChecked = selectedRegion3Files.includes(file.path) ? 'checked' : '';
+                html += `
+                    <div class="music-item">
+                        <input type="checkbox" id="r3_${btoa(file.path)}" value="${file.path}" ${isChecked} onchange="updateRegion3Selection(this)">
+                        <label for="r3_${btoa(file.path)}">${file.name}</label>
+                    </div>
+                `;
+            });
+            
+            listDiv.innerHTML = html;
+        } else {
+            listDiv.innerHTML = `<p class="error-text">Error: ${result.message}</p>`;
+        }
+    } catch (error) {
+        listDiv.innerHTML = `<p class="error-text">Error loading music files: ${error.message}</p>`;
+    }
+}
+
+function updateRegion1Selection(checkbox) {
+    if (checkbox.checked) {
+        if (!selectedRegion1Files.includes(checkbox.value)) {
+            selectedRegion1Files.push(checkbox.value);
+        }
+    } else {
+        selectedRegion1Files = selectedRegion1Files.filter(file => file !== checkbox.value);
+    }
+    updateGenerateButton();
+}
+
+function updateRegion2Selection(radio) {
+    selectedRegion2File = radio.value;
+    updateGenerateButton();
+}
+
+function updateRegion3Selection(checkbox) {
+    if (checkbox.checked) {
+        if (!selectedRegion3Files.includes(checkbox.value)) {
+            selectedRegion3Files.push(checkbox.value);
+        }
+    } else {
+        selectedRegion3Files = selectedRegion3Files.filter(file => file !== checkbox.value);
+    }
+    updateGenerateButton();
+}
+
+function updateGenerateButton() {
+    const button = document.getElementById('generateProjectBtn');
+    if (selectedRegion1Files.length > 0 && selectedRegion2File && selectedRegion3Files.length > 0) {
+        button.disabled = false;
+    } else {
+        button.disabled = true;
+    }
+}
+
+function showGenerateProjectModal() {
+    const modal = document.getElementById('generateProjectModal');
+    modal.style.display = 'block';
+    
+    // Update summary
+    const summaryDiv = document.getElementById('projectSummary');
+    let html = '<div class="project-summary-item"><strong>Region 1 (Upper):</strong> ' + selectedRegion1Files.length + ' graphics selected</div>';
+    html += '<div class="project-summary-item"><strong>Region 2 (Lower):</strong> ' + (selectedRegion2File ? selectedRegion2File.split('/').pop() : 'None') + '</div>';
+    html += '<div class="project-summary-item"><strong>Region 3 (Music):</strong> ' + selectedRegion3Files.length + ' music files selected</div>';
+    
+    summaryDiv.innerHTML = html;
+}
+
+function closeGenerateProjectModal() {
+    document.getElementById('generateProjectModal').style.display = 'none';
+}
+
+async function generateProjectFile() {
+    const projectName = document.getElementById('projectFileName').value.trim();
+    const exportPath = document.getElementById('projectExportPath').value.trim();
+    const exportServer = document.getElementById('projectExportServer').value;
+    
+    if (!projectName) {
+        alert('Please enter a project file name');
+        return;
+    }
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-prj-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                project_name: projectName,
+                export_path: exportPath,
+                export_server: exportServer,
+                region1_files: selectedRegion1Files,
+                region2_file: selectedRegion2File,
+                region3_files: selectedRegion3Files
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Success', result.message, 'success');
+            closeGenerateProjectModal();
+            
+            // Clear selections
+            selectedRegion1Files = [];
+            selectedRegion2File = null;
+            selectedRegion3Files = [];
+            
+            // Reload lists to clear checkboxes
+            if (document.getElementById('region1Server').value) loadRegion1Graphics();
+            if (document.getElementById('region2Server').value) loadRegion2Graphics();
+            if (document.getElementById('region3Server').value) loadMusicFiles();
+            
+            updateGenerateButton();
+        } else {
+            showNotification('Error', result.message, 'error');
+        }
+    } catch (error) {
+        showNotification('Error', 'Failed to generate project file: ' + error.message, 'error');
+    }
+}
+
+// Make Fill Graphics functions available globally
+window.loadRegion1Graphics = loadRegion1Graphics;
+window.loadRegion2Graphics = loadRegion2Graphics;
+window.loadMusicFiles = loadMusicFiles;
+window.updateRegion1Selection = updateRegion1Selection;
+window.updateRegion2Selection = updateRegion2Selection;
+window.updateRegion3Selection = updateRegion3Selection;
+window.showGenerateProjectModal = showGenerateProjectModal;
+window.closeGenerateProjectModal = closeGenerateProjectModal;
+window.generateProjectFile = generateProjectFile;
