@@ -100,96 +100,68 @@
                 </div>
             </div>
 
-            <!-- Scanning Configuration Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h3><i class="fas fa-folder-open"></i> Scanning Configuration</h3>
-                </div>
-                <div class="scanning-config">
-                    <p class="info-text">Select which folders to include when scanning:</p>
-                    
-                    <div class="folder-selection">
-                        <h4>Available Folders:</h4>
-                        <div class="folder-checkboxes">
-                            <div class="checkbox-group">
-                                <input type="checkbox" id="scanOnAirContent" checked>
-                                <label for="scanOnAirContent">
-                                    <strong>On-Air Content</strong>
-                                    <span class="folder-path">/mnt/main/ATL26 On-Air Content</span>
-                                    <span class="sync-mode">→ One-way sync</span>
-                                </label>
-                            </div>
-                            <div class="checkbox-group">
-                                <input type="checkbox" id="scanRecordings" checked>
-                                <label for="scanRecordings">
-                                    <strong>Recordings</strong>
-                                    <span class="folder-path">/mnt/main/Recordings</span>
-                                    <span class="sync-mode">↔ Bidirectional sync</span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="scan-actions">
-                        <button class="button primary" onclick="scanSelectedFolders()">
-                            <i class="fas fa-search"></i> Scan Selected Folders
-                        </button>
-                        <button class="button secondary" onclick="selectAllFolders()">
-                            <i class="fas fa-check-square"></i> Select All
-                        </button>
-                        <button class="button secondary" onclick="deselectAllFolders()">
-                            <i class="fas fa-square"></i> Deselect All
-                        </button>
-                    </div>
-                </div>
-            </div>
 
             <div class="card">
-                <h3><i class="fas fa-search"></i> File Analysis</h3>
+                <h3><i class="fas fa-search"></i> File Scanning and Analysis</h3>
                 <div class="action-buttons">
-                    <button class="button primary" onclick="scanFiles()" style="display: none;">
-                        <i class="fas fa-search"></i> Scan Files
-                    </button>
-                    <button class="button" onclick="compareFiles()" disabled>
-                        <i class="fas fa-balance-scale"></i> Compare Files
-                    </button>
-                    <button class="button" onclick="analyzeFiles()" disabled id="analyzeFilesBtn">
-                        <i class="fas fa-brain"></i> Analyze Files
-                    </button>
-                    <button class="button success" onclick="addAllToSyncQueue()">
-                        <i class="fas fa-plus"></i> Add All to Sync
-                    </button>
-                    <button class="button" id="addFolderButton" onclick="addAllFromFolderToSyncQueue()" disabled>
-                        <i class="fas fa-folder-plus"></i> Add Folder
-                    </button>
-                    <button class="button analysis" id="analyzeFolderButton" onclick="analyzeAllFromFolder()" disabled>
-                        <i class="fas fa-brain"></i> Analyze Folder
-                    </button>
-                    <button class="button analysis" id="analyzeAllUnanalyzedButton" onclick="addAllUnanalyzedToAnalysisQueue()" disabled>
-                        <i class="fas fa-brain"></i> Analyze All Unanalyzed
-                    </button>
-                    <button class="button primary" id="startAnalysisButton" onclick="startAnalysis()" disabled>
-                        <i class="fas fa-play"></i> Start Analysis
-                    </button>
-                    <button class="button danger" onclick="stopAnalysis()" id="stopAnalysisButton" disabled>
-                        <i class="fas fa-stop"></i> Stop Analysis
-                    </button>
-                    <button class="button warning" onclick="clearAnalysisQueue()" id="clearAnalysisButton" disabled>
-                        <i class="fas fa-trash"></i> Clear Analysis Queue
-                    </button>
-                    <button class="button success small" onclick="toggleAutoRestart()" id="autoRestartToggle">
-                        <i class="fas fa-toggle-on"></i> Auto-Restart: ON
-                    </button>
-                    <button class="button success small" onclick="togglePeriodicRescanning()" id="rescanToggle">
-                        <i class="fas fa-toggle-on"></i> Auto-Rescan: ON
-                    </button>
-                    <div class="rescan-config" style="margin-top: 0.5rem;">
-                        <label for="rescanIntervalInput" style="font-size: 0.8rem; margin-right: 0.5rem;">Rescan Interval:</label>
-                        <input type="number" id="rescanIntervalInput" min="30" max="600" value="120" style="width: 80px; font-size: 0.8rem;">
-                        <span style="font-size: 0.8rem; margin-left: 0.25rem;">seconds</span>
-                        <button class="button secondary small" onclick="updateRescanInterval()" style="margin-left: 0.5rem; font-size: 0.7rem;">
-                            <i class="fas fa-check"></i> Update
+                    <!-- First row: Basic file operations -->
+                    <div class="action-buttons-row">
+                        <button class="button primary" onclick="scanSelectedFolders()">
+                            <i class="fas fa-search"></i> Scan Files
                         </button>
+                        <button class="button secondary" onclick="compareFiles()" disabled>
+                            <i class="fas fa-balance-scale"></i> Compare Files
+                        </button>
+                        <button class="button secondary" onclick="analyzeFiles()" disabled id="analyzeFilesBtn">
+                            <i class="fas fa-brain"></i> Analyze Files
+                        </button>
+                        <button class="button success" onclick="addAllToSyncQueue()">
+                            <i class="fas fa-plus"></i> Add All to Sync
+                        </button>
+                    </div>
+                    
+                    <!-- Second row: Folder operations -->
+                    <div class="action-buttons-row" style="margin-top: 15px;">
+                        <button class="button secondary" id="addFolderButton" onclick="addAllFromFolderToSyncQueue()" disabled>
+                            <i class="fas fa-folder-plus"></i> Add Folder
+                        </button>
+                        <button class="button info" id="analyzeFolderButton" onclick="analyzeAllFromFolder()" disabled>
+                            <i class="fas fa-brain"></i> Analyze Folder
+                        </button>
+                        <button class="button info" id="analyzeAllUnanalyzedButton" onclick="addAllUnanalyzedToAnalysisQueue()" disabled>
+                            <i class="fas fa-brain"></i> Analyze All Unanalyzed
+                        </button>
+                    </div>
+                    
+                    <!-- Third row: Analysis controls -->
+                    <div class="action-buttons-row" style="margin-top: 15px;">
+                        <button class="button primary" id="startAnalysisButton" onclick="startAnalysis()" disabled>
+                            <i class="fas fa-play"></i> Start Analysis
+                        </button>
+                        <button class="button danger" onclick="stopAnalysis()" id="stopAnalysisButton" disabled>
+                            <i class="fas fa-stop"></i> Stop Analysis
+                        </button>
+                        <button class="button warning" onclick="clearAnalysisQueue()" id="clearAnalysisButton" disabled>
+                            <i class="fas fa-trash"></i> Clear Analysis Queue
+                        </button>
+                    </div>
+                    
+                    <!-- Fourth row: Auto toggles and settings -->
+                    <div class="action-buttons-row" style="margin-top: 15px;">
+                        <button class="button success" onclick="toggleAutoRestart()" id="autoRestartToggle">
+                            <i class="fas fa-toggle-on"></i> Auto-Restart: ON
+                        </button>
+                        <button class="button success" onclick="togglePeriodicRescanning()" id="rescanToggle">
+                            <i class="fas fa-toggle-on"></i> Auto-Rescan: ON
+                        </button>
+                        <div class="rescan-config" style="display: flex; align-items: center; gap: 8px;">
+                            <label for="rescanIntervalInput" style="font-size: 0.875rem;">Rescan Interval:</label>
+                            <input type="number" id="rescanIntervalInput" min="30" max="600" value="120" style="width: 80px;">
+                            <span style="font-size: 0.875rem;">seconds</span>
+                            <button class="button secondary" onclick="updateRescanInterval()">
+                                <i class="fas fa-check"></i> Update
+                            </button>
+                        </div>
                     </div>
                 </div>
                 
@@ -224,7 +196,7 @@
                     </button>
                 </div>
                 
-                <div class="sync-actions">
+                <div class="sync-actions" style="margin-top: 15px;">
                     <button class="button primary large" onclick="startSync()" id="syncButton" disabled>
                         <i class="fas fa-sync-alt"></i> Start Sync
                     </button>
@@ -880,33 +852,40 @@
             <div class="card-header">
                 <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
                 <div class="template-buttons">
-                    <button class="button primary small" onclick="console.log('Daily button clicked'); showLoadTemplateModal()">
-                        <i class="fas fa-file-import"></i> Import Daily Template
-                    </button>
-                    <button class="button primary small" onclick="console.log('Weekly button clicked'); showLoadWeeklyTemplateModal()">
-                        <i class="fas fa-calendar-week"></i> Import Weekly Template
-                    </button>
-                    <button class="button primary small" onclick="console.log('Monthly button clicked'); showLoadMonthlyTemplateModal()">
-                        <i class="fas fa-calendar-alt"></i> Import Monthly Template
-                    </button>
-                    <button class="button secondary small" onclick="console.log('Fill gaps button clicked'); fillScheduleGaps()">
-                        <i class="fas fa-fill"></i> Fill Schedule Gaps
-                    </button>
-                    <button class="button info small" onclick="showTemplateLibrary()">
-                        <i class="fas fa-folder-open"></i> Template Library
-                    </button>
-                    <button class="button warning small" onclick="importDailyMeetings()">
-                        <i class="fas fa-calendar-day"></i> Import Daily Meetings
-                    </button>
-                    <button class="button warning small" onclick="importWeeklyMeetings()">
-                        <i class="fas fa-calendar-week"></i> Import Weekly Meetings
-                    </button>
-                    <button class="button warning small" onclick="importMonthlyMeetings()">
-                        <i class="fas fa-calendar"></i> Import Monthly Meetings
-                    </button>
-                    <button class="button success small" onclick="exportCurrentTemplate()" id="exportTemplateBtn" style="display: none;">
-                        <i class="fas fa-file-export"></i> Export Template
-                    </button>
+                    <!-- First row of buttons -->
+                    <div class="template-buttons-row">
+                        <button class="button primary small" onclick="console.log('Daily button clicked'); showLoadTemplateModal()">
+                            <i class="fas fa-file-import"></i> Import Daily Template
+                        </button>
+                        <button class="button primary small" onclick="console.log('Weekly button clicked'); showLoadWeeklyTemplateModal()">
+                            <i class="fas fa-calendar-week"></i> Import Weekly Template
+                        </button>
+                        <button class="button primary small" onclick="console.log('Monthly button clicked'); showLoadMonthlyTemplateModal()">
+                            <i class="fas fa-calendar-alt"></i> Import Monthly Template
+                        </button>
+                        <button class="button info small" onclick="showTemplateLibrary()">
+                            <i class="fas fa-folder-open"></i> Template Library
+                        </button>
+                    </div>
+                    
+                    <!-- Second row of buttons -->
+                    <div class="template-buttons-row" style="margin-top: 15px;">
+                        <button class="button warning small" onclick="importDailyMeetings()">
+                            <i class="fas fa-calendar-day"></i> Import Daily Meetings
+                        </button>
+                        <button class="button warning small" onclick="importWeeklyMeetings()">
+                            <i class="fas fa-calendar-week"></i> Import Weekly Meetings
+                        </button>
+                        <button class="button warning small" onclick="importMonthlyMeetings()">
+                            <i class="fas fa-calendar"></i> Import Monthly Meetings
+                        </button>
+                        <button class="button secondary small" onclick="console.log('Fill gaps button clicked'); fillScheduleGaps()">
+                            <i class="fas fa-fill"></i> Fill Schedule Gaps
+                        </button>
+                        <button class="button success small" onclick="exportCurrentTemplate()" id="exportTemplateBtn" style="display: none;">
+                            <i class="fas fa-file-export"></i> Export Template
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="card-content">
