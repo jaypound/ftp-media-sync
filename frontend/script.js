@@ -1712,28 +1712,32 @@ function showPanel(panelName) {
         statusLogsCard.style.display = (panelName === 'dashboard') ? 'block' : 'none';
     }
     
+    // Update AppState current panel
+    if (window.AppState) {
+        window.AppState.setCurrentPanel(panelName);
+    }
+    
     // Dispatch custom event for panel change
     window.dispatchEvent(new CustomEvent('panelChanged', { detail: { panel: panelName } }));
     
-    // Update dashboard stats when showing dashboard
-    if (panelName === 'dashboard') {
-        updateDashboardStats();
-        // Hide Schedule Templates card on dashboard
-        const scheduleTemplatesCard = document.getElementById('scheduleTemplatesCard');
-        if (scheduleTemplatesCard) {
-            scheduleTemplatesCard.style.display = 'none';
-        }
-    } else if (panelName === 'scheduling') {
-        // Show Schedule Templates card on scheduling tab
-        const scheduleTemplatesCard = document.getElementById('scheduleTemplatesCard');
-        if (scheduleTemplatesCard) {
-            scheduleTemplatesCard.style.display = 'block';
-        }
-    }
-    
-    // Load AI settings when showing AI settings panel
-    if (panelName === 'ai-settings') {
-        loadAISettings();
+    // Panel-specific actions
+    switch(panelName) {
+        case 'dashboard':
+            if (window.dashboardUpdateStats) {
+                window.dashboardUpdateStats();
+            } else {
+                updateDashboardStats(); // Legacy fallback
+            }
+            break;
+        case 'ai-settings':
+            loadAISettings();
+            break;
+        case 'scheduling':
+            // Module will handle its own initialization
+            break;
+        case 'servers':
+            // Module will handle its own initialization
+            break;
     }
 }
 
@@ -5123,6 +5127,13 @@ async function listAllSchedules() {
 }
 
 function displayScheduleList(schedules) {
+    // Delegate to the new scheduling module function
+    if (window.schedulingDisplayScheduleList) {
+        window.schedulingDisplayScheduleList(schedules);
+        return;
+    }
+    
+    // Fallback to old implementation
     const scheduleDisplay = document.getElementById('scheduleDisplay');
     
     if (!scheduleDisplay) return;
@@ -5505,6 +5516,13 @@ function parseTimeToSeconds(timeStr) {
 }
 
 function displayScheduleDetails(schedule) {
+    // Delegate to the new scheduling module function
+    if (window.schedulingDisplayScheduleDetails) {
+        window.schedulingDisplayScheduleDetails(schedule);
+        return;
+    }
+    
+    // Fallback to old implementation
     const scheduleDisplay = document.getElementById('scheduleDisplay');
     
     if (!scheduleDisplay) return;
@@ -8501,10 +8519,19 @@ function displayTemplate() {
     }
     
     // Show template info
-    document.getElementById('templateInfo').style.display = 'block';
+    const templateInfoEl = document.getElementById('dashboardTemplateInfo');
+    if (templateInfoEl) {
+        templateInfoEl.style.display = 'block';
+    }
     const scheduleType = currentTemplate.type === 'weekly' ? 'Weekly' : 'Daily';
-    document.getElementById('templateName').textContent = `${currentTemplate.filename || 'Untitled'} (${scheduleType})`;
-    document.getElementById('templateItemCount').textContent = currentTemplate.items.length;
+    const templateNameEl = document.getElementById('dashboardTemplateName');
+    if (templateNameEl) {
+        templateNameEl.textContent = `${currentTemplate.filename || 'Untitled'} (${scheduleType})`;
+    }
+    const templateItemCountEl = document.getElementById('dashboardTemplateItemCount');
+    if (templateItemCountEl) {
+        templateItemCountEl.textContent = currentTemplate.items.length;
+    }
     
     // Calculate total duration
     let totalDuration = 0;

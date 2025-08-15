@@ -6,6 +6,16 @@
     <title>FTP Media Sync for Castus Servers</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Module-specific CSS -->
+    <link rel="stylesheet" href="dashboard/dashboard.css">
+    <link rel="stylesheet" href="servers/servers.css">
+    <link rel="stylesheet" href="settings/settings.css">
+    <link rel="stylesheet" href="ai_settings/ai_settings.css">
+    <link rel="stylesheet" href="admin/admin.css">
+    <link rel="stylesheet" href="scheduling/scheduling.css">
+    <link rel="stylesheet" href="meeting_schedule/meeting_schedule.css">
+    <link rel="stylesheet" href="fill_graphics/fill_graphics.css">
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -59,57 +69,57 @@
     <div class="container">
 
         <!-- Dashboard Panel -->
-        <div id="dashboard" class="panel active">
-            <div class="panel-header">
+        <div id="dashboard" class="panel dashboard-panel active">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-home"></i> Dashboard</h2>
                 <p>Monitor and control your FTP synchronization</p>
             </div>
 
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon">
+            <div class="dashboard-stats-grid">
+                <div class="dashboard-stat-card">
+                    <div class="dashboard-stat-icon">
                         <i class="fas fa-server"></i>
                     </div>
-                    <div class="stat-content">
-                        <h3 id="sourceStatus">Source Server</h3>
+                    <div class="dashboard-stat-content">
+                        <h3>Source Server</h3>
                         <p id="sourceStatusText">Not Connected</p>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon">
+                <div class="dashboard-stat-card">
+                    <div class="dashboard-stat-icon">
                         <i class="fas fa-server"></i>
                     </div>
-                    <div class="stat-content">
-                        <h3 id="targetStatus">Target Server</h3>
+                    <div class="dashboard-stat-content">
+                        <h3>Target Server</h3>
                         <p id="targetStatusText">Not Connected</p>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon">
+                <div class="dashboard-stat-card">
+                    <div class="dashboard-stat-icon">
                         <i class="fas fa-file"></i>
                     </div>
-                    <div class="stat-content">
-                        <h3 id="fileCount">Files Scanned</h3>
+                    <div class="dashboard-stat-content">
+                        <h3>Files Scanned</h3>
                         <p id="fileCountText">0 files</p>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon">
+                <div class="dashboard-stat-card">
+                    <div class="dashboard-stat-icon">
                         <i class="fas fa-sync-alt"></i>
                     </div>
-                    <div class="stat-content">
-                        <h3 id="syncStatus">Sync Queue</h3>
+                    <div class="dashboard-stat-content">
+                        <h3>Sync Queue</h3>
                         <p id="syncStatusText">0 files queued</p>
                     </div>
                 </div>
             </div>
 
 
-            <div class="card">
+            <div class="dashboard-card">
                 <h3><i class="fas fa-search"></i> File Scanning and Analysis</h3>
-                <div class="action-buttons">
+                <div class="dashboard-action-buttons">
                     <!-- First row: Basic file operations -->
-                    <div class="action-buttons-row">
+                    <div class="dashboard-action-buttons-row">
                         <button class="button primary small" onclick="scanSelectedFolders()">
                             <i class="fas fa-search"></i> Scan Files
                         </button>
@@ -229,15 +239,15 @@
         </div>
 
         <!-- Servers Panel -->
-        <div id="servers" class="panel">
-            <div class="panel-header">
+        <div id="servers" class="panel servers-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-server"></i> Server Configuration</h2>
                 <p>Configure your source and target FTP servers</p>
             </div>
             
-            <div class="server-grid">
-                <div class="server-card">
-                    <div class="server-header">
+            <div class="servers-grid">
+                <div class="servers-card servers-source-card">
+                    <div class="servers-header">
                         <h3><i class="fas fa-upload"></i> Source Server</h3>
                         <button class="button small" onclick="testConnection('source')" id="sourceTestBtn">
                             <i class="fas fa-plug"></i> Test Connection
@@ -271,8 +281,8 @@
                     </div>
                 </div>
 
-                <div class="server-card">
-                    <div class="server-header">
+                <div class="servers-card servers-target-card">
+                    <div class="servers-header">
                         <h3><i class="fas fa-download"></i> Target Server</h3>
                         <button class="button small" onclick="testConnection('target')" id="targetTestBtn">
                             <i class="fas fa-plug"></i> Test Connection
@@ -309,8 +319,8 @@
         </div>
 
         <!-- Settings Panel -->
-        <div id="settings" class="panel">
-            <div class="panel-header">
+        <div id="settings" class="panel settings-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-cog"></i> Sync Settings</h2>
                 <p>Configure file filtering and synchronization options</p>
             </div>
@@ -362,8 +372,8 @@
         </div>
 
         <!-- AI Settings Panel -->
-        <div id="ai-settings" class="panel">
-            <div class="panel-header">
+        <div id="ai-settings" class="panel ai-settings-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-brain"></i> AI Analysis Settings</h2>
                 <p>Configure AI provider and analysis options</p>
             </div>
@@ -433,8 +443,8 @@
         </div>
 
         <!-- Admin Panel -->
-        <div id="admin" class="panel">
-            <div class="panel-header">
+        <div id="admin" class="panel admin-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-tools"></i> Administration</h2>
                 <p>Configuration management and system tools</p>
             </div>
@@ -480,8 +490,8 @@
         </div>
 
         <!-- Scheduling Panel ---->
-        <div id="scheduling" class="panel">
-            <div class="panel-header">
+        <div id="scheduling" class="panel scheduling-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-calendar-alt"></i> ATL26 Comcast Channel 26 Scheduling</h2>
                 <p>Schedule analyzed content for broadcast on ATL26 Comcast Channel 26</p>
             </div>
@@ -609,6 +619,56 @@
                     <div id="scheduleDisplay" class="schedule-display">
                         <p>Select a date and click "View Schedule" to display the daily schedule, or click "List All Schedules" to see all available schedules</p>
                     </div>
+                    </div>
+                </div>
+                
+                <!-- Schedule Templates Section -->
+                <div class="scheduling-card" id="scheduleTemplatesCard">
+                    <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
+                    <div class="card-content">
+                        <div class="template-buttons">
+                            <!-- First row of buttons -->
+                            <div class="template-buttons-row">
+                                <button class="button primary small" onclick="console.log('Daily button clicked'); showLoadTemplateModal()">
+                                    <i class="fas fa-file-import"></i> Import Daily Template
+                                </button>
+                                <button class="button primary small" onclick="console.log('Weekly button clicked'); showLoadWeeklyTemplateModal()">
+                                    <i class="fas fa-calendar-week"></i> Import Weekly Template
+                                </button>
+                                <button class="button primary small" onclick="console.log('Monthly button clicked'); showLoadMonthlyTemplateModal()">
+                                    <i class="fas fa-calendar-alt"></i> Import Monthly Template
+                                </button>
+                                <button class="button info small" onclick="showTemplateLibrary()">
+                                    <i class="fas fa-folder-open"></i> Template Library
+                                </button>
+                            </div>
+                            
+                            <!-- Second row of buttons -->
+                            <div class="template-buttons-row" style="margin-top: 15px;">
+                                <button class="button warning small" onclick="importDailyMeetings()">
+                                    <i class="fas fa-calendar-day"></i> Import Daily Meetings
+                                </button>
+                                <button class="button warning small" onclick="importWeeklyMeetings()">
+                                    <i class="fas fa-calendar-week"></i> Import Weekly Meetings
+                                </button>
+                                <button class="button warning small" onclick="importMonthlyMeetings()">
+                                    <i class="fas fa-calendar"></i> Import Monthly Meetings
+                                </button>
+                                <button class="button secondary small" onclick="console.log('Fill gaps button clicked'); fillScheduleGaps()">
+                                    <i class="fas fa-fill"></i> Fill Schedule Gaps
+                                </button>
+                                <button class="button success small" onclick="exportCurrentTemplate()" id="exportTemplateBtn" style="display: none;">
+                                    <i class="fas fa-file-export"></i> Export Template
+                                </button>
+                            </div>
+                        </div>
+                        <div id="schedulingTemplateInfo" class="scheduling-template-info" style="display: none;">
+                            <p><strong>Template:</strong> <span id="schedulingTemplateName">Untitled</span></p>
+                            <p><strong>Items:</strong> <span id="schedulingTemplateItemCount">0</span> | <strong>Duration:</strong> <span id="schedulingTemplateDuration">00:00:00</span></p>
+                        </div>
+                        <div id="schedulingTemplateDisplay" class="scheduling-template-display">
+                            <p style="text-align: center; color: #666;">Load a template file to begin editing</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -740,33 +800,33 @@
         </div>
 
         <!-- Meetings Schedule Panel -->
-        <div id="meetings" class="panel">
-            <div class="panel-header">
+        <div id="meetings" class="panel meeting-schedule-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-calendar-check"></i> Atlanta City Council Meetings Schedule</h2>
                 <p>Manage and track Atlanta City Council meetings</p>
             </div>
             
-            <div class="card">
-                <div class="card-header">
+            <div class="meeting-schedule-import-card">
+                <div class="meeting-schedule-card-header">
                     <h3><i class="fas fa-sync"></i> Import Meetings</h3>
                 </div>
-                <div class="import-controls">
+                <div class="meeting-schedule-import-controls">
                     <button class="button primary" onclick="importMeetingsFromWeb()">
                         <i class="fas fa-download"></i> Import from City Council Website
                     </button>
-                    <span class="import-status" id="importStatus"></span>
+                    <span class="meeting-schedule-import-status" id="importStatus"></span>
                 </div>
             </div>
             
-            <div class="card">
-                <div class="card-header">
+            <div class="meeting-schedule-table-card">
+                <div class="meeting-schedule-card-header">
                     <h3><i class="fas fa-calendar"></i> Meetings Schedule</h3>
                     <button class="button primary small" onclick="openAddMeetingModal()">
                         <i class="fas fa-plus"></i> Add Meeting
                     </button>
                 </div>
-                <div class="meetings-table-container">
-                    <table class="meetings-table" id="meetingsTable">
+                <div class="meeting-schedule-table-container">
+                    <table class="meeting-schedule-table" id="meetingsTable">
                         <thead>
                             <tr>
                                 <th>Meeting Name</th>
@@ -790,18 +850,18 @@
         </div>
 
         <!-- Fill Graphics Panel -->
-        <div id="fill-graphics" class="panel">
-            <div class="panel-header">
+        <div id="fill-graphics" class="panel fill-graphics-panel">
+            <div class="dashboard-panel-header">
                 <h2><i class="fas fa-image"></i> Fill Graphics Generator</h2>
                 <p>Create slideshow project files (.prj) with graphics and music for Castus servers</p>
             </div>
             
-            <div class="card">
-                <div class="card-header">
+            <div class="fill-graphics-card fill-graphics-region1-card">
+                <div class="fill-graphics-card-header">
                     <h3><i class="fas fa-layer-group"></i> Region 1 - Upper Graphics</h3>
                 </div>
-                <div class="card-content">
-                    <p class="info-text">Select graphics (*.jpg, *.png) for slideshow</p>
+                <div class="fill-graphics-card-content">
+                    <p class="fill-graphics-info-text">Select graphics (*.jpg, *.png) for slideshow</p>
                     <div class="form-group">
                         <label for="region1Path">Folder Path</label>
                         <input type="text" id="region1Path" class="form-control" value="/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION" onchange="loadRegion1Graphics()">
@@ -828,12 +888,12 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
+            <div class="fill-graphics-card fill-graphics-region2-card">
+                <div class="fill-graphics-card-header">
                     <h3><i class="fas fa-layer-group"></i> Region 2 - Lower Graphics</h3>
                 </div>
-                <div class="card-content">
-                    <p class="info-text">Select one static graphic (*.png or *.jpg)</p>
+                <div class="fill-graphics-card-content">
+                    <p class="fill-graphics-info-text">Select one static graphic (*.png or *.jpg)</p>
                     <div class="form-group">
                         <label for="region2Path">Folder Path</label>
                         <input type="text" id="region2Path" class="form-control" value="/mnt/main/Graphics" onchange="loadRegion2Graphics()">
@@ -852,12 +912,12 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
+            <div class="fill-graphics-card fill-graphics-region3-card">
+                <div class="fill-graphics-card-header">
                     <h3><i class="fas fa-music"></i> Region 3 - Music</h3>
                 </div>
-                <div class="card-content">
-                    <p class="info-text">Select music files (*.mp4 or *.wav)</p>
+                <div class="fill-graphics-card-content">
+                    <p class="fill-graphics-info-text">Select music files (*.mp4 or *.wav)</p>
                     <div class="form-group">
                         <label for="region3Path">Folder Path</label>
                         <input type="text" id="region3Path" class="form-control" value="/mnt/main/Music" onchange="loadMusicFiles()">
@@ -876,11 +936,11 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
+            <div class="fill-graphics-card">
+                <div class="fill-graphics-card-header">
                     <h3><i class="fas fa-file-export"></i> Generate Project</h3>
                 </div>
-                <div class="card-content">
+                <div class="fill-graphics-card-content">
                     <button class="button primary large" onclick="showGenerateProjectModal()" id="generateProjectBtn" disabled>
                         <i class="fas fa-magic"></i> Generate .PRJ File
                     </button>
@@ -917,57 +977,6 @@
             </div>
         </div>
 
-        <!-- Schedule Templates Panel -->
-        <div class="card" id="scheduleTemplatesCard" style="margin-top: 1.5rem;">
-            <div class="card-header">
-                <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
-                <div class="template-buttons">
-                    <!-- First row of buttons -->
-                    <div class="template-buttons-row">
-                        <button class="button primary small" onclick="console.log('Daily button clicked'); showLoadTemplateModal()">
-                            <i class="fas fa-file-import"></i> Import Daily Template
-                        </button>
-                        <button class="button primary small" onclick="console.log('Weekly button clicked'); showLoadWeeklyTemplateModal()">
-                            <i class="fas fa-calendar-week"></i> Import Weekly Template
-                        </button>
-                        <button class="button primary small" onclick="console.log('Monthly button clicked'); showLoadMonthlyTemplateModal()">
-                            <i class="fas fa-calendar-alt"></i> Import Monthly Template
-                        </button>
-                        <button class="button info small" onclick="showTemplateLibrary()">
-                            <i class="fas fa-folder-open"></i> Template Library
-                        </button>
-                    </div>
-                    
-                    <!-- Second row of buttons -->
-                    <div class="template-buttons-row" style="margin-top: 15px;">
-                        <button class="button warning small" onclick="importDailyMeetings()">
-                            <i class="fas fa-calendar-day"></i> Import Daily Meetings
-                        </button>
-                        <button class="button warning small" onclick="importWeeklyMeetings()">
-                            <i class="fas fa-calendar-week"></i> Import Weekly Meetings
-                        </button>
-                        <button class="button warning small" onclick="importMonthlyMeetings()">
-                            <i class="fas fa-calendar"></i> Import Monthly Meetings
-                        </button>
-                        <button class="button secondary small" onclick="console.log('Fill gaps button clicked'); fillScheduleGaps()">
-                            <i class="fas fa-fill"></i> Fill Schedule Gaps
-                        </button>
-                        <button class="button success small" onclick="exportCurrentTemplate()" id="exportTemplateBtn" style="display: none;">
-                            <i class="fas fa-file-export"></i> Export Template
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="card-content">
-                <div id="dashboardTemplateInfo" class="template-info" style="display: none;">
-                    <p><strong>Template:</strong> <span id="dashboardTemplateName">Untitled</span></p>
-                    <p><strong>Items:</strong> <span id="dashboardTemplateItemCount">0</span> | <strong>Duration:</strong> <span id="dashboardTemplateDuration">00:00:00</span></p>
-                </div>
-                <div id="dashboardTemplateDisplay" class="template-display">
-                    <p style="text-align: center; color: #666;">Load a template file to begin editing</p>
-                </div>
-            </div>
-        </div>
 
         <!-- Meeting Trimmer Panel -->
         <div class="card" id="meetingTrimmerCard">
@@ -1630,6 +1639,23 @@
     <!-- Notification Container -->
     <div id="notificationContainer" class="notification-container"></div>
     
+    <!-- Core Scripts -->
+    <script src="main.js"></script>
+    <script src="api/base.api.js"></script>
+    <script src="api/scheduling.api.js"></script>
+    
+    <!-- Module-specific JavaScript -->
+    <script src="dashboard/dashboard.js"></script>
+    <script src="servers/servers.js"></script>
+    <script src="settings/settings.js"></script>
+    <script src="ai_settings/ai_settings.js"></script>
+    <script src="admin/admin.js"></script>
+    <script src="scheduling/scheduling.js"></script>
+    <script src="scheduling/scheduling_templates.js"></script>
+    <script src="meeting_schedule/meeting_schedule.js"></script>
+    <script src="fill_graphics/fill_graphics.js"></script>
+    
+    <!-- Legacy script for compatibility -->
     <script src="script.js"></script>
 </body>
 </html>

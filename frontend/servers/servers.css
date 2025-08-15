@@ -1,0 +1,232 @@
+/* Servers Module CSS */
+/* All classes prefixed with 'servers-' to avoid conflicts */
+
+/* Server Grid */
+.servers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+/* Server Card */
+.servers-card {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+}
+
+.servers-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Server Header */
+.servers-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.servers-header h3 {
+    margin: 0;
+    color: var(--text-primary, #333);
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Source Server Specific */
+.servers-source-card .servers-header h3 {
+    color: var(--primary-color, #2196f3);
+}
+
+/* Target Server Specific */
+.servers-target-card .servers-header h3 {
+    color: var(--success-color, #4caf50);
+}
+
+/* Form Elements */
+.servers-form-group {
+    margin-bottom: 1rem;
+}
+
+.servers-form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary, #666);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.servers-form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    font-size: 1rem;
+    background-color: var(--input-bg, #fff);
+    color: var(--text-primary, #333);
+    transition: all 0.2s ease;
+}
+
+.servers-form-control:focus {
+    outline: none;
+    border-color: var(--primary-color, #2196f3);
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+/* Form Row */
+.servers-form-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 1rem;
+}
+
+/* Connection Status */
+.servers-connection-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.servers-connection-status.connected {
+    background-color: var(--success-light, #e8f5e9);
+    color: var(--success-dark, #2e7d32);
+}
+
+.servers-connection-status.disconnected {
+    background-color: var(--error-light, #ffebee);
+    color: var(--error-dark, #c62828);
+}
+
+.servers-connection-status.connecting {
+    background-color: var(--warning-light, #fff3e0);
+    color: var(--warning-dark, #f57c00);
+}
+
+/* Test Button */
+.servers-test-button {
+    min-width: 140px;
+}
+
+/* Password Input Wrapper */
+.servers-password-wrapper {
+    position: relative;
+}
+
+.servers-password-toggle {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-secondary, #666);
+    cursor: pointer;
+    padding: 0.5rem;
+}
+
+.servers-password-toggle:hover {
+    color: var(--text-primary, #333);
+}
+
+/* Path Select Group */
+.servers-path-group {
+    margin-top: 1rem;
+}
+
+.servers-path-select {
+    width: 100%;
+    margin-bottom: 0.5rem;
+}
+
+.servers-path-input {
+    width: 100%;
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+/* Server Info Box */
+.servers-info-box {
+    background-color: var(--info-bg, #e3f2fd);
+    border: 1px solid var(--info-border, #90caf9);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.servers-info-box h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--info-color, #1565c0);
+    font-size: 0.875rem;
+}
+
+.servers-info-box p {
+    margin: 0.25rem 0;
+    font-size: 0.813rem;
+    color: var(--text-secondary, #666);
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .servers-card {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .servers-header {
+        border-color: #333;
+    }
+    
+    .servers-form-control {
+        background-color: #222;
+        border-color: #333;
+        color: #e0e0e0;
+    }
+    
+    .servers-form-control:focus {
+        border-color: #2196f3;
+        box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2);
+    }
+    
+    .servers-connection-status.connected {
+        background-color: rgba(76, 175, 80, 0.2);
+    }
+    
+    .servers-connection-status.disconnected {
+        background-color: rgba(244, 67, 54, 0.2);
+    }
+    
+    .servers-connection-status.connecting {
+        background-color: rgba(255, 152, 0, 0.2);
+    }
+    
+    .servers-info-box {
+        background-color: rgba(33, 150, 243, 0.1);
+        border-color: #1976d2;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 900px) {
+    .servers-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .servers-form-row {
+        grid-template-columns: 1fr;
+    }
+}

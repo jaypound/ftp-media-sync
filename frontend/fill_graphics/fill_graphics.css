@@ -1,0 +1,295 @@
+/* Fill Graphics Module CSS */
+/* All classes prefixed with 'fill-graphics-' to avoid conflicts */
+
+/* Fill Graphics Panel */
+.fill-graphics-panel {
+    padding: 1.5rem;
+    background-color: var(--panel-bg, #f5f6fa);
+    min-height: calc(100vh - 60px);
+}
+
+/* Region Card */
+.fill-graphics-card {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.fill-graphics-card-header {
+    background-color: var(--card-header-bg, #f8f9fa);
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px 12px 0 0;
+}
+
+.fill-graphics-card-header h3 {
+    margin: 0;
+    color: var(--text-primary, #333);
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.fill-graphics-card-content {
+    padding: 1.5rem;
+}
+
+/* Region Colors */
+.fill-graphics-region1-card .fill-graphics-card-header {
+    background-color: #e3f2fd;
+}
+
+.fill-graphics-region1-card .fill-graphics-card-header h3 {
+    color: #1976d2;
+}
+
+.fill-graphics-region2-card .fill-graphics-card-header {
+    background-color: #e8f5e9;
+}
+
+.fill-graphics-region2-card .fill-graphics-card-header h3 {
+    color: #388e3c;
+}
+
+.fill-graphics-region3-card .fill-graphics-card-header {
+    background-color: #f3e5f5;
+}
+
+.fill-graphics-region3-card .fill-graphics-card-header h3 {
+    color: #7b1fa2;
+}
+
+/* Info Text */
+.fill-graphics-info-text {
+    background-color: var(--info-bg, #f0f4f8);
+    border-left: 4px solid var(--info-border, #2196f3);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary, #666);
+}
+
+/* Form Elements */
+.fill-graphics-form-group {
+    margin-bottom: 1.5rem;
+}
+
+.fill-graphics-form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary, #666);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.fill-graphics-form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    font-size: 1rem;
+    background-color: var(--input-bg, #fff);
+    color: var(--text-primary, #333);
+    transition: all 0.2s ease;
+}
+
+.fill-graphics-form-control:focus {
+    outline: none;
+    border-color: var(--primary-color, #2196f3);
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+/* File Lists */
+.fill-graphics-list,
+.fill-graphics-music-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    background-color: var(--list-bg, #fafafa);
+}
+
+.fill-graphics-file-item {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: background-color 0.2s ease;
+    cursor: pointer;
+}
+
+.fill-graphics-file-item:last-child {
+    border-bottom: none;
+}
+
+.fill-graphics-file-item:hover {
+    background-color: var(--hover-bg, #f5f5f5);
+}
+
+.fill-graphics-file-item.selected {
+    background-color: var(--selected-bg, #e3f2fd);
+}
+
+/* Checkbox */
+.fill-graphics-file-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--primary-color, #2196f3);
+}
+
+/* File Info */
+.fill-graphics-file-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.fill-graphics-file-name {
+    font-size: 0.875rem;
+    color: var(--text-primary, #333);
+    font-weight: 500;
+}
+
+.fill-graphics-file-details {
+    font-size: 0.75rem;
+    color: var(--text-muted, #999);
+}
+
+/* File Icon */
+.fill-graphics-file-icon {
+    font-size: 1.25rem;
+    color: var(--icon-color, #757575);
+}
+
+.fill-graphics-file-icon.image {
+    color: #4caf50;
+}
+
+.fill-graphics-file-icon.music {
+    color: #ff9800;
+}
+
+/* Selection Actions */
+.fill-graphics-selection-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+/* Generate Button */
+.fill-graphics-generate-button {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    min-height: 56px;
+}
+
+/* Help Text */
+.fill-graphics-help-text {
+    text-align: center;
+    color: var(--text-muted, #999);
+    font-size: 0.875rem;
+    margin-top: 1rem;
+}
+
+/* Loading State */
+.fill-graphics-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    color: var(--text-secondary, #666);
+}
+
+.fill-graphics-loading i {
+    margin-right: 0.5rem;
+}
+
+/* Empty State */
+.fill-graphics-empty {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted, #999);
+}
+
+.fill-graphics-empty i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .fill-graphics-panel {
+        background-color: #0a0a0a;
+    }
+    
+    .fill-graphics-card {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .fill-graphics-card-header {
+        background-color: #222;
+        border-color: #333;
+    }
+    
+    .fill-graphics-region1-card .fill-graphics-card-header {
+        background-color: rgba(33, 150, 243, 0.1);
+    }
+    
+    .fill-graphics-region2-card .fill-graphics-card-header {
+        background-color: rgba(76, 175, 80, 0.1);
+    }
+    
+    .fill-graphics-region3-card .fill-graphics-card-header {
+        background-color: rgba(156, 39, 176, 0.1);
+    }
+    
+    .fill-graphics-info-text {
+        background-color: rgba(33, 150, 243, 0.1);
+        border-color: #1976d2;
+    }
+    
+    .fill-graphics-form-control {
+        background-color: #222;
+        border-color: #333;
+        color: #e0e0e0;
+    }
+    
+    .fill-graphics-list,
+    .fill-graphics-music-list {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .fill-graphics-file-item {
+        border-color: #333;
+    }
+    
+    .fill-graphics-file-item:hover {
+        background-color: #2a2a2a;
+    }
+    
+    .fill-graphics-file-item.selected {
+        background-color: rgba(33, 150, 243, 0.2);
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .fill-graphics-selection-actions {
+        flex-direction: column;
+    }
+    
+    .fill-graphics-selection-actions button {
+        width: 100%;
+    }
+}
