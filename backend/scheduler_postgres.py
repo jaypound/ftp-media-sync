@@ -55,10 +55,10 @@ class PostgreSQLScheduler:
         logger.info(f"Updated rotation order to: {rotation_order}")
     
     def get_available_content(self, duration_category: str, exclude_ids: List[int] = None, ignore_delays: bool = False) -> List[Dict[str, Any]]:
-        """Get available content for a specific duration category
+        """Get available content for a specific duration category or content type
         
         Args:
-            duration_category: The duration category to filter by
+            duration_category: The duration category (id, spots, short_form, long_form) or content type (AN, BMP, PSA, etc.) to filter by
             exclude_ids: List of asset IDs to exclude
             ignore_delays: If True, ignore replay delays (used as fallback)
         """
@@ -95,8 +95,18 @@ class PostgreSQLScheduler:
                 except Exception as e:
                     logger.warning(f"Could not load replay delay config, using defaults: {e}")
             
+            # Determine if we're filtering by duration category or content type
+            duration_categories = ['id', 'spots', 'short_form', 'long_form']
+            is_duration_category = duration_category in duration_categories
+            
+            # Build the appropriate filter condition
+            if is_duration_category:
+                filter_condition = "a.duration_category = %(duration_category)s"
+            else:
+                filter_condition = "a.content_type = %(duration_category)s"
+            
             # Build query to get available content
-            query = """
+            query = f"""
                 SELECT 
                     a.id as asset_id,
                     a.guid,
@@ -121,7 +131,7 @@ class PostgreSQLScheduler:
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                 WHERE 
                     a.analysis_completed = TRUE
-                    AND a.duration_category = %(duration_category)s
+                    AND {filter_condition}
                     AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
                     AND COALESCE(sm.content_expiry_date, CURRENT_TIMESTAMP + INTERVAL '1 year') > CURRENT_TIMESTAMP
                     AND NOT (i.file_path LIKE %(fill_pattern)s)
