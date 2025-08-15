@@ -10,12 +10,12 @@
 <body>
     <!-- Navigation Bar -->
     <nav class="navbar">
-        <div class="container">
-            <div class="nav-brand">
+        <div class="navbar-content">
+            <div class="navbar-brand">
                 <i class="fas fa-sync-alt"></i>
                 <span>FTP Media Sync for Castus Servers</span>
             </div>
-            <div class="nav-menu">
+            <div class="navbar-nav">
                 <button class="nav-item active" onclick="showPanel('dashboard')">
                     <i class="fas fa-home"></i>
                     Dashboard
@@ -110,52 +110,52 @@
                 <div class="action-buttons">
                     <!-- First row: Basic file operations -->
                     <div class="action-buttons-row">
-                        <button class="button primary" onclick="scanSelectedFolders()">
+                        <button class="button primary small" onclick="scanSelectedFolders()">
                             <i class="fas fa-search"></i> Scan Files
                         </button>
-                        <button class="button secondary" onclick="compareFiles()" disabled>
+                        <button class="button secondary small" onclick="compareFiles()" disabled>
                             <i class="fas fa-balance-scale"></i> Compare Files
                         </button>
-                        <button class="button secondary" onclick="analyzeFiles()" disabled id="analyzeFilesBtn">
+                        <button class="button secondary small" onclick="analyzeFiles()" disabled id="analyzeFilesBtn">
                             <i class="fas fa-brain"></i> Analyze Files
                         </button>
-                        <button class="button success" onclick="addAllToSyncQueue()">
+                        <button class="button success small" onclick="addAllToSyncQueue()">
                             <i class="fas fa-plus"></i> Add All to Sync
                         </button>
                     </div>
                     
                     <!-- Second row: Folder operations -->
                     <div class="action-buttons-row" style="margin-top: 15px;">
-                        <button class="button secondary" id="addFolderButton" onclick="addAllFromFolderToSyncQueue()" disabled>
+                        <button class="button secondary small" id="addFolderButton" onclick="addAllFromFolderToSyncQueue()" disabled>
                             <i class="fas fa-folder-plus"></i> Add Folder
                         </button>
-                        <button class="button info" id="analyzeFolderButton" onclick="analyzeAllFromFolder()" disabled>
+                        <button class="button info small" id="analyzeFolderButton" onclick="analyzeAllFromFolder()" disabled>
                             <i class="fas fa-brain"></i> Analyze Folder
                         </button>
-                        <button class="button info" id="analyzeAllUnanalyzedButton" onclick="addAllUnanalyzedToAnalysisQueue()" disabled>
+                        <button class="button info small" id="analyzeAllUnanalyzedButton" onclick="addAllUnanalyzedToAnalysisQueue()" disabled>
                             <i class="fas fa-brain"></i> Analyze All Unanalyzed
                         </button>
                     </div>
                     
                     <!-- Third row: Analysis controls -->
                     <div class="action-buttons-row" style="margin-top: 15px;">
-                        <button class="button primary" id="startAnalysisButton" onclick="startAnalysis()" disabled>
+                        <button class="button primary small" id="startAnalysisButton" onclick="startAnalysis()" disabled>
                             <i class="fas fa-play"></i> Start Analysis
                         </button>
-                        <button class="button danger" onclick="stopAnalysis()" id="stopAnalysisButton" disabled>
+                        <button class="button danger small" onclick="stopAnalysis()" id="stopAnalysisButton" disabled>
                             <i class="fas fa-stop"></i> Stop Analysis
                         </button>
-                        <button class="button warning" onclick="clearAnalysisQueue()" id="clearAnalysisButton" disabled>
+                        <button class="button warning small" onclick="clearAnalysisQueue()" id="clearAnalysisButton" disabled>
                             <i class="fas fa-trash"></i> Clear Analysis Queue
                         </button>
                     </div>
                     
                     <!-- Fourth row: Auto toggles and settings -->
                     <div class="action-buttons-row" style="margin-top: 15px;">
-                        <button class="button success" onclick="toggleAutoRestart()" id="autoRestartToggle">
+                        <button class="button success small" onclick="toggleAutoRestart()" id="autoRestartToggle">
                             <i class="fas fa-toggle-on"></i> Auto-Restart: ON
                         </button>
-                        <button class="button success" onclick="togglePeriodicRescanning()" id="rescanToggle">
+                        <button class="button success small" onclick="togglePeriodicRescanning()" id="rescanToggle">
                             <i class="fas fa-toggle-on"></i> Auto-Rescan: ON
                         </button>
                         <div class="rescan-config" style="display: flex; align-items: center; gap: 8px;">
@@ -189,31 +189,31 @@
                     <button class="button secondary small" onclick="restartAnalysis()" id="restartButton" disabled>
                         <i class="fas fa-redo"></i> Restart Analysis
                     </button>
-                    <button class="button warning" onclick="clearSyncQueue()">
+                    <button class="button warning small" onclick="clearSyncQueue()">
                         <i class="fas fa-trash"></i> Clear Queue
                     </button>
-                    <button class="button danger" onclick="addAllUnmatchedToDeleteQueue()" id="deleteAllUnmatchedButton" disabled>
+                    <button class="button danger small" onclick="addAllUnmatchedToDeleteQueue()" id="deleteAllUnmatchedButton" disabled>
                         <i class="fas fa-trash-alt"></i> Delete All Unmatched
                     </button>
-                    <button class="button danger" onclick="addFolderUnmatchedToDeleteQueue()" id="deleteFolderButton" disabled>
+                    <button class="button danger small" onclick="addFolderUnmatchedToDeleteQueue()" id="deleteFolderButton" disabled>
                         <i class="fas fa-folder-minus"></i> Delete Folder
                     </button>
                 </div>
                 
                 <div class="sync-actions" style="margin-top: 15px;">
-                    <button class="button primary large" onclick="startSync()" id="syncButton" disabled>
+                    <button class="button primary small" onclick="startSync()" id="syncButton" disabled>
                         <i class="fas fa-sync-alt"></i> Start Sync
                     </button>
-                    <button class="button danger" onclick="stopSync()" id="stopButton" disabled>
+                    <button class="button danger small" onclick="stopSync()" id="stopButton" disabled>
                         <i class="fas fa-stop"></i> Stop Sync
                     </button>
-                    <button class="button danger large" onclick="deleteFiles()" id="deleteButton" disabled>
+                    <button class="button danger small" onclick="deleteFiles()" id="deleteButton" disabled>
                         <i class="fas fa-trash"></i> Delete Files
                     </button>
-                    <button class="button warning" onclick="clearDeleteQueue()" id="clearDeleteButton" disabled>
+                    <button class="button warning small" onclick="clearDeleteQueue()" id="clearDeleteButton" disabled>
                         <i class="fas fa-trash-restore"></i> Clear Delete Queue
                     </button>
-                    <button class="button secondary" onclick="clearScannedFiles()">
+                    <button class="button secondary small" onclick="clearScannedFiles()">
                         <i class="fas fa-broom"></i> Clear Results
                     </button>
                 </div>
@@ -245,21 +245,21 @@
                     </div>
                     <div class="form-group">
                         <label for="sourceHost">Host</label>
-                        <input type="text" id="sourceHost" placeholder="192.168.1.100" value="192.168.1.100">
+                        <input type="text" id="sourceHost" class="form-control" placeholder="192.168.1.100" value="192.168.1.100">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="sourcePort">Port</label>
-                            <input type="number" id="sourcePort" placeholder="21" value="21">
+                            <input type="number" id="sourcePort" class="form-control" placeholder="21" value="21">
                         </div>
                         <div class="form-group">
                             <label for="sourceUser">Username</label>
-                            <input type="text" id="sourceUser" placeholder="username">
+                            <input type="text" id="sourceUser" class="form-control" placeholder="username">
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="sourcePass">Password</label>
-                        <input type="password" id="sourcePass" placeholder="password">
+                        <input type="password" id="sourcePass" class="form-control" placeholder="password">
                     </div>
                     <div class="form-group" style="display: none;">
                         <label for="sourcePathSelect">Path</label>
@@ -280,21 +280,21 @@
                     </div>
                     <div class="form-group">
                         <label for="targetHost">Host</label>
-                        <input type="text" id="targetHost" placeholder="192.168.1.101" value="192.168.1.101">
+                        <input type="text" id="targetHost" class="form-control" placeholder="192.168.1.101" value="192.168.1.101">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="targetPort">Port</label>
-                            <input type="number" id="targetPort" placeholder="21" value="21">
+                            <input type="number" id="targetPort" class="form-control" placeholder="21" value="21">
                         </div>
                         <div class="form-group">
                             <label for="targetUser">Username</label>
-                            <input type="text" id="targetUser" placeholder="username">
+                            <input type="text" id="targetUser" class="form-control" placeholder="username">
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="targetPass">Password</label>
-                        <input type="password" id="targetPass" placeholder="password">
+                        <input type="password" id="targetPass" class="form-control" placeholder="password">
                     </div>
                     <div class="form-group" style="display: none;">
                         <label for="targetPathSelect">Path</label>
@@ -320,17 +320,17 @@
                     <h3><i class="fas fa-filter"></i> File Filters</h3>
                     <div class="form-group">
                         <label for="fileFilter">File Extensions</label>
-                        <input type="text" id="fileFilter" placeholder="mp4,mkv,avi,mov,wmv" value="mp4,mkv,avi,mov,wmv">
+                        <input type="text" id="fileFilter" class="form-control" placeholder="mp4,mkv,avi,mov,wmv" value="mp4,mkv,avi,mov,wmv">
                         <small>Comma-separated list of file extensions</small>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="minFileSize">Min Size (MB)</label>
-                            <input type="number" id="minFileSize" placeholder="1" value="1">
+                            <input type="number" id="minFileSize" class="form-control" placeholder="1" value="1">
                         </div>
                         <div class="form-group">
                             <label for="maxFileSize">Max Size (GB)</label>
-                            <input type="number" id="maxFileSize" placeholder="50" value="50">
+                            <input type="number" id="maxFileSize" class="form-control" placeholder="50" value="50">
                         </div>
                     </div>
                 </div>
@@ -385,14 +385,14 @@
                     <h3><i class="fas fa-robot"></i> AI Provider</h3>
                     <div class="form-group">
                         <label for="aiProvider">AI Provider</label>
-                        <select id="aiProvider">
+                        <select id="aiProvider" class="form-control">
                             <option value="openai">OpenAI (GPT)</option>
                             <option value="anthropic">Anthropic (Claude)</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label for="aiModel">AI Model</label>
-                        <select id="aiModel">
+                        <select id="aiModel" class="form-control">
                             <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
                             <option value="gpt-4">GPT-4</option>
                             <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
@@ -405,15 +405,15 @@
                     <h3><i class="fas fa-key"></i> API Keys</h3>
                     <div class="form-group">
                         <label for="openaiApiKey">OpenAI API Key</label>
-                        <input type="password" id="openaiApiKey" placeholder="sk-...">
+                        <input type="password" id="openaiApiKey" class="form-control" placeholder="sk-...">
                     </div>
                     <div class="form-group">
                         <label for="anthropicApiKey">Anthropic API Key</label>
-                        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+                        <input type="password" id="anthropicApiKey" class="form-control" placeholder="sk-ant-...">
                     </div>
                     <div class="form-group">
                         <label for="maxChunkSize">Max Chunk Size</label>
-                        <input type="number" id="maxChunkSize" placeholder="4000" value="4000">
+                        <input type="number" id="maxChunkSize" class="form-control" placeholder="4000" value="4000">
                         <small>Maximum characters per AI analysis chunk</small>
                     </div>
                 </div>
@@ -562,7 +562,7 @@
                         <div class="schedule-creation">
                         <div class="form-group">
                             <label for="scheduleDate">Schedule Date</label>
-                            <input type="date" id="scheduleDate" value="">
+                            <input type="date" id="scheduleDate" class="form-control" value="">
                         </div>
                         <div class="schedule-buttons">
                             <button class="button success" onclick="createDailySchedule()">
@@ -586,7 +586,7 @@
                         <div class="schedule-management">
                         <div class="form-group">
                             <label for="viewScheduleDate">View Schedule Date</label>
-                            <input type="date" id="viewScheduleDate" value="">
+                            <input type="date" id="viewScheduleDate" class="form-control" value="">
                         </div>
                         <div class="schedule-buttons">
                             <button class="button secondary" onclick="listAllSchedules()">
@@ -814,6 +814,14 @@
                             <option value="target">Target Server</option>
                         </select>
                     </div>
+                    <div style="margin-bottom: 1rem;">
+                        <button class="button secondary small" onclick="selectAllRegion1Graphics()" id="selectAllRegion1Btn" style="display: none;">
+                            <i class="fas fa-check-square"></i> Select All
+                        </button>
+                        <button class="button secondary small" onclick="deselectAllRegion1Graphics()" id="deselectAllRegion1Btn" style="display: none; margin-left: 0.5rem;">
+                            <i class="fas fa-square"></i> Deselect All
+                        </button>
+                    </div>
                     <div class="graphics-list" id="region1GraphicsList">
                         <!-- Graphics will be loaded here -->
                     </div>
@@ -1032,7 +1040,9 @@
                     <i class="fas fa-eye"></i> Show Logs
                 </button>
             </div>
-            <div id="status" class="status" style="display: none;">Ready to sync. Configure your servers and click "Scan Files" to begin.</div>
+            <div id="status" class="status" style="display: none;">
+                <div class="log-entry info">Ready to sync. Configure your servers and click "Scan Files" to begin.</div>
+            </div>
         </div>
     </div>
 

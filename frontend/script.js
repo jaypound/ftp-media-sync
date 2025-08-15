@@ -89,7 +89,10 @@ function log(message, type = 'info') {
     const status = document.getElementById('status');
     const timestamp = new Date().toLocaleTimeString();
     const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
-    status.innerHTML += `[${timestamp}] ${prefix} ${message}\n`;
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry ${type}`;
+    logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${prefix} ${message}`;
+    status.appendChild(logEntry);
     status.scrollTop = status.scrollHeight;
 }
 
@@ -1697,6 +1700,18 @@ function showPanel(panelName) {
         activeNavItem.classList.add('active');
     }
     
+    // Show/hide Meeting Trimmer based on panel
+    const meetingTrimmerCard = document.getElementById('meetingTrimmerCard');
+    if (meetingTrimmerCard) {
+        meetingTrimmerCard.style.display = (panelName === 'meetings') ? 'block' : 'none';
+    }
+    
+    // Show/hide Status & Logs based on panel - only show on dashboard
+    const statusLogsCard = document.querySelector('.card:has(.fa-terminal)');
+    if (statusLogsCard) {
+        statusLogsCard.style.display = (panelName === 'dashboard') ? 'block' : 'none';
+    }
+    
     // Dispatch custom event for panel change
     window.dispatchEvent(new CustomEvent('panelChanged', { detail: { panel: panelName } }));
     
@@ -1893,12 +1908,12 @@ function toggleDarkMode() {
     const body = document.body;
     const darkModeToggle = document.getElementById('darkModeToggle');
     
-    if (body.getAttribute('data-theme') === 'dark') {
-        body.removeAttribute('data-theme');
+    if (body.classList.contains('dark-mode')) {
+        body.classList.remove('dark-mode');
         darkModeToggle.innerHTML = '<i class="fas fa-moon"></i> Dark';
         localStorage.setItem('theme', 'light');
     } else {
-        body.setAttribute('data-theme', 'dark');
+        body.classList.add('dark-mode');
         darkModeToggle.innerHTML = '<i class="fas fa-sun"></i> Light';
         localStorage.setItem('theme', 'dark');
     }
@@ -1910,10 +1925,10 @@ function initializeTheme() {
     const darkModeToggle = document.getElementById('darkModeToggle');
     
     if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        body.setAttribute('data-theme', 'dark');
+        body.classList.add('dark-mode');
         darkModeToggle.innerHTML = '<i class="fas fa-sun"></i> Light';
     } else {
-        body.removeAttribute('data-theme');
+        body.classList.remove('dark-mode');
         darkModeToggle.innerHTML = '<i class="fas fa-moon"></i> Dark';
     }
 }
@@ -3581,6 +3596,21 @@ function generateRotationConfigHTML() {
                         <option value="spots">Spots</option>
                         <option value="short_form">Short Form</option>
                         <option value="long_form">Long Form</option>
+                        <option value="" disabled>──────────</option>
+                        <option value="AN">Atlanta Now</option>
+                        <option value="BMP">Bumps</option>
+                        <option value="IMOW">IMOW</option>
+                        <option value="IM">Inclusion Months</option>
+                        <option value="IA">Inside Atlanta</option>
+                        <option value="LM">Legislative Minute</option>
+                        <option value="MTG">Meetings</option>
+                        <option value="MAF">Moving Atlanta Forward</option>
+                        <option value="PKG">Packages</option>
+                        <option value="PMO">Promos</option>
+                        <option value="PSA">PSAs</option>
+                        <option value="SZL">Sizzles</option>
+                        <option value="SPP">Special Projects</option>
+                        <option value="OTHER">Other</option>
                     </select>
                     <button onclick="addCategoryToRotation()">Add to Rotation</button>
                 </div>
@@ -3592,7 +3622,7 @@ function generateRotationConfigHTML() {
             </div>
             
             <div class="rotation-note">
-                <p><strong>Note:</strong> The scheduler will cycle through categories in this order when selecting content. Adding duplicates increases that category's selection frequency.</p>
+                <p><strong>Note:</strong> The scheduler will cycle through categories in this order when selecting content. You can use duration categories (ID, Spots, Short Form, Long Form) or specific content types. Adding duplicates increases that category's selection frequency.</p>
             </div>
         </div>
     `;
@@ -3605,10 +3635,26 @@ function closeConfigModal() {
 // Helper functions for rotation configuration
 function getCategoryDisplayName(category) {
     const names = {
+        // Duration categories
         'id': 'ID',
         'spots': 'Spots',
         'short_form': 'Short Form',
-        'long_form': 'Long Form'
+        'long_form': 'Long Form',
+        // Content type categories
+        'AN': 'Atlanta Now',
+        'BMP': 'Bumps',
+        'IMOW': 'IMOW',
+        'IM': 'Inclusion Months',
+        'IA': 'Inside Atlanta',
+        'LM': 'Legislative Minute',
+        'MTG': 'Meetings',
+        'MAF': 'Moving Atlanta Forward',
+        'PKG': 'Packages',
+        'PMO': 'Promos',
+        'PSA': 'PSAs',
+        'SZL': 'Sizzles',
+        'SPP': 'Special Projects',
+        'OTHER': 'Other'
     };
     return names[category] || category;
 }
@@ -8479,7 +8525,7 @@ function displayTemplate() {
         templateDisplay.innerHTML = '<p style="color: #666; text-align: center;">No items in template. Add items from Available Content.</p>';
     } else {
         let html = `
-            <div class="template-item" style="font-weight: bold; background: rgba(33, 150, 243, 0.1); border-bottom: 2px solid rgba(33, 150, 243, 0.3);">
+            <div class="template-item header">
                 <span>#</span>
                 <span>Start Time</span>
                 <span>File Name</span>
@@ -8522,23 +8568,26 @@ function displayTemplate() {
             
             const durationTimecode = formatDurationTimecodeWithMs(item.duration_seconds || 0);
             const hasAssetId = item.asset_id || item.content_id;
-            const itemStyle = hasAssetId ? '' : 'opacity: 0.6;';
             const itemTitle = hasAssetId ? item.file_path : `${item.file_path} (Not in database - must be added from Available Content)`;
+            
+            // Check if this is a Live Input item
+            const isLiveInput = item.filename && item.filename.toLowerCase().includes('live input');
+            const itemClasses = isLiveInput ? 'template-item live-input' : 'template-item';
             
             // Format start and end times to show frames
             const startTimeFormatted = formatTimeToTimecode(item.start_time || '00:00:00');
             const endTimeFormatted = formatTimeToTimecode(item.end_time || '00:00:00');
             
             html += `
-                <div class="template-item" style="${itemStyle}">
-                    <span style="color: #666;">${index + 1}</span>
-                    <span>${startTimeFormatted}</span>
-                    <span title="${itemTitle}">
+                <div class="${itemClasses}" ${!hasAssetId ? 'style="opacity: 0.6;"' : ''}>
+                    <span class="template-item-index">${index + 1}</span>
+                    <span class="template-item-time">${startTimeFormatted}</span>
+                    <span class="template-item-title" title="${itemTitle}">
                         ${item.filename}
-                        ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i>' : ''}
+                        ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle warning-icon"></i>' : ''}
                     </span>
-                    <span>${durationTimecode}</span>
-                    <span>${endTimeFormatted}</span>
+                    <span class="template-item-duration">${durationTimecode}</span>
+                    <span class="template-item-end">${endTimeFormatted}</span>
                     <div class="template-item-actions">
                         <button class="button info small" onclick="showTemplateItemInfo(${index})">
                             <i class="fas fa-info-circle"></i>
@@ -8920,14 +8969,14 @@ function displayDashboardTemplate() {
         
         html += `
             <div class="template-item ${!hasAssetId ? 'missing-asset' : ''}">
-                <span class="template-item-number">${index + 1}</span>
+                <span class="template-item-index">${index + 1}</span>
                 <span class="template-item-time">${startTimeTimecode}</span>
                 <span class="template-item-title">
                     ${item.title || item.name || item.file_name || item.filename || 'Untitled'}
                     ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i>' : ''}
                 </span>
-                <span>${durationTimecode}</span>
-                <span>${item.end_time || '00:00:00'}</span>
+                <span class="template-item-duration">${durationTimecode}</span>
+                <span class="template-item-end">${item.end_time || '00:00:00'}</span>
                 <div class="template-item-actions">
                     <button class="button info small" onclick="showTemplateItemInfo(${index})">
                         <i class="fas fa-info-circle"></i>
@@ -11558,11 +11607,21 @@ async function loadRegion1Graphics() {
             });
             
             listDiv.innerHTML = html;
+            
+            // Show/hide select all buttons
+            document.getElementById('selectAllRegion1Btn').style.display = 'inline-block';
+            document.getElementById('deselectAllRegion1Btn').style.display = 'inline-block';
         } else {
             listDiv.innerHTML = `<p class="error-text">Error: ${result.message}</p>`;
+            // Hide buttons on error
+            document.getElementById('selectAllRegion1Btn').style.display = 'none';
+            document.getElementById('deselectAllRegion1Btn').style.display = 'none';
         }
     } catch (error) {
         listDiv.innerHTML = `<p class="error-text">Error loading graphics: ${error.message}</p>`;
+        // Hide buttons on error
+        document.getElementById('selectAllRegion1Btn').style.display = 'none';
+        document.getElementById('deselectAllRegion1Btn').style.display = 'none';
     }
 }
 
@@ -11780,6 +11839,23 @@ async function generateProjectFile() {
     }
 }
 
+// Select/Deselect all functions for Region 1
+function selectAllRegion1Graphics() {
+    const checkboxes = document.querySelectorAll('#region1GraphicsList input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+        updateRegion1Selection(checkbox);
+    });
+}
+
+function deselectAllRegion1Graphics() {
+    const checkboxes = document.querySelectorAll('#region1GraphicsList input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        updateRegion1Selection(checkbox);
+    });
+}
+
 // Make Fill Graphics functions available globally
 window.loadRegion1Graphics = loadRegion1Graphics;
 window.loadRegion2Graphics = loadRegion2Graphics;
@@ -11790,3 +11866,5 @@ window.updateRegion3Selection = updateRegion3Selection;
 window.showGenerateProjectModal = showGenerateProjectModal;
 window.closeGenerateProjectModal = closeGenerateProjectModal;
 window.generateProjectFile = generateProjectFile;
+window.selectAllRegion1Graphics = selectAllRegion1Graphics;
+window.deselectAllRegion1Graphics = deselectAllRegion1Graphics;
