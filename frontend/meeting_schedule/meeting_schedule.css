@@ -1,0 +1,317 @@
+/* Meeting Schedule Module CSS */
+/* All classes prefixed with 'meeting-schedule-' to avoid conflicts */
+
+/* Meeting Schedule Panel */
+.meeting-schedule-panel {
+    padding: 1.5rem;
+    background-color: var(--panel-bg, #f5f6fa);
+    min-height: calc(100vh - 60px);
+}
+
+/* Import Card */
+.meeting-schedule-import-card {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.meeting-schedule-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.meeting-schedule-card-header h3 {
+    margin: 0;
+    color: var(--text-primary, #333);
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Import Controls */
+.meeting-schedule-import-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.meeting-schedule-import-status {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #666);
+}
+
+.meeting-schedule-import-status.success {
+    color: var(--success-color, #4caf50);
+}
+
+.meeting-schedule-import-status.error {
+    color: var(--error-color, #f44336);
+}
+
+/* Meetings Table Card */
+.meeting-schedule-table-card {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Table Container */
+.meeting-schedule-table-container {
+    overflow-x: auto;
+}
+
+/* Meetings Table */
+.meeting-schedule-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.meeting-schedule-table thead {
+    background-color: var(--table-header-bg, #f8f9fa);
+    border-bottom: 2px solid var(--border-color, #e0e0e0);
+}
+
+.meeting-schedule-table th {
+    padding: 1rem;
+    text-align: left;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary, #666);
+    white-space: nowrap;
+}
+
+.meeting-schedule-table tbody tr {
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    transition: background-color 0.2s ease;
+}
+
+.meeting-schedule-table tbody tr:hover {
+    background-color: var(--hover-bg, #f8f9fa);
+}
+
+.meeting-schedule-table td {
+    padding: 1rem;
+    font-size: 0.875rem;
+    color: var(--text-primary, #333);
+}
+
+/* Meeting Name Column */
+.meeting-schedule-name {
+    font-weight: 500;
+    color: var(--primary-color, #2196f3);
+}
+
+/* Date Column */
+.meeting-schedule-date {
+    font-family: monospace;
+    font-weight: 500;
+}
+
+/* Time Columns */
+.meeting-schedule-time {
+    font-family: monospace;
+}
+
+/* Duration Column */
+.meeting-schedule-duration {
+    color: var(--text-secondary, #666);
+}
+
+/* Room Column */
+.meeting-schedule-room {
+    background-color: var(--room-bg, #e3f2fd);
+    color: var(--room-color, #1976d2);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.813rem;
+    display: inline-block;
+}
+
+/* ATL26 Column */
+.meeting-schedule-atl26 {
+    text-align: center;
+}
+
+.meeting-schedule-broadcast-yes {
+    color: var(--success-color, #4caf50);
+    font-size: 1.25rem;
+}
+
+.meeting-schedule-broadcast-no {
+    color: var(--text-muted, #ccc);
+    font-size: 1.25rem;
+}
+
+/* Action Buttons */
+.meeting-schedule-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.meeting-schedule-actions button {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.813rem;
+}
+
+/* No Meetings Message */
+.meeting-schedule-no-meetings {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-muted, #999);
+}
+
+.meeting-schedule-no-meetings p {
+    margin: 0;
+    font-size: 1rem;
+}
+
+/* Meeting Trimmer Card */
+.meeting-schedule-trimmer-card {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    margin-top: 2rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.meeting-schedule-trimmer-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Trimmer Content */
+.meeting-schedule-trimmer-content {
+    padding: 1.5rem;
+}
+
+/* Recordings List */
+.meeting-schedule-recordings-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    background-color: var(--list-bg, #fafafa);
+}
+
+.meeting-schedule-recording-item {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s ease;
+}
+
+.meeting-schedule-recording-item:hover {
+    background-color: var(--hover-bg, #f5f5f5);
+}
+
+.meeting-schedule-recording-info h4 {
+    margin: 0 0 0.25rem 0;
+    font-size: 0.875rem;
+    color: var(--text-primary, #333);
+}
+
+.meeting-schedule-recording-info p {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--text-secondary, #666);
+}
+
+/* Auto Trim Toggle */
+.meeting-schedule-auto-trim-toggle {
+    background-color: var(--info-bg, #e3f2fd);
+    color: var(--info-color, #1976d2);
+}
+
+.meeting-schedule-auto-trim-toggle.active {
+    background-color: var(--success-bg, #e8f5e9);
+    color: var(--success-color, #4caf50);
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .meeting-schedule-panel {
+        background-color: #0a0a0a;
+    }
+    
+    .meeting-schedule-import-card,
+    .meeting-schedule-table-card,
+    .meeting-schedule-trimmer-card {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .meeting-schedule-table thead {
+        background-color: #222;
+        border-color: #333;
+    }
+    
+    .meeting-schedule-table tbody tr {
+        border-color: #333;
+    }
+    
+    .meeting-schedule-table tbody tr:hover {
+        background-color: #2a2a2a;
+    }
+    
+    .meeting-schedule-room {
+        background-color: rgba(33, 150, 243, 0.2);
+    }
+    
+    .meeting-schedule-recordings-list {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .meeting-schedule-recording-item {
+        border-color: #333;
+    }
+    
+    .meeting-schedule-recording-item:hover {
+        background-color: #2a2a2a;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+    .meeting-schedule-table {
+        font-size: 0.813rem;
+    }
+    
+    .meeting-schedule-table th,
+    .meeting-schedule-table td {
+        padding: 0.75rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .meeting-schedule-import-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .meeting-schedule-trimmer-buttons {
+        flex-direction: column;
+    }
+    
+    .meeting-schedule-trimmer-buttons button {
+        width: 100%;
+    }
+    
+    .meeting-schedule-actions {
+        flex-direction: column;
+    }
+    
+    .meeting-schedule-actions button {
+        width: 100%;
+    }
+}

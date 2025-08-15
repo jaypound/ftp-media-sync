@@ -1,0 +1,225 @@
+/* Settings Module CSS */
+/* All classes prefixed with 'settings-' to avoid conflicts */
+
+/* Settings Panel */
+.settings-panel {
+    padding: 1.5rem;
+    background-color: var(--panel-bg, #f5f6fa);
+    min-height: calc(100vh - 60px);
+}
+
+/* Settings Grid */
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+/* Settings Card */
+.settings-card {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.settings-card h3 {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-primary, #333);
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Form Elements */
+.settings-form-group {
+    margin-bottom: 1.5rem;
+}
+
+.settings-form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary, #666);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.settings-form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    font-size: 1rem;
+    background-color: var(--input-bg, #fff);
+    color: var(--text-primary, #333);
+    transition: all 0.2s ease;
+}
+
+.settings-form-control:focus {
+    outline: none;
+    border-color: var(--primary-color, #2196f3);
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+.settings-form-control[type="number"] {
+    max-width: 120px;
+}
+
+/* Form Row */
+.settings-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+/* Small Text */
+.settings-form-group small {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--text-muted, #999);
+    font-size: 0.813rem;
+}
+
+/* Checkbox Group */
+.settings-checkbox-group {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.settings-checkbox-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-right: 0.75rem;
+    cursor: pointer;
+    accent-color: var(--primary-color, #2196f3);
+}
+
+.settings-checkbox-group label {
+    margin: 0;
+    cursor: pointer;
+    color: var(--text-primary, #333);
+    font-weight: normal;
+}
+
+/* File Extensions Input */
+.settings-extensions-input {
+    font-family: monospace;
+    font-size: 0.875rem;
+}
+
+/* Size Input Group */
+.settings-size-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.settings-size-unit {
+    color: var(--text-secondary, #666);
+    font-size: 0.875rem;
+}
+
+/* Options Section */
+.settings-options-section {
+    border-top: 1px solid var(--border-color, #e0e0e0);
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+}
+
+/* Info Box */
+.settings-info-box {
+    background-color: var(--info-bg, #e3f2fd);
+    border: 1px solid var(--info-border, #90caf9);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.settings-info-box p {
+    margin: 0;
+    color: var(--info-color, #1565c0);
+    font-size: 0.875rem;
+}
+
+.settings-info-box i {
+    margin-right: 0.5rem;
+}
+
+/* Warning Box */
+.settings-warning-box {
+    background-color: var(--warning-bg, #fff3e0);
+    border: 1px solid var(--warning-border, #ffb74d);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.settings-warning-box p {
+    margin: 0;
+    color: var(--warning-color, #f57c00);
+    font-size: 0.875rem;
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .settings-panel {
+        background-color: #0a0a0a;
+    }
+    
+    .settings-card {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .settings-form-control {
+        background-color: #222;
+        border-color: #333;
+        color: #e0e0e0;
+    }
+    
+    .settings-form-control:focus {
+        border-color: #2196f3;
+        box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2);
+    }
+    
+    .settings-checkbox-group label {
+        color: #e0e0e0;
+    }
+    
+    .settings-options-section {
+        border-color: #333;
+    }
+    
+    .settings-info-box {
+        background-color: rgba(33, 150, 243, 0.1);
+        border-color: #1976d2;
+    }
+    
+    .settings-warning-box {
+        background-color: rgba(255, 152, 0, 0.1);
+        border-color: #f57c00;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 900px) {
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .settings-form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .settings-size-group {
+        flex-wrap: wrap;
+    }
+}
