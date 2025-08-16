@@ -937,10 +937,10 @@ class PostgreSQLDatabaseManager:
                     sm.priority_score,
                     sm.optimal_timeslots
                 FROM assets a
-                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                 WHERE a.analysis_completed = TRUE
-                AND NOT (i.file_path LIKE %s)
+                AND (i.file_path IS NULL OR NOT (i.file_path LIKE %s))
             """
             
             params = ['%FILL%']
@@ -964,9 +964,9 @@ class PostgreSQLDatabaseManager:
                 search_pattern = f'%{search}%'
                 params.extend([search_pattern, search_pattern, search_pattern])
             
-            # Filter out expired content
+            # Include all content regardless of expiration status
+            # Only filter by availability flag
             query += """
-                AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP)
                 AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
             """
             
