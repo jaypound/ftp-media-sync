@@ -328,6 +328,165 @@
     margin-bottom: 1rem;
 }
 
+/* Expiration Styles */
+.scheduling-expiration-date {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.scheduling-expiration-date.expired {
+    color: var(--danger-color, #dc3545);
+    font-weight: 600;
+}
+
+.scheduling-expiration-date.expiring-soon {
+    color: var(--warning-color, #ff9800);
+    font-weight: 600;
+}
+
+.scheduling-expiration-date.expiring {
+    color: var(--info-color, #2196f3);
+}
+
+/* Shelf Life Grid */
+.scheduling-shelf-life-grid {
+    display: grid;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.scheduling-grid-header {
+    display: grid;
+    grid-template-columns: 220px repeat(3, 1fr);
+    gap: 1rem;
+    font-weight: 600;
+    padding: 0.75rem;
+    background-color: var(--secondary-bg, #f5f6fa);
+    border-radius: 4px;
+    color: var(--text-primary, #2c3e50);
+}
+
+.scheduling-grid-row {
+    display: grid;
+    grid-template-columns: 220px repeat(3, 1fr);
+    gap: 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 4px;
+    align-items: center;
+}
+
+.scheduling-grid-label {
+    font-weight: 500;
+    color: var(--text-primary, #333);
+}
+
+.scheduling-days-input {
+    width: 80px;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+/* Expiration Statistics */
+.scheduling-expiration-stats {
+    padding: 1rem;
+}
+
+.scheduling-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.scheduling-stat-item {
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+}
+
+.scheduling-stat-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #666);
+    margin-bottom: 0.5rem;
+}
+
+.scheduling-stat-value {
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--text-primary, #333);
+}
+
+.scheduling-stat-value.total {
+    color: var(--primary-color, #2c3e50);
+    font-weight: 700;
+}
+
+.scheduling-stat-value.active {
+    color: var(--success-color, #28a745);
+}
+
+.scheduling-stat-value.expired {
+    color: var(--danger-color, #dc3545);
+}
+
+.scheduling-stat-value.warning {
+    color: var(--warning-color, #ff9800);
+}
+
+/* Content Expiration Modal */
+.scheduling-expiration-modal-body {
+    padding: 1rem;
+}
+
+.scheduling-expiration-buttons {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    justify-content: center;
+}
+
+/* Dark Mode Support for Stats */
+@media (prefers-color-scheme: dark) {
+    .scheduling-stat-value {
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-stat-value.total {
+        color: var(--primary-color-light, #5a7a9a);
+    }
+    
+    .scheduling-stat-item {
+        background-color: var(--card-bg-dark, #2a2a2a);
+        border-color: var(--border-dark, #444);
+    }
+    
+    .scheduling-grid-header {
+        background-color: var(--secondary-bg-dark, #2a2a2a);
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-grid-row {
+        background-color: var(--card-bg-dark, #1a1a1a);
+        border-color: var(--border-dark, #444);
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-grid-label {
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-days-input {
+        background-color: var(--input-bg-dark, #2a2a2a);
+        border-color: var(--border-dark, #444);
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .scheduling-schedule-table-header,

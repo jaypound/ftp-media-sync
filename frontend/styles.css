@@ -1863,9 +1863,25 @@ body.dark-mode .status {
 .content-duration,
 .content-category,
 .content-score,
-.content-last-scheduled {
+.content-last-scheduled,
+.content-expiration {
     font-size: 0.875rem;
     color: var(--text-secondary);
+}
+
+/* Expiration styles */
+.content-expiration.expired {
+    color: var(--danger-color, #dc3545);
+    font-weight: 600;
+}
+
+.content-expiration.expiring-soon {
+    color: var(--warning-color, #ff9800);
+    font-weight: 600;
+}
+
+.content-expiration.expiring {
+    color: var(--info-color, #2196f3);
 }
 
 /* Category Rotation Configuration - Compact */

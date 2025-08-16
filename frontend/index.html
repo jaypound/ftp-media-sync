@@ -1636,6 +1636,43 @@
         </div>
     </div>
 
+    <!-- Content Expiration Modal -->
+    <div id="contentExpirationModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-hourglass-end"></i> Content Expiration Settings</h3>
+                <button class="modal-close" onclick="schedulingCloseExpirationModal()">&times;</button>
+            </div>
+            <div class="modal-body scheduling-expiration-modal-body">
+                <h4>Shelf Life Settings (in days)</h4>
+                <p>Configure how many days content should remain active based on duration category and shelf life type.</p>
+                
+                <div id="shelfLifeGrid">
+                    <!-- Grid will be populated by JavaScript -->
+                </div>
+                
+                <div class="scheduling-expiration-buttons">
+                    <button class="button primary" onclick="schedulingSetContentExpiration()">
+                        <i class="fas fa-save"></i> Set Content Expiration
+                    </button>
+                    <button class="button info" onclick="schedulingGetContentCounts()">
+                        <i class="fas fa-chart-bar"></i> Get Content Statistics
+                    </button>
+                    <button class="button danger" onclick="schedulingClearAllExpirations()">
+                        <i class="fas fa-trash-alt"></i> Clear All Expiration Dates
+                    </button>
+                </div>
+                
+                <div id="expirationStatsContainer" style="display: none; margin-top: 2rem;">
+                    <!-- Stats will be displayed here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="schedulingCloseExpirationModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Notification Container -->
     <div id="notificationContainer" class="notification-container"></div>
     
@@ -1653,6 +1690,7 @@
     <script src="scheduling/scheduling.js"></script>
     <script src="scheduling/scheduling_templates.js"></script>
     <script src="scheduling/scheduling_template_library.js"></script>
+    <script src="scheduling/scheduling_expiration.js"></script>
     <script src="meeting_schedule/meeting_schedule.js"></script>
     <script src="fill_graphics/fill_graphics.js"></script>
     

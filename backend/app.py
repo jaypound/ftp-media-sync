@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import uuid
 import subprocess
 import shutil
+from psycopg2.extras import RealDictCursor
 
 # Load environment variables from .env file
 load_dotenv()
@@ -5857,6 +5858,196 @@ def generate_prj_file():
             'success': False,
             'message': str(e)
         })
+
+@app.route('/api/set-content-expiration', methods=['POST'])
+def set_content_expiration():
+    """Set content expiration dates based on shelf life settings"""
+    logger.info("=== SET CONTENT EXPIRATION REQUEST ===")
+    try:
+        data = request.json
+        shelf_life_settings = data.get('shelf_life_settings', {})
+        
+        logger.info(f"Setting content expiration with shelf life settings: {shelf_life_settings}")
+        
+        # Get all content with scheduling metadata
+        query = """
+            SELECT 
+                a.id as asset_id,
+                i.encoded_date,
+                a.duration_seconds,
+                a.content_type,
+                i.file_name,
+                sm.id as scheduling_id
+            FROM assets a
+            LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+            LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+            WHERE a.analysis_completed = true
+        """
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query)
+                assets = cursor.fetchall()
+                
+                updated_count = 0
+                
+                for asset in assets:
+                    # Get creation date from encoded_date or filename
+                    creation_date = None
+                    
+                    if asset['encoded_date']:
+                        creation_date = asset['encoded_date']
+                    elif asset['file_name']:
+                        # Try to extract from filename (YYMMDD format)
+                        filename = asset['file_name']
+                        if len(filename) >= 6 and filename[:6].isdigit():
+                            try:
+                                yy = int(filename[0:2])
+                                mm = int(filename[2:4])
+                                dd = int(filename[4:6])
+                                
+                                # Validate date components
+                                if 1 <= mm <= 12 and 1 <= dd <= 31:
+                                    # Determine century
+                                    year = 2000 + yy if yy <= 30 else 1900 + yy
+                                    creation_date = datetime(year, mm, dd)
+                            except:
+                                pass
+                    
+                    if not creation_date:
+                        continue
+                        
+                    # Get content type (uppercase)
+                    content_type = asset.get('content_type', 'other').upper()
+                    
+                    # Map content type to the keys used in shelf life settings
+                    content_type_key = content_type if content_type in shelf_life_settings else 'OTHER'
+                    
+                    # For now, assume medium shelf life (can be enhanced to use AI analysis)
+                    shelf_life_type = 'medium'
+                    
+                    # Get days from settings based on content type
+                    days = shelf_life_settings.get(content_type_key, {}).get(shelf_life_type, 60)
+                    
+                    # Calculate expiration date from creation date
+                    expiry_date = creation_date + timedelta(days=days)
+                    
+                    # Update or insert scheduling metadata
+                    if asset['scheduling_id']:
+                        cursor.execute("""
+                            UPDATE scheduling_metadata 
+                            SET content_expiry_date = %s 
+                            WHERE id = %s
+                        """, (expiry_date, asset['scheduling_id']))
+                    else:
+                        cursor.execute("""
+                            INSERT INTO scheduling_metadata (asset_id, content_expiry_date)
+                            VALUES (%s, %s)
+                        """, (asset['asset_id'], expiry_date))
+                    
+                    updated_count += 1
+                
+                conn.commit()
+        finally:
+            db_manager._put_connection(conn)
+        
+        logger.info(f"Updated expiration dates for {updated_count} content items")
+        
+        return jsonify({
+            'success': True,
+            'updated_count': updated_count,
+            'message': f'Successfully updated {updated_count} content items'
+        })
+        
+    except Exception as e:
+        error_msg = f"Set content expiration error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+
+@app.route('/api/clear-content-expirations', methods=['POST'])
+def clear_content_expirations():
+    """Clear all content expiration dates"""
+    logger.info("=== CLEAR CONTENT EXPIRATIONS REQUEST ===")
+    try:
+        # Clear all expiration dates
+        query = """
+            UPDATE scheduling_metadata 
+            SET content_expiry_date = NULL 
+            WHERE content_expiry_date IS NOT NULL
+        """
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                cleared_count = cursor.rowcount
+                conn.commit()
+        finally:
+            db_manager._put_connection(conn)
+        
+        logger.info(f"Cleared expiration dates for {cleared_count} content items")
+        
+        return jsonify({
+            'success': True,
+            'cleared_count': cleared_count,
+            'message': f'Successfully cleared {cleared_count} expiration dates'
+        })
+        
+    except Exception as e:
+        error_msg = f"Clear content expirations error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
+
+@app.route('/api/content-expiration-stats', methods=['GET'])
+def get_content_expiration_stats():
+    """Get statistics about active and expired content"""
+    logger.info("=== GET CONTENT EXPIRATION STATS REQUEST ===")
+    try:
+        query = """
+            SELECT 
+                COUNT(*) as total,
+                COUNT(CASE WHEN sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP THEN 1 END) as active,
+                COUNT(CASE WHEN sm.content_expiry_date IS NOT NULL AND sm.content_expiry_date <= CURRENT_TIMESTAMP THEN 1 END) as expired,
+                COUNT(CASE WHEN sm.content_expiry_date IS NOT NULL AND sm.content_expiry_date > CURRENT_TIMESTAMP AND sm.content_expiry_date <= CURRENT_TIMESTAMP + INTERVAL '7 days' THEN 1 END) as expiring_soon,
+                COALESCE(SUM(a.duration_seconds), 0) as total_duration_seconds,
+                COALESCE(SUM(CASE WHEN sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP THEN a.duration_seconds END), 0) as active_duration_seconds,
+                COALESCE(SUM(CASE WHEN sm.content_expiry_date IS NOT NULL AND sm.content_expiry_date <= CURRENT_TIMESTAMP THEN a.duration_seconds END), 0) as expired_duration_seconds
+            FROM assets a
+            LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+            WHERE a.analysis_completed = true
+        """
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query)
+                stats = cursor.fetchone()
+        finally:
+            db_manager._put_connection(conn)
+        
+        logger.info(f"Content stats: {stats}")
+        
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total': stats['total'],
+                'active': stats['active'],
+                'expired': stats['expired'],
+                'expiring_soon': stats['expiring_soon'],
+                'total_hours': round(stats['total_duration_seconds'] / 3600, 1),
+                'active_hours': round(stats['active_duration_seconds'] / 3600, 1),
+                'expired_hours': round(stats['expired_duration_seconds'] / 3600, 1)
+            }
+        })
+        
+    except Exception as e:
+        error_msg = f"Get content expiration stats error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg})
+
 
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")

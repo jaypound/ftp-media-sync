@@ -3352,8 +3352,14 @@ function showScheduleConfig(configType) {
             bodyContent = generateReplayConfigHTML();
             break;
         case 'expiration':
-            titleText = 'Content Expiration Configuration';
-            bodyContent = generateExpirationConfigHTML();
+            // Use the new scheduling expiration modal instead
+            if (window.schedulingShowExpirationModal) {
+                window.schedulingShowExpirationModal();
+                return;
+            } else {
+                titleText = 'Content Expiration Configuration';
+                bodyContent = generateExpirationConfigHTML();
+            }
             break;
         case 'rotation':
             titleText = 'Category Rotation Configuration';
@@ -4089,6 +4095,13 @@ async function updateContentType(contentId, newType) {
 function displayAvailableContent() {
     const contentList = document.getElementById('availableContentList');
     
+    if (!contentList) {
+        console.error('availableContentList element not found!');
+        return;
+    }
+    
+    console.log('Displaying available content:', availableContent.length, 'items');
+    
     // Update the count display
     const countElement = document.getElementById('contentCount');
     if (countElement) {
@@ -4099,6 +4112,8 @@ function displayAvailableContent() {
         contentList.innerHTML = '<p>No content matches the current filters</p>';
         return;
     }
+    
+    console.log('Building HTML for content display...');
     
     // Add sort header
     let html = `
@@ -4118,8 +4133,8 @@ function displayAvailableContent() {
             <span class="sort-field" data-field="engagement" onclick="sortContent('engagement')">
                 Score ${getSortIcon('engagement')}
             </span>
-            <span class="sort-field" data-field="lastScheduled" onclick="sortContent('lastScheduled')">
-                Last Scheduled ${getSortIcon('lastScheduled')}
+            <span class="sort-field" data-field="expiration" onclick="sortContent('expiration')">
+                Expiration ${getSortIcon('expiration')}
             </span>
             <span style="text-align: center;">Actions</span>
         </div>
@@ -4132,14 +4147,30 @@ function displayAvailableContent() {
         const durationCategory = getDurationCategory(content.file_duration);
         const engagementScore = content.engagement_score || 'N/A';
         
-        // Format last scheduled date
-        let lastScheduledDisplay = 'Never';
-        if (content.scheduling?.last_scheduled_date) {
-            const lastDate = new Date(content.scheduling.last_scheduled_date);
-            const month = (lastDate.getMonth() + 1).toString().padStart(2, '0');
-            const day = lastDate.getDate().toString().padStart(2, '0');
-            const year = lastDate.getFullYear().toString().slice(-2);
-            lastScheduledDisplay = `${month}/${day}/${year}`;
+        // Format expiration date
+        let expirationDisplay = 'Not Set';
+        let expirationClass = '';
+        if (content.scheduling?.content_expiry_date) {
+            const expiryDate = new Date(content.scheduling.content_expiry_date);
+            const today = new Date();
+            const daysUntilExpiry = Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24));
+            
+            if (daysUntilExpiry < 0) {
+                expirationDisplay = 'Expired';
+                expirationClass = 'expired';
+            } else if (daysUntilExpiry <= 7) {
+                expirationDisplay = `${daysUntilExpiry}d`;
+                expirationClass = 'expiring-soon';
+            } else if (daysUntilExpiry <= 30) {
+                expirationDisplay = `${daysUntilExpiry}d`;
+                expirationClass = 'expiring';
+            } else {
+                const month = (expiryDate.getMonth() + 1).toString().padStart(2, '0');
+                const day = expiryDate.getDate().toString().padStart(2, '0');
+                const year = expiryDate.getFullYear().toString().slice(-2);
+                expirationDisplay = `${month}/${day}/${year}`;
+                expirationClass = '';
+            }
         }
         
         // Use PostgreSQL id as the content identifier
@@ -4167,7 +4198,7 @@ function displayAvailableContent() {
                 <span class="content-duration">${durationTimecode}</span>
                 <span class="content-category">${durationCategory.toUpperCase()}</span>
                 <span class="content-score">${engagementScore}%</span>
-                <span class="content-last-scheduled">${lastScheduledDisplay}</span>
+                <span class="content-expiration ${expirationClass}">${expirationDisplay}</span>
                 <div class="content-actions">
                     <button class="button small primary" onclick="addToSchedule('${contentId}')" title="Add to Schedule">
                         <i class="fas fa-calendar-plus"></i>
@@ -7031,6 +7062,10 @@ function sortContent(field) {
                 aVal = a.scheduling?.last_scheduled_date ? new Date(a.scheduling.last_scheduled_date).getTime() : 0;
                 bVal = b.scheduling?.last_scheduled_date ? new Date(b.scheduling.last_scheduled_date).getTime() : 0;
                 break;
+            case 'expiration':
+                aVal = a.scheduling?.content_expiry_date ? new Date(a.scheduling.content_expiry_date).getTime() : Number.MAX_SAFE_INTEGER;
+                bVal = b.scheduling?.content_expiry_date ? new Date(b.scheduling.content_expiry_date).getTime() : Number.MAX_SAFE_INTEGER;
+                break;
             default:
                 return 0;
         }
@@ -7043,6 +7078,159 @@ function sortContent(field) {
     
     // Redisplay the sorted content
     displayAvailableContent();
+}
+
+// Helper function to extract creation date from filename (YYMMDD format)
+function getCreationDateFromFilename(filename) {
+    if (!filename || filename.length < 6) {
+        return null;
+    }
+    
+    // Extract first 6 characters
+    const dateStr = filename.substring(0, 6);
+    
+    // Check if it's a valid date format (all digits)
+    if (!/^\d{6}$/.test(dateStr)) {
+        return null;
+    }
+    
+    // Parse YY, MM, DD
+    const yy = parseInt(dateStr.substring(0, 2));
+    const mm = parseInt(dateStr.substring(2, 4));
+    const dd = parseInt(dateStr.substring(4, 6));
+    
+    // Validate month and day ranges
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) {
+        return null;
+    }
+    
+    // Determine century (assume 2000s for 00-30, 1900s for 31-99)
+    const year = yy <= 30 ? 2000 + yy : 1900 + yy;
+    
+    try {
+        const date = new Date(year, mm - 1, dd);
+        // Verify the date is valid (e.g., not Feb 31)
+        if (date.getMonth() !== mm - 1 || date.getDate() !== dd) {
+            return null;
+        }
+        return date;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Helper function to get effective creation date (encoded date or from filename)
+function getEffectiveCreationDate(content) {
+    // Use encoded date if available
+    if (content.encoded_date) {
+        return new Date(content.encoded_date);
+    }
+    
+    // Try to extract from filename
+    if (content.file_name) {
+        const dateFromFilename = getCreationDateFromFilename(content.file_name);
+        if (dateFromFilename) {
+            return dateFromFilename;
+        }
+    }
+    
+    return null;
+}
+
+// Helper function to format expiration date with status
+function formatExpirationDate(expiryDate) {
+    if (!expiryDate) {
+        return 'Not Set';
+    }
+    
+    const expiry = new Date(expiryDate);
+    const today = new Date();
+    const daysUntilExpiry = Math.floor((expiry - today) / (1000 * 60 * 60 * 24));
+    
+    const formattedDate = expiry.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+    
+    if (daysUntilExpiry < 0) {
+        return `<span style="color: var(--danger-color, #dc3545); font-weight: 600;">Expired (${formattedDate})</span>`;
+    } else if (daysUntilExpiry === 0) {
+        return `<span style="color: var(--danger-color, #dc3545); font-weight: 600;">Expires Today</span>`;
+    } else if (daysUntilExpiry <= 7) {
+        return `<span style="color: var(--warning-color, #ff9800); font-weight: 600;">Expires in ${daysUntilExpiry} day${daysUntilExpiry > 1 ? 's' : ''} (${formattedDate})</span>`;
+    } else if (daysUntilExpiry <= 30) {
+        return `<span style="color: var(--info-color, #2196f3);">Expires in ${daysUntilExpiry} days (${formattedDate})</span>`;
+    } else {
+        return `${formattedDate} (${daysUntilExpiry} days)`;
+    }
+}
+
+// Helper function to format creation date with source info
+function formatCreationDate(content) {
+    const creationDate = getEffectiveCreationDate(content);
+    
+    if (!creationDate) {
+        return 'Unknown';
+    }
+    
+    const formattedDate = creationDate.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+    });
+    
+    // Indicate source of date
+    if (content.encoded_date) {
+        return formattedDate + ' (from metadata)';
+    } else if (content.file_name) {
+        return formattedDate + ' (from filename)';
+    }
+    
+    return formattedDate;
+}
+
+// Helper function to get shelf life information
+function getShelfLifeInfo(content) {
+    const creationDate = getEffectiveCreationDate(content);
+    
+    if (!creationDate) {
+        return 'Unknown (no creation date)';
+    }
+    
+    const expiryDate = content.scheduling?.content_expiry_date ? new Date(content.scheduling.content_expiry_date) : null;
+    
+    if (!expiryDate) {
+        return 'Not calculated';
+    }
+    
+    // Calculate the shelf life in days
+    const shelfLifeDays = Math.round((expiryDate - creationDate) / (1000 * 60 * 60 * 24));
+    
+    // Determine shelf life category
+    let shelfLifeCategory = 'Custom';
+    const durationCategory = getDurationCategory(content.file_duration);
+    
+    // Check against standard shelf life values
+    if (durationCategory === 'short') {
+        if (shelfLifeDays === 7) shelfLifeCategory = 'Short';
+        else if (shelfLifeDays === 14) shelfLifeCategory = 'Medium';
+        else if (shelfLifeDays === 30) shelfLifeCategory = 'Long';
+    } else if (durationCategory === 'medium') {
+        if (shelfLifeDays === 30) shelfLifeCategory = 'Short';
+        else if (shelfLifeDays === 60) shelfLifeCategory = 'Medium';
+        else if (shelfLifeDays === 90) shelfLifeCategory = 'Long';
+    } else if (durationCategory === 'long') {
+        if (shelfLifeDays === 90) shelfLifeCategory = 'Short';
+        else if (shelfLifeDays === 180) shelfLifeCategory = 'Medium';
+        else if (shelfLifeDays === 365) shelfLifeCategory = 'Long';
+    } else if (durationCategory === 'extra_long') {
+        if (shelfLifeDays === 180) shelfLifeCategory = 'Short';
+        else if (shelfLifeDays === 365) shelfLifeCategory = 'Medium';
+        else if (shelfLifeDays === 730) shelfLifeCategory = 'Long';
+    }
+    
+    return `${shelfLifeCategory} (${shelfLifeDays} days from encode date)`;
 }
 
 function viewContentDetails(contentId) {
@@ -7101,11 +7289,20 @@ function viewContentDetails(contentId) {
                         <strong>Engagement Score:</strong>
                         <span>${content.engagement_score || 'N/A'}%</span>
                         
+                        <strong>Creation Date:</strong>
+                        <span>${formatCreationDate(content)}</span>
+                        
                         <strong>Last Scheduled:</strong>
                         <span>${lastScheduled}</span>
                         
                         <strong>Total Airings:</strong>
                         <span>${totalAirings}</span>
+                        
+                        <strong>Expiration Date:</strong>
+                        <span>${formatExpirationDate(content.scheduling?.content_expiry_date)}</span>
+                        
+                        <strong>Shelf Life:</strong>
+                        <span>${getShelfLifeInfo(content)}</span>
                         
                         ${content.summary ? `
                         <strong>Summary:</strong>
@@ -9771,6 +9968,16 @@ window.viewTemplate = viewTemplate;
 window.loadSavedTemplate = loadSavedTemplate;
 window.exportTemplate = exportTemplate;
 window.deleteTemplate = deleteTemplate;
+
+// Make content loading functions globally accessible
+window.loadAvailableContent = loadAvailableContent;
+window.sortContent = sortContent;
+window.getSortIcon = getSortIcon;
+window.viewContentDetails = viewContentDetails;
+window.addToTemplate = addToTemplate;
+window.getContentTypeLabel = getContentTypeLabel;
+window.formatDurationTimecode = formatDurationTimecode;
+window.getDurationCategory = getDurationCategory;
 window.closeTemplateExportModal = closeTemplateExportModal;
 window.confirmTemplateExport = confirmTemplateExport;
 window.exportCurrentTemplate = exportCurrentTemplate;
