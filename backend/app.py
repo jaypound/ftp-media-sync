@@ -64,8 +64,118 @@ logger = logging.getLogger(__name__)
 ftp_managers = {}
 config_manager = ConfigManager()
 
+# Track app start time for uptime calculation
+import time
+app_start_time = time.time()
+
 # Initialize database connection
 db_manager.connect()
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Get backend status information"""
+    import time
+    
+    try:
+        return jsonify({
+            'success': True,
+            'status': 'online',
+            'version': '1.0.0',
+            'uptime': time.time() - app_start_time if 'app_start_time' in globals() else 0,
+            'database_connected': db_manager.connected if db_manager else False,
+            'timestamp': time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting status: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/admin/database-stats', methods=['GET'])
+def get_database_stats():
+    """Get database statistics for admin panel"""
+    try:
+        stats = {
+            'totalAnalyses': 0,
+            'totalSchedules': 0,
+            'dbSize': '0 MB'
+        }
+        
+        if db_manager.connected:
+            conn = db_manager._get_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Count analyzed assets
+                    cursor.execute("SELECT COUNT(*) FROM assets WHERE analysis_completed = true")
+                    result = cursor.fetchone()
+                    stats['totalAnalyses'] = result[0] if result else 0
+                    
+                    # Count schedules
+                    cursor.execute("SELECT COUNT(*) FROM schedules")
+                    result = cursor.fetchone()
+                    stats['totalSchedules'] = result[0] if result else 0
+                    
+                    # Get database size
+                    cursor.execute("""
+                        SELECT pg_database_size(current_database()) / 1024 / 1024 as size_mb
+                    """)
+                    result = cursor.fetchone()
+                    size_mb = result[0] if result else 0
+                    stats['dbSize'] = f"{size_mb:.1f} MB"
+            finally:
+                db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting database stats: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'stats': {
+                'totalAnalyses': 0,
+                'totalSchedules': 0,
+                'dbSize': '0 MB'
+            }
+        })
+
+
+@app.route('/api/admin/logs', methods=['GET'])
+def get_admin_logs():
+    """Get recent application logs for admin panel"""
+    try:
+        # For now, return empty logs
+        # In a real implementation, you would read from log files
+        return jsonify({
+            'success': True,
+            'logs': []
+        })
+    except Exception as e:
+        logger.error(f"Error getting logs: {str(e)}")
+        return jsonify({'success': False, 'message': str(e), 'logs': []})
+
+
+@app.route('/api/ai/api-keys', methods=['GET'])
+def get_ai_api_keys():
+    """Get AI API keys from environment variables"""
+    try:
+        # Check environment variables for API keys
+        openai_key = os.getenv('OPENAI_API_KEY', '')
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY', '')
+        
+        # Only return masked versions for security
+        return jsonify({
+            'success': True,
+            'openai_key': '***' + openai_key[-4:] if openai_key and len(openai_key) > 4 else '',
+            'anthropic_key': '***' + anthropic_key[-4:] if anthropic_key and len(anthropic_key) > 4 else '',
+            'has_openai_key': bool(openai_key),
+            'has_anthropic_key': bool(anthropic_key)
+        })
+    except Exception as e:
+        logger.error(f"Error getting AI API keys: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
@@ -986,6 +1096,116 @@ def update_content_type():
         return jsonify({
             'success': False,
             'message': str(e)
+        })
+
+@app.route('/api/content/<content_id>', methods=['DELETE'])
+def delete_content_entry(content_id):
+    """Delete content from database (does not delete the actual file)"""
+    try:
+        logger.info(f"Deleting database entry for content ID: {content_id}")
+        
+        # Ensure database is connected
+        if not db_manager.connected:
+            db_manager.connect()
+            if not db_manager.connected:
+                return jsonify({
+                    'success': False,
+                    'message': 'Failed to connect to database'
+                })
+        
+        # Get database connection
+        try:
+            conn = db_manager._get_connection()
+        except Exception as conn_error:
+            logger.error(f"Failed to get database connection: {conn_error}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'message': f'Failed to get database connection: {str(conn_error)}'
+            })
+            
+        try:
+            cursor = conn.cursor()
+            
+            # First get the asset info for logging
+            cursor.execute("""
+                SELECT i.file_name, i.file_path, a.content_title 
+                FROM assets a
+                LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                WHERE a.id = %s
+            """, (content_id,))
+            
+            asset_info = cursor.fetchone()
+            if not asset_info:
+                return jsonify({
+                    'success': False,
+                    'message': f'Content ID {content_id} not found in database'
+                })
+            
+            # Handle both tuple and dict results
+            if isinstance(asset_info, dict):
+                file_name = asset_info.get('file_name') or 'Unknown'
+                file_path = asset_info.get('file_path') or 'Unknown'
+                content_title = asset_info.get('content_title') or file_name
+            else:
+                file_name = asset_info[0] or 'Unknown'
+                file_path = asset_info[1] or 'Unknown'
+                content_title = asset_info[2] or file_name
+            
+            logger.info(f"Deleting database entries for: {file_name} (path: {file_path})")
+            
+            # Delete from instances table first (foreign key constraint)
+            cursor.execute("""
+                DELETE FROM instances 
+                WHERE asset_id = %s
+            """, (content_id,))
+            
+            instances_deleted = cursor.rowcount
+            logger.info(f"Deleted {instances_deleted} instance(s)")
+            
+            # Delete from assets table
+            cursor.execute("""
+                DELETE FROM assets 
+                WHERE id = %s
+            """, (content_id,))
+            
+            assets_deleted = cursor.rowcount
+            
+            # Commit the transaction
+            conn.commit()
+            cursor.close()
+            
+            logger.info(f"Successfully deleted asset ID {content_id} from database")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Database entry deleted successfully',
+                'details': {
+                    'asset_id': content_id,
+                    'file_name': file_name,
+                    'instances_deleted': instances_deleted,
+                    'assets_deleted': assets_deleted
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Database deletion failed: {str(e)}", exc_info=True)
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception args: {e.args}")
+            if conn:
+                conn.rollback()
+            return jsonify({
+                'success': False,
+                'message': f'Database deletion failed: {str(e)}'
+            })
+        finally:
+            if conn:
+                db_manager._put_connection(conn)
+                
+    except Exception as e:
+        logger.error(f"Delete content entry failed: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': f'Delete content entry failed: {str(e)}'
         })
 
 @app.route('/api/rename-content', methods=['POST'])
@@ -3335,34 +3555,131 @@ def fill_template_gaps():
             
             if schedule_type == 'weekly' and ' ' in str(start_time):
                 # Parse weekly format like "mon 8:00 am"
+                logger.debug(f"Parsing weekly time format: '{start_time}'")
                 parts = start_time.lower().split(' ')
+                logger.debug(f"Split into parts: {parts}")
+                
                 day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
                 day_index = day_map.get(parts[0], 0)
+                
                 # Parse time portion
-                time_parts = parts[1].split(':')
-                hours = int(time_parts[0])
+                if len(parts) < 2:
+                    logger.error(f"Invalid weekly time format - missing time portion: '{start_time}'")
+                    raise ValueError(f"Invalid weekly time format: '{start_time}'")
+                
+                time_str = parts[1]
+                logger.debug(f"Time portion: '{time_str}'")
+                
+                # Check if time string contains colon
+                if ':' not in time_str:
+                    logger.error(f"Invalid time format - missing colon: '{time_str}' in '{start_time}'")
+                    raise ValueError(f"Invalid time format in '{start_time}': '{time_str}'")
+                
+                time_parts = time_str.split(':')
+                logger.debug(f"Time parts after split: {time_parts}")
+                
+                try:
+                    hours = int(time_parts[0])
+                except ValueError as e:
+                    logger.error(f"Failed to parse hours from '{time_parts[0]}' in time '{start_time}'")
+                    raise ValueError(f"Invalid hour value in '{start_time}': '{time_parts[0]}'")
+                
                 if len(parts) > 2 and parts[2] == 'pm' and hours != 12:
                     hours += 12
                 elif len(parts) > 2 and parts[2] == 'am' and hours == 12:
                     hours = 0
-                minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
-                start_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60)
-            else:
-                # Parse daily format
-                time_parts = str(start_time).split(':')
-                if len(time_parts) >= 3:
-                    hours = int(time_parts[0])
-                    minutes = int(time_parts[1])
-                    seconds = float(time_parts[2])
-                    start_seconds = (hours * 3600) + (minutes * 60) + seconds
                     
-                    # For weekly templates, we need to distribute these across days
-                    # This is a temporary fix - ideally the frontend should handle this
-                    if is_weekly_with_daily_times:
-                        # Simple distribution: spread items across different days
-                        # This is just for overlap detection - the frontend will handle actual placement
-                        day_offset = (idx % 7) * 24 * 3600
-                        start_seconds += day_offset
+                try:
+                    minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                except ValueError as e:
+                    logger.error(f"Failed to parse minutes from '{time_parts[1]}' in time '{start_time}'")
+                    raise ValueError(f"Invalid minute value in '{start_time}': '{time_parts[1]}'")
+                    
+                start_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60)
+                logger.debug(f"Parsed to {start_seconds} seconds (day={day_index}, hours={hours}, minutes={minutes})")
+            else:
+                # Parse daily format - could be 24-hour (HH:MM:SS) or 12-hour (HH:MM:SS am/pm)
+                logger.debug(f"Parsing daily time format: '{start_time}'")
+                
+                # Check if it contains am/pm
+                time_str = str(start_time).strip()
+                is_12_hour = time_str.lower().endswith((' am', ' pm'))
+                
+                if is_12_hour:
+                    # Handle 12-hour format like "12:00:00 am"
+                    parts = time_str.lower().split()
+                    if len(parts) >= 2:
+                        time_portion = parts[0]
+                        am_pm = parts[1]
+                        
+                        time_parts = time_portion.split(':')
+                        if len(time_parts) >= 2:
+                            try:
+                                hours = int(time_parts[0])
+                                minutes = int(time_parts[1])
+                                seconds = 0
+                                
+                                # Handle seconds if present
+                                if len(time_parts) >= 3:
+                                    # Remove any remaining am/pm text from seconds
+                                    sec_str = time_parts[2].replace('am', '').replace('pm', '').strip()
+                                    try:
+                                        seconds = float(sec_str)
+                                    except ValueError:
+                                        logger.warning(f"Could not parse seconds from '{time_parts[2]}', defaulting to 0")
+                                        seconds = 0
+                                
+                                # Convert 12-hour to 24-hour
+                                if am_pm == 'pm' and hours != 12:
+                                    hours += 12
+                                elif am_pm == 'am' and hours == 12:
+                                    hours = 0
+                                
+                                start_seconds = (hours * 3600) + (minutes * 60) + seconds
+                                logger.debug(f"Parsed 12-hour format to {start_seconds} seconds (hours={hours}, minutes={minutes}, seconds={seconds})")
+                            except ValueError as e:
+                                logger.error(f"Failed to parse 12-hour time '{start_time}': {e}")
+                                raise ValueError(f"Invalid 12-hour time format: '{start_time}'")
+                        else:
+                            logger.error(f"Invalid time format - not enough parts: '{time_portion}'")
+                            raise ValueError(f"Invalid time format: '{start_time}'")
+                    else:
+                        logger.error(f"Invalid 12-hour format - missing am/pm: '{start_time}'")
+                        raise ValueError(f"Invalid 12-hour time format: '{start_time}'")
+                else:
+                    # Handle 24-hour format like "08:30:45"
+                    time_parts = time_str.split(':')
+                    if len(time_parts) >= 3:
+                        try:
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            seconds = float(time_parts[2])
+                            start_seconds = (hours * 3600) + (minutes * 60) + seconds
+                            logger.debug(f"Parsed 24-hour format to {start_seconds} seconds")
+                        except ValueError as e:
+                            logger.error(f"Failed to parse 24-hour time '{start_time}': {e}")
+                            raise ValueError(f"Invalid 24-hour time format: '{start_time}'")
+                    elif len(time_parts) == 2:
+                        # Handle HH:MM format
+                        try:
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            start_seconds = (hours * 3600) + (minutes * 60)
+                            logger.debug(f"Parsed HH:MM format to {start_seconds} seconds")
+                        except ValueError as e:
+                            logger.error(f"Failed to parse time '{start_time}': {e}")
+                            raise ValueError(f"Invalid time format: '{start_time}'")
+                    else:
+                        logger.error(f"Invalid time format - not enough parts: '{start_time}'")
+                        raise ValueError(f"Invalid time format: '{start_time}'")
+                
+                # For weekly templates, we need to distribute these across days
+                # This is a temporary fix - ideally the frontend should handle this
+                if is_weekly_with_daily_times:
+                    # Simple distribution: spread items across different days
+                    # This is just for overlap detection - the frontend will handle actual placement
+                    day_offset = (idx % 7) * 24 * 3600
+                    start_seconds += day_offset
             
             duration = float(item.get('duration_seconds', 0))
             end_seconds = start_seconds + duration
@@ -3418,6 +3735,8 @@ def fill_template_gaps():
         
         # Initialize scheduler for rotation logic
         scheduler = scheduler_postgres
+        
+        # Reset rotation to ensure consistent behavior between fills
         scheduler._reset_rotation()
         
         # Convert available content to the format expected by scheduler
@@ -3455,11 +3774,14 @@ def fill_template_gaps():
         items_added = []
         
         # Track when each asset was last scheduled (for replay delays)
+        # We need to track ALL items in the template (including previously filled items)
+        # to ensure replay delays work correctly when filling gaps multiple times
         asset_schedule_times = {}  # asset_id -> list of scheduled times in seconds
         
-        # For templates, we need to calculate times differently based on type
+        # Track all existing template items that have assets (not just placeholders)
         for item in template.get('items', []):
             asset_id = item.get('asset_id') or item.get('id') or item.get('content_id')
+            # Only track items that have actual content (not empty template slots)
             if asset_id and 'start_time' in item and item['start_time']:
                 # Parse start time to seconds
                 start_time = item['start_time']
@@ -3480,19 +3802,57 @@ def fill_template_gaps():
                     minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
                     time_in_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60)
                 else:
-                    # Parse daily format
-                    time_parts = str(start_time).split(':')
-                    if len(time_parts) >= 3:
-                        hours = int(time_parts[0])
-                        minutes = int(time_parts[1])
-                        seconds = float(time_parts[2])
-                        time_in_seconds = (hours * 3600) + (minutes * 60) + seconds
+                    # Parse daily format - could be 24-hour (HH:MM:SS) or 12-hour (HH:MM:SS am/pm)
+                    time_str = str(start_time).strip()
+                    is_12_hour = time_str.lower().endswith((' am', ' pm'))
+                    
+                    if is_12_hour:
+                        # Handle 12-hour format like "12:00:00 am"
+                        parts = time_str.lower().split()
+                        if len(parts) >= 2:
+                            time_portion = parts[0]
+                            am_pm = parts[1]
+                            
+                            time_parts = time_portion.split(':')
+                            if len(time_parts) >= 2:
+                                hours = int(time_parts[0])
+                                minutes = int(time_parts[1])
+                                seconds = 0
+                                
+                                # Handle seconds if present
+                                if len(time_parts) >= 3:
+                                    # Remove any remaining am/pm text from seconds
+                                    sec_str = time_parts[2].replace('am', '').replace('pm', '').strip()
+                                    try:
+                                        seconds = float(sec_str)
+                                    except ValueError:
+                                        seconds = 0
+                                
+                                # Convert 12-hour to 24-hour
+                                if am_pm == 'pm' and hours != 12:
+                                    hours += 12
+                                elif am_pm == 'am' and hours == 12:
+                                    hours = 0
+                                
+                                time_in_seconds = (hours * 3600) + (minutes * 60) + seconds
+                    else:
+                        # Handle 24-hour format
+                        time_parts = str(start_time).split(':')
+                        if len(time_parts) >= 3:
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            seconds = float(time_parts[2])
+                            time_in_seconds = (hours * 3600) + (minutes * 60) + seconds
+                        elif len(time_parts) == 2:
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            time_in_seconds = (hours * 3600) + (minutes * 60)
                 
                 if asset_id not in asset_schedule_times:
                     asset_schedule_times[asset_id] = []
                 asset_schedule_times[asset_id].append(time_in_seconds)
         
-        logger.info(f"Assets already scheduled: {len(asset_schedule_times)}")
+        logger.info(f"Assets already scheduled in template: {len(asset_schedule_times)}")
         
         # Load replay delay configuration
         try:

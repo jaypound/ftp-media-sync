@@ -43,13 +43,26 @@ function schedulingTemplateLibraryInit() {
 // Load saved templates from localStorage
 function schedulingLoadSavedTemplates() {
     try {
+        // Test if localStorage is available
+        const testKey = '__localStorage_test__';
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+        
         const saved = localStorage.getItem('savedTemplates');
         if (saved) {
             schedulingTemplateLibraryState.savedTemplates = JSON.parse(saved);
         }
     } catch (e) {
-        console.error('Error loading saved templates:', e);
+        console.warn('localStorage is not available (possibly in Incognito mode):', e.message);
         schedulingTemplateLibraryState.savedTemplates = [];
+        
+        // Show a warning if we're in the template library
+        if (document.getElementById('templateLibraryModal') && document.getElementById('templateLibraryModal').style.display === 'block') {
+            const libraryList = document.getElementById('templateLibraryList');
+            if (libraryList) {
+                libraryList.innerHTML = '<p style="text-align: center; color: #ff6b6b; padding: 20px;">Template Library is not available in Incognito/Private browsing mode.<br>Please use a regular browser window to save and load templates.</p>';
+            }
+        }
     }
 }
 
@@ -90,10 +103,9 @@ function schedulingLoadSavedTemplate(index) {
     // Set as current template
     schedulingTemplateLibraryState.currentViewIndex = index;
     
-    // Update global state if needed
-    if (window.currentTemplate !== undefined) {
-        window.currentTemplate = template;
-    }
+    // Update global state - always set it
+    window.currentTemplate = template;
+    console.log('Template loaded from library to window.currentTemplate:', window.currentTemplate);
     
     // Display the template
     if (window.schedulingDisplayTemplate) {
@@ -127,6 +139,16 @@ function schedulingLoadTemplateLibrary() {
     const libraryList = document.getElementById('templateLibraryList');
     if (!libraryList) {
         console.error('Template library list element not found');
+        return;
+    }
+    
+    // Check if localStorage is available
+    try {
+        const testKey = '__localStorage_test__';
+        localStorage.setItem(testKey, 'test');
+        localStorage.removeItem(testKey);
+    } catch (e) {
+        libraryList.innerHTML = '<p style="text-align: center; color: #ff6b6b; padding: 20px;">Template Library is not available in Incognito/Private browsing mode.<br>Please use a regular browser window to save and load templates.</p>';
         return;
     }
     

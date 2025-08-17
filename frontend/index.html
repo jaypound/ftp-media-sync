@@ -590,7 +590,7 @@
                 </div>
                 
                 <!-- Schedule Management Section -->
-                <div class="scheduling-card">
+                <div class="scheduling-card collapsed">
                     <h3><i class="fas fa-list-alt"></i> Schedule Management</h3>
                     <div class="card-content">
                         <div class="schedule-management">
@@ -640,6 +640,9 @@
                                 </button>
                                 <button class="button info small" onclick="showTemplateLibrary()">
                                     <i class="fas fa-folder-open"></i> Template Library
+                                </button>
+                                <button class="button primary small" onclick="createScheduleFromTemplate()" id="createScheduleBtn" style="display: none;">
+                                    <i class="fas fa-calendar-plus"></i> Create Schedule from Template
                                 </button>
                             </div>
                             

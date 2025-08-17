@@ -4219,6 +4219,9 @@ function displayAvailableContent() {
                     <button class="button small secondary" onclick="viewContentDetails('${contentId}')" title="View Details">
                         <i class="fas fa-info"></i>
                     </button>
+                    <button class="button small danger" onclick="deleteContentFromDatabase('${contentId}')" title="Delete from Database">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </div>
             </div>
         `;
@@ -7233,6 +7236,60 @@ function getShelfLifeInfo(content) {
     return `${shelfLifeCategory} (${shelfLifeDays} days from encode date)`;
 }
 
+async function deleteContentFromDatabase(contentId) {
+    const content = availableContent.find(c => {
+        const itemId = c.id || c._id || c.guid;
+        return itemId == contentId || itemId === contentId || 
+               String(itemId) === String(contentId);
+    });
+    
+    if (!content) {
+        alert('Content not found');
+        return;
+    }
+    
+    const confirmMsg = `Are you sure you want to delete the database entry for:\n\n"${content.file_name || content.content_title || 'Unknown'}"\n\nThis will remove the content analysis data but will NOT delete the actual file.`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/api/content/${contentId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Remove from local array
+            const index = availableContent.findIndex(c => {
+                const itemId = c.id || c._id || c.guid;
+                return itemId == contentId || itemId === contentId || 
+                       String(itemId) === String(contentId);
+            });
+            if (index > -1) {
+                availableContent.splice(index, 1);
+            }
+            
+            // Refresh display
+            displayAvailableContent();
+            
+            log(`✅ Database entry deleted for: ${content.file_name || content.content_title}`, 'success');
+        } else {
+            alert(`Failed to delete database entry: ${result.message || 'Unknown error'}`);
+            log(`❌ Failed to delete database entry: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting content:', error);
+        alert(`Error deleting database entry: ${error.message}`);
+        log(`❌ Error deleting content: ${error.message}`, 'error');
+    }
+}
+
 function viewContentDetails(contentId) {
     // Find the content item - convert contentId to match the type
     const content = availableContent.find(c => {
@@ -7721,10 +7778,34 @@ async function fillScheduleGaps() {
     try {
         log('fillScheduleGaps: Function called', 'info');
         
-        if (!currentTemplate) {
-            log('fillScheduleGaps: No current template loaded', 'warning');
-            alert('Please load a template first');
-            return;
+        // Debug logging
+        console.log('fillScheduleGaps debug:');
+        console.log('  currentTemplate:', currentTemplate);
+        console.log('  window.currentTemplate:', window.currentTemplate);
+        console.log('  window.schedulingTemplateState:', window.schedulingTemplateState);
+        console.log('  schedulingTemplateState.currentTemplate:', window.schedulingTemplateState?.currentTemplate);
+        
+        // Check both global currentTemplate and scheduling module's template
+        if (!currentTemplate && !window.currentTemplate) {
+            // Try to get template from scheduling module
+            if (window.schedulingTemplateState && window.schedulingTemplateState.currentTemplate) {
+                currentTemplate = window.schedulingTemplateState.currentTemplate;
+                window.currentTemplate = currentTemplate; // Also set global
+                log('fillScheduleGaps: Using template from scheduling module', 'info');
+            } else {
+                log('fillScheduleGaps: No current template loaded', 'warning');
+                alert('Please load a template first');
+                return;
+            }
+        } else if (window.currentTemplate && !currentTemplate) {
+            // Use window.currentTemplate if available
+            currentTemplate = window.currentTemplate;
+            log('fillScheduleGaps: Using window.currentTemplate', 'info');
+        }
+        
+        // Ensure currentTemplate is set for the rest of the function
+        if (!currentTemplate && window.currentTemplate) {
+            currentTemplate = window.currentTemplate;
         }
         
         if (!currentTemplate.items || currentTemplate.items.length === 0) {
@@ -7868,6 +7949,14 @@ async function fillScheduleGaps() {
                 const gaps = calculateScheduleGaps(cleanTemplate);
                 console.log('Calculated gaps to fill:', gaps);
                 
+                // Check if there are any meaningful gaps to fill
+                const totalGapTime = gaps.reduce((sum, gap) => sum + (gap.end - gap.start), 0);
+                if (totalGapTime < 60) { // Less than 1 minute of gaps
+                    alert('The schedule is already full. There are no significant gaps to fill.');
+                    log('fillScheduleGaps: Schedule is already full, no gaps to fill', 'info');
+                    return;
+                }
+                
                 // Validate gaps don't contain any fixed items
                 let invalidGaps = false;
                 gaps.forEach((gap, gapIdx) => {
@@ -7927,16 +8016,58 @@ async function fillScheduleGaps() {
                         console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
                     });
                     
+                    // Update all template references
+                    window.currentTemplate = currentTemplate;
+                    
+                    // Update the scheduling template state if in scheduling module
+                    if (window.schedulingTemplateState) {
+                        window.schedulingTemplateState.currentTemplate = currentTemplate;
+                        window.schedulingTemplateState.templateLoaded = true;
+                    }
+                    
                     // Update the template display
-                    const activePanel = document.querySelector('.panel:not([style*="display: none"])');
-                    if (activePanel && activePanel.id === 'dashboard') {
-                        displayDashboardTemplate();
-                    } else {
-                        displayTemplate();
+                    console.log('About to update template display with', currentTemplate.items.length, 'items');
+                    
+                    try {
+                        const activePanel = document.querySelector('.panel:not([style*="display: none"])');
+                        console.log('Active panel:', activePanel ? activePanel.id : 'none');
+                        
+                        if (activePanel && activePanel.id === 'dashboard') {
+                            // Only call dashboard display if we're actually in dashboard
+                            if (document.getElementById('templateInfo')) {
+                                console.log('Calling displayDashboardTemplate');
+                                displayDashboardTemplate();
+                            }
+                        } else if (activePanel && activePanel.id === 'scheduling') {
+                            // Use scheduling module's display function
+                            console.log('Active panel is scheduling, calling schedulingDisplayTemplate');
+                            if (window.schedulingDisplayTemplate) {
+                                window.schedulingDisplayTemplate(currentTemplate);
+                            } else {
+                                console.error('schedulingDisplayTemplate not found');
+                            }
+                        } else {
+                            // Fallback to generic display
+                            console.log('Using fallback display method');
+                            if (window.schedulingDisplayTemplate) {
+                                window.schedulingDisplayTemplate(currentTemplate);
+                            } else if (window.displayTemplate) {
+                                window.displayTemplate(currentTemplate);
+                            }
+                        }
+                    } catch (displayError) {
+                        console.error('Error updating template display:', displayError);
+                        console.error('Stack trace:', displayError.stack);
                     }
                     
                     alert(`Successfully added ${result.items_added.length} items to fill the schedule gaps.`);
                     log(`fillScheduleGaps: Template now has ${currentTemplate.items.length} items`, 'success');
+                    
+                    // Force a refresh of the display
+                    console.log('Forcing display refresh with', currentTemplate.items.length, 'items');
+                    if (window.schedulingDisplayTemplate) {
+                        window.schedulingDisplayTemplate(currentTemplate);
+                    }
                 } else {
                     log(`fillScheduleGaps: ${result.message || 'No suitable content found to fill gaps'}`, 'warning');
                     
@@ -9793,6 +9924,22 @@ function parseTimeToSeconds(timeStr, templateType) {
 
 // Helper function to format seconds to time string with proper format
 function formatTimeFromSeconds(totalSeconds, templateType = 'daily') {
+    // Check if we should use 24-hour format by looking at existing template items
+    let use24HourFormat = false;
+    if (window.currentTemplate && window.currentTemplate.items) {
+        // Check first few items with valid start times
+        for (let i = 0; i < Math.min(5, window.currentTemplate.items.length); i++) {
+            const item = window.currentTemplate.items[i];
+            if (item.start_time && typeof item.start_time === 'string') {
+                // If the time doesn't contain 'am' or 'pm', it's 24-hour format
+                if (!item.start_time.toLowerCase().includes('am') && !item.start_time.toLowerCase().includes('pm')) {
+                    use24HourFormat = true;
+                    break;
+                }
+            }
+        }
+    }
+    
     if (templateType === 'weekly') {
         // Calculate day and time for weekly schedules
         const dayIndex = Math.floor(totalSeconds / (24 * 3600));
@@ -9825,30 +9972,39 @@ function formatTimeFromSeconds(totalSeconds, templateType = 'daily') {
         
         return timeStr;
     } else {
-        // Regular daily format - return in 12-hour AM/PM format to match imported templates
+        // Regular daily format
         const hours = Math.floor(totalSeconds / 3600);
         const minutes = Math.floor((totalSeconds % 3600) / 60);
         const seconds = totalSeconds % 60;
         const milliseconds = Math.round((seconds % 1) * 1000);
         const wholeSeconds = Math.floor(seconds);
         
-        // Convert to 12-hour format
-        let period = 'am';
-        let displayHours = hours;
-        if (hours >= 12) {
-            period = 'pm';
-            if (hours > 12) displayHours = hours - 12;
+        if (use24HourFormat) {
+            // Return in 24-hour format to match the template
+            let timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}`;
+            if (milliseconds > 0) {
+                timeStr += `.${milliseconds.toString().padStart(3, '0')}`;
+            }
+            return timeStr;
+        } else {
+            // Convert to 12-hour format
+            let period = 'am';
+            let displayHours = hours;
+            if (hours >= 12) {
+                period = 'pm';
+                if (hours > 12) displayHours = hours - 12;
+            }
+            if (displayHours === 0) displayHours = 12;
+            
+            // Format time string
+            let timeStr = `${displayHours}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}`;
+            if (milliseconds > 0) {
+                timeStr += `.${milliseconds.toString().padStart(3, '0')}`;
+            }
+            timeStr += ` ${period}`;
+            
+            return timeStr;
         }
-        if (displayHours === 0) displayHours = 12;
-        
-        // Format time string
-        let timeStr = `${displayHours}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}`;
-        if (milliseconds > 0) {
-            timeStr += `.${milliseconds.toString().padStart(3, '0')}`;
-        }
-        timeStr += ` ${period}`;
-        
-        return timeStr;
     }
 }
 
@@ -9981,6 +10137,104 @@ window.getDurationCategory = getDurationCategory;
 window.closeTemplateExportModal = closeTemplateExportModal;
 window.confirmTemplateExport = confirmTemplateExport;
 window.exportCurrentTemplate = exportCurrentTemplate;
+window.createScheduleFromTemplate = createScheduleFromTemplate;
+
+async function createScheduleFromTemplate() {
+    // Get current template from all possible locations
+    let template = window.currentTemplate || 
+                  (window.schedulingTemplateState && window.schedulingTemplateState.currentTemplate) ||
+                  schedulingTemplateState.currentTemplate;
+    
+    if (!template || !template.items || template.items.length === 0) {
+        alert('No template loaded. Please load a template first.');
+        return;
+    }
+    
+    // Get today's date as default
+    const today = new Date();
+    const defaultDate = today.toISOString().split('T')[0];
+    
+    // Prompt for air date
+    const airDate = prompt('Enter the air date for this schedule (YYYY-MM-DD):', defaultDate);
+    if (!airDate) {
+        return; // User cancelled
+    }
+    
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(airDate)) {
+        alert('Invalid date format. Please use YYYY-MM-DD format.');
+        return;
+    }
+    
+    const scheduleName = prompt('Enter a name for this schedule:', `Schedule for ${airDate}`);
+    if (!scheduleName) {
+        return; // User cancelled
+    }
+    
+    log(`Creating schedule from template: ${scheduleName} for ${airDate}`, 'info');
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/create-schedule-from-template', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                air_date: airDate,
+                schedule_name: scheduleName,
+                channel: 'Comcast Channel 26',
+                items: template.items
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`Schedule created successfully! Schedule ID: ${result.schedule_id}`, 'success');
+            alert(`Schedule created successfully!\n\nSchedule: ${scheduleName}\nAir Date: ${airDate}\nItems: ${result.added_count}\n\nYou can now view this schedule in the Schedules panel.`);
+            
+            // Optionally switch to schedules view
+            const switchToSchedules = confirm('Would you like to switch to the Schedules panel to view the new schedule?');
+            if (switchToSchedules) {
+                // Switch to scheduling panel
+                const schedulingBtn = document.querySelector('[onclick="showPanel(\'scheduling\')"]');
+                if (schedulingBtn) {
+                    schedulingBtn.click();
+                }
+                
+                // After a short delay to ensure panel is switched, expand Schedule Management and load schedules
+                setTimeout(() => {
+                    // Find and expand the Schedule Management card
+                    const scheduleManagementCard = Array.from(document.querySelectorAll('.scheduling-card')).find(card => {
+                        const header = card.querySelector('h3');
+                        return header && header.textContent.includes('Schedule Management');
+                    });
+                    
+                    if (scheduleManagementCard && scheduleManagementCard.classList.contains('collapsed')) {
+                        const header = scheduleManagementCard.querySelector('h3');
+                        if (header) {
+                            header.click(); // This will expand the card
+                        }
+                    }
+                    
+                    // Load the schedules list
+                    if (window.listAllSchedules) {
+                        window.listAllSchedules();
+                    } else if (typeof listAllSchedules === 'function') {
+                        listAllSchedules();
+                    }
+                }, 200);
+            }
+        } else {
+            log(`Failed to create schedule: ${result.message}`, 'error');
+            alert(`Failed to create schedule: ${result.message}`);
+        }
+    } catch (error) {
+        log(`Error creating schedule: ${error.message}`, 'error');
+        alert(`Error creating schedule: ${error.message}`);
+    }
+}
 
 function addToTemplate(assetId) {
     if (!currentTemplate) {
