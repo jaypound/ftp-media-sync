@@ -270,7 +270,7 @@
 
 .scheduling-template-item {
     display: grid;
-    grid-template-columns: 40px 80px 1fr 120px 80px;
+    grid-template-columns: 40px 120px 1fr 120px 80px;
     gap: 1rem;
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border-color, #e0e0e0);
@@ -296,9 +296,7 @@
 .scheduling-template-item-title {
     font-weight: 500;
     color: var(--text-primary, #333);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    word-break: break-word;
 }
 
 .scheduling-template-item-category {
@@ -326,6 +324,14 @@
     border-radius: 6px;
     padding: 1rem;
     margin-bottom: 1rem;
+}
+
+/* Empty Template Message */
+.scheduling-template-empty {
+    text-align: center;
+    color: var(--text-secondary, #666);
+    padding: 2rem;
+    font-style: italic;
 }
 
 /* Expiration Styles */
@@ -450,7 +456,7 @@
     justify-content: center;
 }
 
-/* Dark Mode Support for Stats */
+/* Dark Mode Support for Stats and Templates */
 @media (prefers-color-scheme: dark) {
     .scheduling-stat-value {
         color: var(--text-primary-dark, #e0e0e0);
@@ -484,6 +490,56 @@
         background-color: var(--input-bg-dark, #2a2a2a);
         border-color: var(--border-dark, #444);
         color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    /* Template Display Dark Mode */
+    .scheduling-template-items {
+        background-color: var(--card-bg-dark, #1a1a1a);
+        border-color: var(--border-dark, #444);
+    }
+    
+    .scheduling-template-day-header {
+        background-color: var(--day-header-bg-dark, #2a2a2a);
+        border-color: var(--border-dark, #444);
+    }
+    
+    .scheduling-template-item {
+        border-color: var(--border-dark, #444);
+    }
+    
+    .scheduling-template-item:hover {
+        background-color: var(--hover-bg-dark, #2a2a2a);
+    }
+    
+    .scheduling-template-item-number {
+        color: var(--text-secondary-dark, #999);
+    }
+    
+    .scheduling-template-item-time {
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-template-item-title {
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-template-item-category {
+        background-color: var(--category-bg-dark, #3a4a5a);
+        color: var(--category-color-dark, #4a9eff);
+    }
+    
+    .scheduling-template-item-duration {
+        color: var(--text-secondary-dark, #999);
+    }
+    
+    .scheduling-template-info {
+        background-color: var(--info-bg-dark, #2a3a4a);
+        border-color: var(--info-border-dark, #3a5a7a);
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-template-empty {
+        color: var(--text-secondary-dark, #999);
     }
 }
 

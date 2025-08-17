@@ -13,6 +13,9 @@ const schedulingTemplateState = {
 function schedulingTemplatesInit() {
     console.log('Initializing Scheduling Templates module...');
     
+    // Expose state to global scope
+    window.schedulingTemplateState = schedulingTemplateState;
+    
     // Override the legacy displayTemplate function
     if (window.displayTemplate) {
         window.displayTemplate = schedulingDisplayTemplate;
@@ -26,8 +29,14 @@ function schedulingDisplayTemplate(template) {
         return;
     }
     
+    console.log('schedulingDisplayTemplate called with template containing', template.items ? template.items.length : 0, 'items');
+    
     schedulingTemplateState.currentTemplate = template;
     schedulingTemplateState.templateLoaded = true;
+    
+    // Ensure global currentTemplate is updated
+    window.currentTemplate = template;
+    console.log('Template set in window.currentTemplate:', window.currentTemplate);
     
     // Update template info display
     const templateInfoEl = document.getElementById('schedulingTemplateInfo');
@@ -69,13 +78,24 @@ function schedulingDisplayTemplate(template) {
     // Display template items
     const templateDisplayEl = document.getElementById('schedulingTemplateDisplay');
     if (templateDisplayEl) {
-        templateDisplayEl.innerHTML = schedulingGenerateTemplateHTML(template);
+        console.log('Found template display element, generating HTML for', template.items.length, 'items');
+        const html = schedulingGenerateTemplateHTML(template);
+        console.log('Generated HTML length:', html.length, 'characters');
+        templateDisplayEl.innerHTML = html;
+        console.log('HTML set to element');
+    } else {
+        console.error('schedulingTemplateDisplay element not found!')
     }
     
-    // Show export button if template is loaded
+    // Show export and create schedule buttons if template is loaded
     const exportBtn = document.getElementById('exportTemplateBtn');
     if (exportBtn) {
         exportBtn.style.display = 'inline-block';
+    }
+    
+    const createScheduleBtn = document.getElementById('createScheduleBtn');
+    if (createScheduleBtn) {
+        createScheduleBtn.style.display = 'inline-block';
     }
     
     console.log('Template displayed successfully:', template.filename);
@@ -84,8 +104,10 @@ function schedulingDisplayTemplate(template) {
 // Generate HTML for template display
 function schedulingGenerateTemplateHTML(template) {
     if (!template || !template.items || template.items.length === 0) {
-        return '<p style="text-align: center; color: #666;">No items in template</p>';
+        return '<p class="scheduling-template-empty">No items in template</p>';
     }
+    
+    console.log('schedulingGenerateTemplateHTML: Generating HTML for', template.items.length, 'items');
     
     let html = '<div class="scheduling-template-items">';
     
@@ -106,6 +128,7 @@ function schedulingGenerateTemplateHTML(template) {
         });
     } else {
         // Daily template - show all items
+        console.log('Processing daily template items...');
         template.items.forEach((item, index) => {
             html += schedulingGenerateItemHTML(item, index);
         });
@@ -117,16 +140,29 @@ function schedulingGenerateTemplateHTML(template) {
 
 // Generate HTML for a single item
 function schedulingGenerateItemHTML(item, index) {
-    const title = item.title || item.filename || 'Untitled';
+    // Try multiple fields for title - prefer content_title over filename
+    let title = item.content_title || item.title || item.filename || item.file_name || 'Untitled';
+    
+    // If we're using filename/file_name, remove the extension
+    if (!item.content_title && !item.title && (item.filename || item.file_name)) {
+        const filename = item.filename || item.file_name;
+        const lastDotIndex = filename.lastIndexOf('.');
+        if (lastDotIndex > 0) {
+            title = filename.substring(0, lastDotIndex);
+        } else {
+            title = filename;
+        }
+    }
+    
     const startTime = item.start_time || '00:00:00';
-    const duration = schedulingFormatDuration(item.duration_seconds || 0);
-    const category = item.category || '';
+    const duration = schedulingFormatDuration(item.duration_seconds || item.file_duration || 0);
+    const category = item.category || item.duration_category || 'No Category';
     
     return `
         <div class="scheduling-template-item">
             <span class="scheduling-template-item-number">${index + 1}</span>
             <span class="scheduling-template-item-time">${startTime}</span>
-            <span class="scheduling-template-item-title">${title}</span>
+            <span class="scheduling-template-item-title" title="${title}">${title}</span>
             <span class="scheduling-template-item-category">${category}</span>
             <span class="scheduling-template-item-duration">${duration}</span>
         </div>
