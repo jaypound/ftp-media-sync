@@ -343,6 +343,7 @@ function renderComparisonResults() {
     
     if (showTargetOnly) {
         // Show only target-only files
+        fileListDiv.classList.remove('dashboard-comparison-container');
         targetOnlyFiles.forEach(result => {
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item target-only';
@@ -370,14 +371,28 @@ function renderComparisonResults() {
             fileListDiv.appendChild(fileItem);
         });
     } else {
-        // Show source/target comparison results
+        // Show source/target comparison results in side-by-side layout
+        fileListDiv.classList.add('dashboard-comparison-container');
+        
+        // Create sections for side-by-side layout
+        const sourceSection = document.createElement('div');
+        sourceSection.className = 'dashboard-comparison-section';
+        sourceSection.innerHTML = '<h4><i class="fas fa-exchange-alt"></i> Source/Target Differences</h4>';
+        
+        const targetSection = document.createElement('div');
+        targetSection.className = 'dashboard-comparison-section';
+        targetSection.innerHTML = '<h4><i class="fas fa-folder-plus"></i> Target-Only Files</h4>';
+        
+        // Add files that need syncing to source section
         const resultsToShow = showAllFiles ? allComparisonResults : allComparisonResults.filter(result => result.status !== 'identical');
+        let hasSourceDifferences = false;
         
         resultsToShow.forEach(result => {
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item';
             
             if (result.status === 'missing') {
+                hasSourceDifferences = true;
                 // File missing on target
                 fileItem.classList.add('missing');
                 fileItem.innerHTML = `
@@ -389,6 +404,7 @@ function renderComparisonResults() {
                     <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">Add to Sync</button>
                 `;
             } else if (result.status === 'different') {
+                hasSourceDifferences = true;
                 // File size different
                 fileItem.classList.add('different');
                 fileItem.innerHTML = `
@@ -411,11 +427,19 @@ function renderComparisonResults() {
                 `;
             }
             
-            fileListDiv.appendChild(fileItem);
+            sourceSection.appendChild(fileItem);
         });
         
-        // Add target-only files when showing all files
-        if (showAllFiles) {
+        // Add placeholder if no source differences
+        if (!hasSourceDifferences && !showAllFiles) {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'dashboard-empty-state';
+            placeholder.innerHTML = '<p style="color: #666; text-align: center;">All files are in sync</p>';
+            sourceSection.appendChild(placeholder);
+        }
+        
+        // Add target-only files to target section
+        if (targetOnlyFiles.length > 0) {
             targetOnlyFiles.forEach(result => {
                 const fileItem = document.createElement('div');
                 fileItem.className = 'file-item target-only';
@@ -440,9 +464,18 @@ function renderComparisonResults() {
                     </div>
                 `;
                 
-                fileListDiv.appendChild(fileItem);
+                targetSection.appendChild(fileItem);
             });
+        } else {
+            const placeholder = document.createElement('div');
+            placeholder.className = 'dashboard-empty-state';
+            placeholder.innerHTML = '<p style="color: #666; text-align: center;">No target-only files</p>';
+            targetSection.appendChild(placeholder);
         }
+        
+        // Append both sections to the container
+        fileListDiv.appendChild(sourceSection);
+        fileListDiv.appendChild(targetSection);
     }
 }
 
@@ -500,17 +533,15 @@ function displayScannedFiles() {
         }
         
         fileItem.innerHTML = `
-            <div class="scanned-file-content">
-                <div class="scanned-file-name">${file.name}</div>
-                <div class="scanned-file-details">
-                    <span>Size: ${formatFileSize(file.size)}</span>
-                    <span class="scanned-file-path">${file.path || file.name}</span>
-                </div>
+            <div class="file-info">
+                <div class="file-name">${file.name}</div>
+                <div class="file-size">${formatFileSize(file.size)}</div>
+                <div class="file-path">${file.path || file.name}</div>
             </div>
-            <div class="scanned-file-actions">
+            <div class="file-actions">
                 ${isAnalyzed ? '<span class="analyzed-status">✅ Analyzed</span>' : ''}
                 ${isVideoFile ? `
-                    <button class="analyze-btn ${isAnalyzed ? 'analyzed' : ''}" 
+                    <button class="button analyze-btn ${isAnalyzed ? 'analyzed' : ''}" 
                             onclick="addToAnalysisQueue('${btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '')}')" 
                             data-file-path="${file.path || file.name}"
                             data-is-analyzed="${isAnalyzed}">
@@ -528,12 +559,10 @@ function displayScannedFiles() {
         const fileItem = document.createElement('div');
         fileItem.className = 'scanned-file-item';
         fileItem.innerHTML = `
-            <div class="scanned-file-content">
-                <div class="scanned-file-name">${file.name}</div>
-                <div class="scanned-file-details">
-                    <span>Size: ${formatFileSize(file.size)}</span>
-                    <span class="scanned-file-path">${file.path || file.name}</span>
-                </div>
+            <div class="file-info">
+                <div class="file-name">${file.name}</div>
+                <div class="file-size">${formatFileSize(file.size)}</div>
+                <div class="file-path">${file.path || file.name}</div>
             </div>
         `;
         targetFilesList.appendChild(fileItem);
@@ -1561,6 +1590,9 @@ async function scanFiles() {
         
         // Display scanned files
         displayScannedFiles();
+        
+        // Update dashboard stats to show file count
+        updateDashboardStats();
         
         // Enable compare and analyze buttons
         document.querySelector('button[onclick="compareFiles()"]').disabled = false;
@@ -10555,6 +10587,9 @@ async function scanSelectedFolders() {
         
         // Display scanned files
         displayScannedFiles();
+        
+        // Update dashboard stats to show file count
+        updateDashboardStats();
         
         // Enable compare button
         document.querySelector('button[onclick="compareFiles()"]').disabled = false;
