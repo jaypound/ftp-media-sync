@@ -5988,32 +5988,135 @@ def list_graphics_files():
             'message': str(e)
         })
 
+@app.route('/api/list-files', methods=['POST'])
+def list_files():
+    """List files in a directory with optional extension filtering"""
+    try:
+        data = request.json
+        server = data.get('server', 'source')
+        path = data.get('path', '')
+        extensions = data.get('extensions', [])
+        
+        logger.info(f"List files request - server: {server}, path: {path}, extensions: {extensions}")
+        
+        # Check if server is connected
+        if server not in ftp_managers:
+            return jsonify({
+                'success': False,
+                'message': f'{server.capitalize()} server not connected. Please connect to FTP servers first.'
+            })
+        
+        ftp = ftp_managers[server]
+        
+        # List files in the directory
+        try:
+            all_files = ftp.list_files(path)
+            
+            # Filter by extensions if provided
+            if extensions:
+                # Convert extensions to lowercase for case-insensitive comparison
+                extensions_lower = [ext.lower() for ext in extensions]
+                filtered_files = []
+                
+                for file in all_files:
+                    # Skip directories
+                    if file.get('type') == 'dir':
+                        continue
+                        
+                    file_name = file.get('name', '').lower()
+                    # Check if file ends with any of the specified extensions
+                    # Handle both with and without dots
+                    for ext in extensions_lower:
+                        ext = ext.lstrip('.')  # Remove leading dot if present
+                        if file_name.endswith(f'.{ext}'):
+                            filtered_files.append(file)
+                            break
+            else:
+                # If no extensions specified, return all files (but not directories)
+                filtered_files = [f for f in all_files if f.get('type') != 'dir']
+            
+            # Sort files by name
+            filtered_files.sort(key=lambda x: x.get('name', ''))
+            
+            logger.info(f"Found {len(filtered_files)} files matching criteria")
+            
+            return jsonify({
+                'success': True,
+                'files': filtered_files,
+                'total': len(filtered_files)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error listing files from {path}: {str(e)}")
+            return jsonify({
+                'success': False,
+                'message': f'Error listing files: {str(e)}'
+            })
+            
+    except Exception as e:
+        logger.error(f"List files error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
 @app.route('/api/generate-prj-file', methods=['POST'])
 def generate_prj_file():
     """Generate and export a .prj project file"""
     try:
         data = request.json
+        logger.info(f"=== GENERATE PRJ FILE REQUEST ===")
+        logger.info(f"Raw request data: {data}")
+        
         project_name = data.get('project_name')
         export_path = data.get('export_path', '/mnt/main/Projects/')
         export_server = data.get('export_server', 'source')
         region1_files = data.get('region1_files', [])
+        region1_path = data.get('region1_path', '')
         region2_file = data.get('region2_file')
+        region2_path = data.get('region2_path', '')
         region3_files = data.get('region3_files', [])
+        region3_path = data.get('region3_path', '')
+        slide_duration = data.get('slide_duration', 5)  # Default to 5 seconds
+        
+        # Ensure slide_duration is an integer
+        try:
+            slide_duration = int(slide_duration)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid slide_duration value: {slide_duration}, using default of 5")
+            slide_duration = 5
         
         logger.info(f"Generating PRJ file: {project_name}")
         logger.info(f"Region 1 files: {len(region1_files)}")
         logger.info(f"Region 2 file: {region2_file}")
         logger.info(f"Region 3 files: {len(region3_files)}")
+        logger.info(f"Slide duration received: {slide_duration} seconds (type: {type(slide_duration)})")
+        logger.info(f"Slide duration after conversion: {slide_duration} seconds")
         
         # Build the PRJ content in JSON format
         import json
         import uuid
+        import os
         
-        # Calculate total duration based on Region 1 files (5 seconds per image)
-        duration_per_image = 5.005005005005006  # ~5 seconds at 29.97 fps
+        # Calculate total duration based on Region 1 files and custom slide duration
         frame_rate_n = 30000
         frame_rate_d = 1001
-        frames_per_image = 150  # 5 seconds at 29.97 fps
+        frame_rate = frame_rate_n / frame_rate_d  # 29.97 fps
+        
+        # Calculate exact duration and frames for the custom slide duration
+        # For 29.97 fps: X seconds = X * 29.97 frames
+        # So we use floor(seconds * 29.97) to get frame count
+        logger.info(f"DEBUG: About to calculate frames - slide_duration={slide_duration}, frame_rate={frame_rate}")
+        frames_per_image = int(slide_duration * frame_rate)  # frames for custom duration
+        logger.info(f"DEBUG: frames_per_image calculated = {frames_per_image}")
+        
+        # Recalculate exact duration based on actual frame count
+        duration_per_image = frames_per_image / frame_rate  # exact duration in seconds
+        logger.info(f"DEBUG: duration_per_image calculated = {duration_per_image}")
+        
+        logger.info(f"Slide duration calculation: {slide_duration}s * {frame_rate}fps = {frames_per_image} frames")
+        logger.info(f"Actual duration per image: {duration_per_image} seconds")
+        logger.info(f"Expected for 10s: 299 frames, 9.976643 seconds. Got: {frames_per_image} frames, {duration_per_image} seconds")
         
         total_frames = len(region1_files) * frames_per_image
         total_duration = len(region1_files) * duration_per_image
@@ -6049,10 +6152,22 @@ def generate_prj_file():
         current_frame = 0
         current_time = 0.0
         
-        for idx, file_path in enumerate(region1_files):
+        for idx, filename in enumerate(region1_files):
+            # Construct full path
+            full_path = os.path.join(region1_path, filename) if region1_path else filename
+            
+            # Calculate frame boundaries
+            # For example: first slide is frames 0-148 (149 frames), second is 149-297 (149 frames), etc.
+            end_frame = current_frame + frames_per_image - 1
+            
+            if idx == 0:  # Log details for first item
+                logger.info(f"DEBUG: First item - startFrame={current_frame}, endFrame={end_frame}")
+                logger.info(f"DEBUG: First item - start={current_time}, end={current_time + duration_per_image}")
+                logger.info(f"DEBUG: First item - durationFrame={frames_per_image}, duration={duration_per_image}")
+            
             item = {
                 "startFrame": current_frame,
-                "endFrame": current_frame + frames_per_image,
+                "endFrame": end_frame,
                 "offsetFrame": None,
                 "start": current_time,
                 "end": current_time + duration_per_image,
@@ -6060,7 +6175,7 @@ def generate_prj_file():
                 "durationFrame": frames_per_image,
                 "duration": duration_per_image,
                 "isSelected": False,
-                "path": file_path,
+                "path": full_path,
                 "guid": "{" + str(uuid.uuid4()) + "}",
                 "file type": "image/jpeg",
                 "item duration": 0
@@ -6088,6 +6203,9 @@ def generate_prj_file():
         
         # Region 2 - Lower static graphic
         if region2_file:
+            # Construct full path for region 2
+            region2_full_path = os.path.join(region2_path, region2_file) if region2_path else region2_file
+            
             region2 = {
                 "mute": False,
                 "invisible": False,
@@ -6101,7 +6219,7 @@ def generate_prj_file():
                 "main": False,
                 "list": [{
                     "startFrame": 0,
-                    "endFrame": total_frames,
+                    "endFrame": total_frames - 1,
                     "offsetFrame": None,
                     "start": 0,
                     "end": total_duration,
@@ -6109,7 +6227,7 @@ def generate_prj_file():
                     "durationFrame": total_frames,
                     "duration": total_duration,
                     "isSelected": False,
-                    "path": region2_file,
+                    "path": region2_full_path,
                     "guid": "{" + str(uuid.uuid4()) + "}",
                     "file type": "image/png",
                     "item duration": 0
@@ -6122,8 +6240,10 @@ def generate_prj_file():
         # Region 3 - Music (invisible audio track)
         if region3_files:
             # For simplicity, just use the first music file
-            music_file = region3_files[0] if region3_files else None
-            if music_file:
+            music_filename = region3_files[0] if region3_files else None
+            if music_filename:
+                # Construct full path for music file
+                music_file = os.path.join(region3_path, music_filename) if region3_path else music_filename
                 region3 = {
                     "mute": False,
                     "invisible": True,  # Audio region is invisible
@@ -6137,7 +6257,7 @@ def generate_prj_file():
                     "main": False,
                     "list": [{
                         "startFrame": 0,
-                        "endFrame": total_frames,
+                        "endFrame": total_frames - 1,
                         "offsetFrame": None,
                         "start": 0,
                         "end": total_duration,
