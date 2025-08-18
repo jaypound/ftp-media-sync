@@ -246,6 +246,206 @@
     }
 }
 
+/* Scanned Files Container - Side-by-side layout */
+.dashboard-scanned-files-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-top: 1rem;
+}
+
+.dashboard-scanned-files-section {
+    background-color: var(--section-bg, #f8f9fa);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.dashboard-scanned-files-section h4 {
+    margin: 0 0 1rem 0;
+    color: var(--primary-color, #2196f3);
+    font-size: 1.125rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.dashboard-file-count {
+    font-size: 0.875rem;
+    color: var(--text-secondary, #666);
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+/* File Comparison Container - Side-by-side layout */
+.dashboard-comparison-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-top: 1rem;
+}
+
+.dashboard-comparison-section {
+    background-color: var(--section-bg, #f8f9fa);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+/* Compact file item styles for scanned files */
+.dashboard-scanned-files-section .scanned-file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    min-height: auto;
+}
+
+.dashboard-scanned-files-section .file-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.dashboard-scanned-files-section .file-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.dashboard-scanned-files-section .file-size {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #666);
+}
+
+/* Hide file paths in scanned files */
+.dashboard-scanned-files-section .file-path {
+    display: none;
+}
+
+/* Right-align buttons */
+.dashboard-scanned-files-section .file-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* Smaller buttons */
+.dashboard-scanned-files-section .analyze-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+}
+
+/* Analyzed status styling */
+.dashboard-scanned-files-section .analyzed-status {
+    font-size: 0.75rem;
+    color: var(--success-color, #28a745);
+    margin-right: 0.5rem;
+}
+
+/* Compact file item styles for comparison results */
+.dashboard-comparison-section .file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    min-height: auto;
+}
+
+.dashboard-comparison-section .file-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.dashboard-comparison-section .file-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.dashboard-comparison-section .file-size {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #666);
+}
+
+/* Hide file paths in comparison results */
+.dashboard-comparison-section .file-path {
+    display: none;
+}
+
+/* Right-align buttons */
+.dashboard-comparison-section .file-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* Smaller buttons in comparison */
+.dashboard-comparison-section .button,
+.dashboard-comparison-section .add-to-sync-btn,
+.dashboard-comparison-section .delete-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+}
+
+/* Dark Mode Support for new styles */
+@media (prefers-color-scheme: dark) {
+    .dashboard-scanned-files-section,
+    .dashboard-comparison-section {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    /* Dark mode for analyzed status */
+    .dashboard-scanned-files-section .analyzed-status {
+        color: #4ade80;
+    }
+    
+    /* Dark mode for buttons */
+    .dashboard-scanned-files-section .analyze-btn,
+    .dashboard-comparison-section .button,
+    .dashboard-comparison-section .add-to-sync-btn {
+        background-color: #2563eb;
+        color: #fff;
+        border-color: #1d4ed8;
+    }
+    
+    .dashboard-scanned-files-section .analyze-btn:hover,
+    .dashboard-comparison-section .button:hover,
+    .dashboard-comparison-section .add-to-sync-btn:hover {
+        background-color: #1d4ed8;
+        border-color: #1e40af;
+    }
+    
+    /* Analyzed/reanalyze button in dark mode */
+    .dashboard-scanned-files-section .analyze-btn.analyzed {
+        background-color: #10b981;
+        border-color: #059669;
+    }
+    
+    .dashboard-scanned-files-section .analyze-btn.analyzed:hover {
+        background-color: #059669;
+        border-color: #047857;
+    }
+    
+    /* Delete button in dark mode */
+    .dashboard-comparison-section .delete-btn {
+        background-color: #dc2626;
+        color: #fff;
+        border-color: #b91c1c;
+    }
+    
+    .dashboard-comparison-section .delete-btn:hover {
+        background-color: #b91c1c;
+        border-color: #991b1b;
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .dashboard-stats-grid {
@@ -258,5 +458,12 @@
     
     .dashboard-monitor-stats {
         grid-template-columns: 1fr;
+    }
+    
+    /* Stack containers on mobile */
+    .dashboard-scanned-files-container,
+    .dashboard-comparison-container {
+        grid-template-columns: 1fr;
+        gap: 1rem;
     }
 }
