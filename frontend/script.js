@@ -12074,11 +12074,18 @@ window.attachMonthlyHandlers = function() {
 };
 
 // Fill Graphics Functions
+// These variables are still needed by the old load functions
 let selectedRegion1Files = [];
 let selectedRegion2File = null;
 let selectedRegion3Files = [];
 
 async function loadRegion1Graphics() {
+    // Redirect to the new fill_graphics module function
+    if (window.fillGraphicsLoadRegion1Graphics) {
+        return window.fillGraphicsLoadRegion1Graphics();
+    }
+    
+    // Fallback to old implementation if module not loaded
     const server = document.getElementById('region1Server').value;
     const path = document.getElementById('region1Path').value;
     const listDiv = document.getElementById('region1GraphicsList');
@@ -12145,6 +12152,12 @@ async function loadRegion1Graphics() {
 }
 
 async function loadRegion2Graphics() {
+    // Redirect to the new fill_graphics module function
+    if (window.fillGraphicsLoadRegion2Graphics) {
+        return window.fillGraphicsLoadRegion2Graphics();
+    }
+    
+    // Fallback to old implementation if module not loaded
     const server = document.getElementById('region2Server').value;
     const path = document.getElementById('region2Path').value;
     const listDiv = document.getElementById('region2GraphicsList');
@@ -12201,6 +12214,12 @@ async function loadRegion2Graphics() {
 }
 
 async function loadMusicFiles() {
+    // Redirect to the new fill_graphics module function
+    if (window.fillGraphicsLoadMusicFiles) {
+        return window.fillGraphicsLoadMusicFiles();
+    }
+    
+    // Fallback to old implementation if module not loaded
     const server = document.getElementById('region3Server').value;
     const path = document.getElementById('region3Path').value;
     const listDiv = document.getElementById('musicFilesList');
@@ -12283,6 +12302,8 @@ function updateRegion3Selection(checkbox) {
     updateGenerateButton();
 }
 
+// DEPRECATED: This function is replaced by fillGraphicsUpdateGenerateButton in fill_graphics.js
+/*
 function updateGenerateButton() {
     const button = document.getElementById('generateProjectBtn');
     if (selectedRegion1Files.length > 0 && selectedRegion2File && selectedRegion3Files.length > 0) {
@@ -12291,7 +12312,10 @@ function updateGenerateButton() {
         button.disabled = true;
     }
 }
+*/
 
+// DEPRECATED: These functions are replaced by the fill_graphics module
+/*
 function showGenerateProjectModal() {
     const modal = document.getElementById('generateProjectModal');
     modal.style.display = 'block';
@@ -12308,7 +12332,11 @@ function showGenerateProjectModal() {
 function closeGenerateProjectModal() {
     document.getElementById('generateProjectModal').style.display = 'none';
 }
+*/
 
+// DEPRECATED: This function has been replaced by fillGraphicsGenerateProjectFile in fill_graphics.js
+// Commenting out to avoid conflicts with the new implementation that includes slide_duration
+/*
 async function generateProjectFile() {
     const projectName = document.getElementById('projectFileName').value.trim();
     const exportPath = document.getElementById('projectExportPath').value.trim();
@@ -12357,8 +12385,12 @@ async function generateProjectFile() {
         showNotification('Error', 'Failed to generate project file: ' + error.message, 'error');
     }
 }
+*/
 
 // Select/Deselect all functions for Region 1
+// DEPRECATED: These functions are now handled by the fill_graphics module
+// The new functions properly manage the state and UI updates
+/*
 function selectAllRegion1Graphics() {
     const checkboxes = document.querySelectorAll('#region1GraphicsList input[type="checkbox"]');
     checkboxes.forEach(checkbox => {
@@ -12374,6 +12406,7 @@ function deselectAllRegion1Graphics() {
         updateRegion1Selection(checkbox);
     });
 }
+*/
 
 // Make Fill Graphics functions available globally
 window.loadRegion1Graphics = loadRegion1Graphics;
@@ -12382,8 +12415,10 @@ window.loadMusicFiles = loadMusicFiles;
 window.updateRegion1Selection = updateRegion1Selection;
 window.updateRegion2Selection = updateRegion2Selection;
 window.updateRegion3Selection = updateRegion3Selection;
-window.showGenerateProjectModal = showGenerateProjectModal;
-window.closeGenerateProjectModal = closeGenerateProjectModal;
+// These are now handled by the fill_graphics module
+// window.showGenerateProjectModal = showGenerateProjectModal;
+// window.closeGenerateProjectModal = closeGenerateProjectModal;
 window.generateProjectFile = generateProjectFile;
-window.selectAllRegion1Graphics = selectAllRegion1Graphics;
-window.deselectAllRegion1Graphics = deselectAllRegion1Graphics;
+// These are now handled by the fill_graphics module
+// window.selectAllRegion1Graphics = selectAllRegion1Graphics;
+// window.deselectAllRegion1Graphics = deselectAllRegion1Graphics;

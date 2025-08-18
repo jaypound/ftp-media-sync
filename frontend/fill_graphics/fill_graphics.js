@@ -62,7 +62,7 @@ function fillGraphicsSetupEventListeners() {
 // Handle path change
 function fillGraphicsHandlePathChange(event) {
     const input = event.target;
-    const regionNum = input.id.match(/region(\d)/)[1];
+    const regionNum = parseInt(input.id.match(/region(\d)/)[1]);
     fillGraphicsState[`region${regionNum}`].path = input.value;
     
     // Reload files if server is selected
@@ -74,7 +74,8 @@ function fillGraphicsHandlePathChange(event) {
 // Handle server change
 function fillGraphicsHandleServerChange(event) {
     const select = event.target;
-    const regionNum = select.id.match(/region(\d)/)[1];
+    const regionNum = parseInt(select.id.match(/region(\d)/)[1]);
+    console.log(`DEBUG: Server change for region ${regionNum}, server: ${select.value}`);
     fillGraphicsState[`region${regionNum}`].server = select.value;
     
     // Load files for selected server
@@ -85,23 +86,46 @@ function fillGraphicsHandleServerChange(event) {
 
 // Load graphics files for region 1
 async function fillGraphicsLoadRegion1Graphics() {
+    // Sync state from DOM
+    const serverEl = document.getElementById('region1Server');
+    const pathEl = document.getElementById('region1Path');
+    if (serverEl) fillGraphicsState.region1.server = serverEl.value;
+    if (pathEl) fillGraphicsState.region1.path = pathEl.value;
+    
     await fillGraphicsLoadFiles(1);
 }
 
 // Load graphics files for region 2
 async function fillGraphicsLoadRegion2Graphics() {
+    // Sync state from DOM
+    const serverEl = document.getElementById('region2Server');
+    const pathEl = document.getElementById('region2Path');
+    if (serverEl) fillGraphicsState.region2.server = serverEl.value;
+    if (pathEl) fillGraphicsState.region2.path = pathEl.value;
+    
     await fillGraphicsLoadFiles(2);
 }
 
 // Load music files
 async function fillGraphicsLoadMusicFiles() {
+    // Sync state from DOM
+    const serverEl = document.getElementById('region3Server');
+    const pathEl = document.getElementById('region3Path');
+    if (serverEl) fillGraphicsState.region3.server = serverEl.value;
+    if (pathEl) fillGraphicsState.region3.path = pathEl.value;
+    
     await fillGraphicsLoadFiles(3);
 }
 
 // Generic file loader
 async function fillGraphicsLoadFiles(regionNum) {
+    console.log(`DEBUG: Loading files for region ${regionNum}`);
+    
     const region = fillGraphicsState[`region${regionNum}`];
-    if (!region.server || !region.path) return;
+    if (!region.server || !region.path) {
+        console.log(`DEBUG: No server or path for region ${regionNum}`);
+        return;
+    }
     
     const listElement = document.getElementById(
         regionNum === 1 ? 'region1GraphicsList' :
@@ -125,7 +149,7 @@ async function fillGraphicsLoadFiles(regionNum) {
             fillGraphicsDisplayFiles(regionNum, response.files);
             
             // Show/hide select all buttons for region 1
-            if (regionNum === 1) {
+            if (regionNum == 1) {
                 const selectAllBtn = document.getElementById('selectAllRegion1Btn');
                 const deselectAllBtn = document.getElementById('deselectAllRegion1Btn');
                 if (selectAllBtn) selectAllBtn.style.display = response.files.length > 0 ? 'inline-block' : 'none';
@@ -142,13 +166,19 @@ async function fillGraphicsLoadFiles(regionNum) {
 
 // Display files
 function fillGraphicsDisplayFiles(regionNum, files) {
-    const listElement = document.getElementById(
-        regionNum === 1 ? 'region1GraphicsList' :
-        regionNum === 2 ? 'region2GraphicsList' :
-        'musicFilesList'
-    );
+    const elementId = regionNum === 1 ? 'region1GraphicsList' :
+                      regionNum === 2 ? 'region2GraphicsList' :
+                      'musicFilesList';
     
-    if (!listElement) return;
+    console.log(`DEBUG: Displaying files for region ${regionNum} in element ${elementId}`);
+    console.log(`DEBUG: Found ${files.length} files`);
+    
+    const listElement = document.getElementById(elementId);
+    
+    if (!listElement) {
+        console.error(`ERROR: Could not find element with ID ${elementId}`);
+        return;
+    }
     
     if (files.length === 0) {
         listElement.innerHTML = '<div class="fill-graphics-empty"><i class="fas fa-folder-open"></i><p>No files found</p></div>';
@@ -158,22 +188,22 @@ function fillGraphicsDisplayFiles(regionNum, files) {
     let html = '';
     
     files.forEach((file, index) => {
-        const isSelected = regionNum === 1 ? 
+        const isSelected = regionNum == 1 ? 
             fillGraphicsState.region1.selected.includes(file.name) :
-            regionNum === 2 ?
+            regionNum == 2 ?
             fillGraphicsState.region2.selected === file.name :
             fillGraphicsState.region3.selected.includes(file.name);
         
-        const iconClass = regionNum === 3 ? 'music' : 'image';
-        const iconType = regionNum === 3 ? 'fa-music' : 'fa-image';
+        const iconClass = regionNum == 3 ? 'music' : 'image';
+        const iconType = regionNum == 3 ? 'fa-music' : 'fa-image';
         
         html += `
             <div class="fill-graphics-file-item ${isSelected ? 'selected' : ''}" 
                  onclick="fillGraphicsToggleFile(${regionNum}, '${file.name}', ${index})">
-                <input type="${regionNum === 2 ? 'radio' : 'checkbox'}" 
+                <input type="${regionNum == 2 ? 'radio' : 'checkbox'}" 
                        class="fill-graphics-file-checkbox"
                        ${isSelected ? 'checked' : ''}
-                       name="${regionNum === 2 ? 'region2File' : ''}">
+                       name="${regionNum == 2 ? 'region2File' : ''}">
                 <i class="fas ${iconType} fill-graphics-file-icon ${iconClass}"></i>
                 <div class="fill-graphics-file-info">
                     <div class="fill-graphics-file-name">${file.name}</div>
@@ -190,7 +220,7 @@ function fillGraphicsDisplayFiles(regionNum, files) {
 function fillGraphicsToggleFile(regionNum, filename, index) {
     const region = fillGraphicsState[`region${regionNum}`];
     
-    if (regionNum === 2) {
+    if (regionNum == 2) {
         // Radio button behavior for region 2
         region.selected = region.selected === filename ? null : filename;
     } else {
@@ -226,15 +256,23 @@ function fillGraphicsDeselectAllRegion1Graphics() {
 
 // Update generate button state
 function fillGraphicsUpdateGenerateButton() {
+    console.log('DEBUG: Updating generate button state');
+    console.log(`  Region 1 selected: ${fillGraphicsState.region1.selected.length} files`);
+    console.log(`  Region 2 selected: ${fillGraphicsState.region2.selected}`);
+    console.log(`  Region 3 selected: ${fillGraphicsState.region3.selected.length} files`);
+    
     const canGenerate = 
         fillGraphicsState.region1.selected.length > 0 &&
         fillGraphicsState.region2.selected !== null &&
         fillGraphicsState.region3.selected.length > 0;
     
+    console.log(`  Can generate: ${canGenerate}`);
+    
     fillGraphicsState.canGenerate = canGenerate;
     
     const button = document.getElementById('generateProjectBtn');
     if (button) {
+        console.log(`  Button found, setting disabled to: ${!canGenerate}`);
         button.disabled = !canGenerate;
     }
 }
@@ -243,12 +281,18 @@ function fillGraphicsUpdateGenerateButton() {
 function fillGraphicsShowGenerateProjectModal() {
     if (!fillGraphicsState.canGenerate) return;
     
+    console.log('DEBUG: Opening generate modal with state:', {
+        region1: fillGraphicsState.region1.selected,
+        region2: fillGraphicsState.region2.selected,
+        region3: fillGraphicsState.region3.selected
+    });
+    
     // Update summary in modal
     const summaryEl = document.getElementById('projectSummary');
     if (summaryEl) {
         summaryEl.innerHTML = `
             <p><strong>Region 1 (Upper Graphics):</strong> ${fillGraphicsState.region1.selected.length} files selected</p>
-            <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected}</p>
+            <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected || 'None'}</p>
             <p><strong>Region 3 (Music):</strong> ${fillGraphicsState.region3.selected.length} files selected</p>
         `;
     }
@@ -259,12 +303,13 @@ function fillGraphicsShowGenerateProjectModal() {
 }
 
 // Generate project file
-async function fillGraphicsGenerateProjectFile() {
+async function fillGraphicsGenerateProjectFile(event) {
     const nameInput = document.getElementById('projectFileName');
     const pathInput = document.getElementById('projectExportPath');
     const serverSelect = document.getElementById('projectExportServer');
+    const durationInput = document.getElementById('slideDuration');
     
-    if (!nameInput || !pathInput || !serverSelect) return;
+    if (!nameInput || !pathInput || !serverSelect || !durationInput) return;
     
     const projectName = nameInput.value.trim();
     if (!projectName) {
@@ -272,24 +317,36 @@ async function fillGraphicsGenerateProjectFile() {
         return;
     }
     
-    const button = event.target;
+    const slideDuration = parseInt(durationInput.value) || 5;
+    
+    console.log('DEBUG: Slide duration input value:', durationInput.value);
+    console.log('DEBUG: Parsed slide duration:', slideDuration);
+    
+    // Get button from event or find it by ID
+    const button = event && event.target ? event.target : document.querySelector('.modal-footer .button.primary');
     button.disabled = true;
     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
     
     try {
-        const response = await window.API.post('/fill-graphics/generate-project', {
+        console.log('DEBUG: Sending request with slide_duration:', slideDuration);
+        const requestData = {
             project_name: projectName,
             export_path: pathInput.value,
             export_server: serverSelect.value,
+            slide_duration: slideDuration,
             region1_files: fillGraphicsState.region1.selected,
             region1_path: fillGraphicsState.region1.path,
             region2_file: fillGraphicsState.region2.selected,
             region2_path: fillGraphicsState.region2.path,
             region3_files: fillGraphicsState.region3.selected,
             region3_path: fillGraphicsState.region3.path
-        });
+        };
         
-        if (response.success) {
+        console.log('DEBUG: Request data:', requestData);
+        const response = await window.API.post('/generate-prj-file', requestData);
+        console.log('DEBUG: Response received:', response);
+        
+        if (response && response.success) {
             window.showNotification('Project file generated successfully!', 'success');
             fillGraphicsCloseGenerateProjectModal();
             
@@ -303,12 +360,18 @@ async function fillGraphicsGenerateProjectFile() {
             fillGraphicsDisplayFiles(2, fillGraphicsState.region2.files);
             fillGraphicsDisplayFiles(3, fillGraphicsState.region3.files);
             fillGraphicsUpdateGenerateButton();
+        } else {
+            console.error('DEBUG: Generate failed:', response);
+            window.showNotification(`Failed to generate project: ${response.message || 'Unknown error'}`, 'error');
         }
     } catch (error) {
+        console.error('DEBUG: Generate error:', error);
         window.showNotification(`Failed to generate project: ${error.message}`, 'error');
     } finally {
-        button.disabled = false;
-        button.innerHTML = '<i class="fas fa-file-export"></i> Generate & Export';
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-file-export"></i> Generate & Export';
+        }
     }
 }
 
@@ -348,3 +411,4 @@ window.deselectAllRegion1Graphics = fillGraphicsDeselectAllRegion1Graphics;
 window.showGenerateProjectModal = fillGraphicsShowGenerateProjectModal;
 window.generateProjectFile = fillGraphicsGenerateProjectFile;
 window.closeGenerateProjectModal = fillGraphicsCloseGenerateProjectModal;
+window.updateGenerateButton = fillGraphicsUpdateGenerateButton;
