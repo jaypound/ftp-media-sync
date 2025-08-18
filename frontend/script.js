@@ -286,16 +286,14 @@ async function compareFiles() {
             
             targetOnlyFiles.push(targetOnlyResult);
             
-            // In bidirectional mode (for recordings), add target-only files as copyable from target to source
-            if (targetFile.isBidirectional) {
-                availableFiles.push({ 
-                    type: 'copy', 
-                    file: targetFile, 
-                    id: fileId, 
-                    direction: 'target_to_source',
-                    isTargetOnly: true 
-                });
-            }
+            // Add ALL target-only files as copyable from target to source
+            availableFiles.push({ 
+                type: 'copy', 
+                file: targetFile, 
+                id: fileId, 
+                direction: 'target_to_source',
+                isTargetOnly: true 
+            });
         }
     });
     
@@ -357,11 +355,9 @@ function renderComparisonResults() {
                     <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                 </div>
                 <div class="file-actions">
-                    ${isBidirectional ? `
-                        <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
-                            <i class="fas fa-arrow-left"></i> Copy to Source
-                        </button>
-                    ` : ''}
+                    <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
+                        <i class="fas fa-arrow-left"></i> Copy to Source
+                    </button>
                     <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
                         <i class="fas fa-trash"></i> Delete
                     </button>
@@ -453,11 +449,9 @@ function renderComparisonResults() {
                         <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                     </div>
                     <div class="file-actions">
-                        ${isBidirectional ? `
-                            <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
-                                <i class="fas fa-arrow-left"></i> Copy to Source
-                            </button>
-                        ` : ''}
+                        <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
+                            <i class="fas fa-arrow-left"></i> Copy to Source
+                        </button>
                         <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
                             <i class="fas fa-trash"></i> Delete
                         </button>
@@ -644,6 +638,9 @@ function addToSyncQueue(fileId, buttonElement) {
     updateSyncButtonState();
     updateAnalysisButtonState();
     updateAnalyzeAllButtonState();
+    
+    // Update dashboard stats to show new sync queue count
+    updateDashboardStats();
 }
 
 function removeFromSyncQueue(fileId) {
@@ -666,6 +663,7 @@ function removeFromSyncQueue(fileId) {
         });
         
         updateSyncButtonState();
+        updateDashboardStats();
     }
 }
 
