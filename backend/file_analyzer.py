@@ -126,8 +126,10 @@ class FileAnalyzer:
                     # Get the correct API key based on provider
                     if provider == 'openai':
                         ai_analyzer.api_key = ai_config.get('openai_api_key')
-                    else:
+                    elif provider == 'anthropic':
                         ai_analyzer.api_key = ai_config.get('anthropic_api_key')
+                    elif provider == 'ollama':
+                        ai_analyzer.ollama_url = ai_config.get('ollama_url', 'http://localhost:11434')
                     
                     ai_analyzer.model = ai_config.get('model')
                     ai_analyzer.setup_client()
