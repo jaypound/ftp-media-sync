@@ -398,6 +398,7 @@
                         <select id="aiProvider" class="form-control">
                             <option value="openai">OpenAI (GPT)</option>
                             <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="ollama">Ollama (Local/Remote)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -420,6 +421,11 @@
                     <div class="form-group">
                         <label for="anthropicApiKey">Anthropic API Key</label>
                         <input type="password" id="anthropicApiKey" class="form-control" placeholder="sk-ant-...">
+                    </div>
+                    <div class="form-group" id="ollamaUrlGroup" style="display: none;">
+                        <label for="ollamaUrl">Ollama URL</label>
+                        <input type="text" id="ollamaUrl" class="form-control" placeholder="http://10.0.0.48:11434" value="http://10.0.0.48:11434">
+                        <small>URL of your Ollama instance (e.g., http://10.0.0.48:11434 for ML_WORKSTATION)</small>
                     </div>
                     <div class="form-group">
                         <label for="maxChunkSize">Max Chunk Size</label>

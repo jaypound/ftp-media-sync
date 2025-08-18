@@ -5,14 +5,16 @@ from typing import Dict, List, Any
 from openai import OpenAI
 from anthropic import Anthropic
 import math
+import requests
 
 logger = logging.getLogger(__name__)
 
 class AIAnalyzer:
-    def __init__(self, api_provider="openai", api_key=None, model=None, auto_setup=True):
+    def __init__(self, api_provider="openai", api_key=None, model=None, ollama_url=None, auto_setup=True):
         self.api_provider = api_provider.lower()
         self.api_key = api_key
         self.model = model
+        self.ollama_url = ollama_url or "http://localhost:11434"
         self.client = None
         
         # Default models
@@ -21,6 +23,8 @@ class AIAnalyzer:
                 self.model = "gpt-3.5-turbo"
             elif self.api_provider == "anthropic":
                 self.model = "claude-3-sonnet-20240229"
+            elif self.api_provider == "ollama":
+                self.model = "llama2"
         
         if auto_setup:
             self.setup_client()
@@ -64,6 +68,11 @@ class AIAnalyzer:
                 except Exception as anthropic_error:
                     logger.error(f"Anthropic client setup failed: {anthropic_error}")
                     self.client = None
+            
+            elif self.api_provider == "ollama":
+                # For Ollama, we'll use HTTP requests instead of a client library
+                self.client = "http_requests"  # Marker to use HTTP requests
+                logger.info(f"Ollama setup successful with URL: {self.ollama_url}, model: {self.model}")
                 
         except Exception as e:
             logger.error(f"Error setting up AI client: {str(e)}")
@@ -91,6 +100,72 @@ Please provide only valid JSON in your response, no additional text.
 Transcript:
 {transcript}
 """
+    
+    def analyze_chunk_ollama(self, chunk: str) -> Dict[str, Any]:
+        """Analyze a content chunk using Ollama"""
+        prompt = self.create_analysis_prompt(chunk)
+        return self._call_ollama_api(prompt)
+    
+    def analyze_chunk_ollama_direct(self, prompt: str) -> Dict[str, Any]:
+        """Analyze using Ollama with a direct prompt (no template)"""
+        return self._call_ollama_api(prompt)
+    
+    def _call_ollama_api(self, prompt: str) -> Dict[str, Any]:
+        """Make API call to Ollama"""
+        try:
+            logger.info(f"Calling Ollama API at {self.ollama_url} with model {self.model}")
+            
+            # Prepare the request
+            url = f"{self.ollama_url}/api/generate"
+            headers = {"Content-Type": "application/json"}
+            data = {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 1000
+                }
+            }
+            
+            # Make the request
+            response = requests.post(url, headers=headers, json=data, timeout=60)
+            response.raise_for_status()
+            
+            result = response.json()
+            content = result.get("response", "").strip()
+            logger.info(f"Ollama response received (length: {len(content)} chars)")
+            
+            # Try to parse JSON response
+            try:
+                parsed_result = json.loads(content)
+                logger.info("Successfully parsed Ollama JSON response")
+                return parsed_result
+            except json.JSONDecodeError:
+                logger.warning("Ollama response was not valid JSON, attempting to extract JSON")
+                logger.debug(f"Raw response: {content}")
+                # Try to extract JSON from response
+                start = content.find('{')
+                end = content.rfind('}') + 1
+                if start != -1 and end > start:
+                    json_str = content[start:end]
+                    parsed_result = json.loads(json_str)
+                    logger.info("Successfully extracted JSON from Ollama response")
+                    return parsed_result
+                else:
+                    logger.error("No valid JSON found in Ollama response")
+                    return None
+                    
+        except requests.exceptions.Timeout:
+            logger.error(f"Ollama API timeout at {self.ollama_url}")
+            return None
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Failed to connect to Ollama at {self.ollama_url}")
+            return None
+        except Exception as e:
+            logger.error(f"Error calling Ollama API: {str(e)}")
+            return None
     
     def chunk_text(self, text: str, max_chars: int = 4000) -> List[str]:
         """Split text into chunks for processing"""
@@ -216,12 +291,16 @@ Transcript:
                 return self.analyze_chunk_openai_direct(chunk)
             elif self.api_provider == "anthropic":
                 return self.analyze_chunk_anthropic_direct(chunk)
+            elif self.api_provider == "ollama":
+                return self.analyze_chunk_ollama_direct(chunk)
         else:
             # Regular content analysis
             if self.api_provider == "openai":
                 return self.analyze_chunk_openai(chunk)
             elif self.api_provider == "anthropic":
                 return self.analyze_chunk_anthropic(chunk)
+            elif self.api_provider == "ollama":
+                return self.analyze_chunk_ollama(chunk)
         
         logger.error(f"Unsupported AI provider: {self.api_provider}")
         return None

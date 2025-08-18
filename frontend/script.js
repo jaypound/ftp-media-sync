@@ -2212,6 +2212,11 @@ async function loadAISettings() {
             } else if (config.anthropic_api_key === '***') {
                 document.getElementById('anthropicApiKey').placeholder = 'API key configured (hidden for security)';
             }
+            // Load Ollama URL if configured
+            if (config.ollama_url) {
+                document.getElementById('ollamaUrl').value = config.ollama_url;
+            }
+            
             document.getElementById('maxChunkSize').value = config.max_chunk_size || 4000;
             
             // Update model options based on provider
@@ -2235,6 +2240,7 @@ async function saveAISettings() {
             model: document.getElementById('aiModel').value,
             openai_api_key: document.getElementById('openaiApiKey').value,
             anthropic_api_key: document.getElementById('anthropicApiKey').value,
+            ollama_url: document.getElementById('ollamaUrl').value,
             max_chunk_size: parseInt(document.getElementById('maxChunkSize').value) || 4000,
             enable_batch_analysis: true
         };
@@ -2260,9 +2266,15 @@ async function saveAISettings() {
 function updateModelOptions(provider) {
     const modelSelect = document.getElementById('aiModel');
     const currentValue = modelSelect.value;
+    const ollamaUrlGroup = document.getElementById('ollamaUrlGroup');
     
     // Clear existing options
     modelSelect.innerHTML = '';
+    
+    // Show/hide Ollama URL field
+    if (ollamaUrlGroup) {
+        ollamaUrlGroup.style.display = provider === 'ollama' ? 'block' : 'none';
+    }
     
     if (provider === 'openai') {
         modelSelect.innerHTML = `
@@ -2276,13 +2288,32 @@ function updateModelOptions(provider) {
             <option value="claude-3-opus-20240229">Claude 3 Opus</option>
             <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
         `;
+    } else if (provider === 'ollama') {
+        // Common Ollama models
+        modelSelect.innerHTML = `
+            <option value="llama2">Llama 2</option>
+            <option value="llama3">Llama 3</option>
+            <option value="mistral">Mistral</option>
+            <option value="mixtral">Mixtral</option>
+            <option value="codellama">Code Llama</option>
+            <option value="phi">Phi</option>
+            <option value="neural-chat">Neural Chat</option>
+            <option value="starling-lm">Starling LM</option>
+            <option value="orca-mini">Orca Mini</option>
+        `;
     }
     
     // Try to restore previous value, or set default
     if (Array.from(modelSelect.options).some(option => option.value === currentValue)) {
         modelSelect.value = currentValue;
     } else {
-        modelSelect.value = provider === 'openai' ? 'gpt-3.5-turbo' : 'claude-3-sonnet-20240229';
+        if (provider === 'openai') {
+            modelSelect.value = 'gpt-3.5-turbo';
+        } else if (provider === 'anthropic') {
+            modelSelect.value = 'claude-3-sonnet-20240229';
+        } else if (provider === 'ollama') {
+            modelSelect.value = 'llama2';
+        }
     }
 }
 
