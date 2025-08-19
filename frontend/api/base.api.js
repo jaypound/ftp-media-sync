@@ -6,7 +6,8 @@
 class BaseAPI {
     constructor(module) {
         this.module = module;
-        this.baseURL = window.APIConfig ? window.APIConfig.baseURL : 'http://127.0.0.1:5000/api';
+        this.baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
     }
     
     // Log function

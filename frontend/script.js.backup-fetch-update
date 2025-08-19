@@ -1428,7 +1428,7 @@ async function testConnection(serverType) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const result = await response.json();
         console.log('Test connection result:', result);
         
         if (result.success) {
@@ -1644,7 +1644,7 @@ async function startSync() {
             throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
         
-        
+        const result = await response.json();
         log(`Debug: Full response: ${JSON.stringify(result, null, 2)}`);
         
         if (result.success) {
@@ -2268,7 +2268,7 @@ async function saveAISettings() {
             body: JSON.stringify({ ai_analysis: aiConfig })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log('AI settings saved successfully');
@@ -2436,7 +2436,7 @@ async function checkAnalysisStatus() {
             body: JSON.stringify({ files: sourceFiles })
         });
         
-        
+        const result = await response.json();
         if (result.success) {
             analysisResults = result.analyzed_files || [];
             log(`Found ${analysisResults.length} previously analyzed files`);
@@ -2762,7 +2762,7 @@ async function startAnalysis() {
                 })
             });
             
-            
+            const result = await response.json();
             
             if (result.success) {
                 const analysisResult = result.results[0];
@@ -2937,7 +2937,7 @@ async function clearAllAnalyses() {
             headers: { 'Content-Type': 'application/json' }
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Successfully cleared database: ${result.message}`, 'success');
@@ -3083,7 +3083,7 @@ async function deleteFiles() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`Delete operation completed: ${result.success_count} successful, ${result.failure_count} failed${dryRun ? ' (DRY RUN)' : ''}`);
@@ -3865,7 +3865,7 @@ async function saveScheduleConfig() {
             })
         });
         
-        
+        const result = await response.json();
         if (result.success) {
             log(`✅ ${configType} configuration saved successfully`);
         } else {
@@ -4102,7 +4102,7 @@ async function updateContentType(contentId, newType) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Content Type Updated', `Successfully updated content type to ${newType}`, 'success');
@@ -4196,8 +4196,6 @@ function displayAvailableContent() {
         const engagementScore = content.engagement_score || 'N/A';
         
         // Format expiration date
-        // NOTE: Expired content is shown for informational purposes only
-        // The backend will prevent scheduling expired content based on the air date
         let expirationDisplay = 'Not Set';
         let expirationClass = '';
         if (content.scheduling?.content_expiry_date) {
@@ -4520,14 +4518,14 @@ async function listAllPlaylists() {
     log('📋 Loading playlists...', 'info');
     
     try {
-        const result = await window.API.get('/');
+        const response = await fetch('/api/list-playlists');
         console.log('Response status:', response.status);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const data = await response.json();
         console.log('Playlists data:', data);
         
         if (data.success) {
@@ -4611,7 +4609,7 @@ async function viewPlaylistItems(playlistId, playlistName, server = 'target', pa
     
     try {
         const response = await fetch(`/api/playlist/${playlistId}/items?server=${server}&path=${encodeURIComponent(path)}`);
-        
+        const data = await response.json();
         
         if (data.success) {
             displayPlaylistItems(data.playlist, data.items);
@@ -4689,7 +4687,7 @@ async function deletePlaylist(playlistId, server = 'target', path = '/mnt/main/P
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ Playlist deleted successfully`, 'success');
@@ -4718,7 +4716,7 @@ async function exportPlaylist(playlistId, server = 'target') {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const data = await response.json();
         console.log('DEBUG: Playlist data received:', data);
         
         if (data.success) {
@@ -4773,7 +4771,7 @@ async function removePlaylistItem(playlistId, itemId) {
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ Item removed from playlist`, 'success');
@@ -4837,7 +4835,7 @@ async function previewPlaylistFiles() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             const previewDiv = document.getElementById('playlistPreview');
@@ -4916,7 +4914,7 @@ async function confirmCreatePlaylist() {
             body: JSON.stringify(requestBody)
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ ${data.message}`, 'success');
@@ -5014,7 +5012,7 @@ async function confirmExportPlaylist() {
             body: JSON.stringify(requestBody)
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ Playlist exported to ${data.path}`, 'success');
@@ -5059,7 +5057,7 @@ async function previewSchedule() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             const preview = result.preview;
@@ -5106,7 +5104,7 @@ async function viewDailySchedule() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.schedule) {
             const schedule = result.schedule;
@@ -5146,7 +5144,7 @@ async function deleteSchedule() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (!result.success || !result.schedule) {
             log(`❌ No schedule found for ${viewDate}`, 'error');
@@ -5193,8 +5191,8 @@ async function listAllSchedules() {
     log('📋 Loading all schedules...');
     
     try {
-        const result = await window.API.get('/');
-        
+        const response = await fetch('/api/list-schedules');
+        const result = await response.json();
         
         if (result.success) {
             displayScheduleList(result.schedules);
@@ -5307,7 +5305,7 @@ async function viewScheduleDetails(scheduleId, date) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.schedule) {
             currentSchedule = result.schedule;  // Store the schedule globally
@@ -5338,7 +5336,7 @@ async function deleteScheduleById(scheduleId, date) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ ${result.message}`);
@@ -5373,7 +5371,7 @@ async function deleteAllSchedules() {
             headers: { 'Content-Type': 'application/json' }
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ ${result.message}`);
@@ -5792,7 +5790,7 @@ async function toggleScheduleItemAvailability(scheduleId, itemId, available) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', result.message, 'success');
@@ -5844,7 +5842,7 @@ async function moveScheduleItem(scheduleId, index, direction) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', 'Item moved successfully', 'success');
@@ -5886,7 +5884,7 @@ async function deleteScheduleItem(scheduleId, itemId, index) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', 'Item deleted successfully', 'success');
@@ -6817,7 +6815,7 @@ async function addToSchedule(contentId) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Content added to schedule successfully at position ${result.order_index + 1}`);
@@ -7048,7 +7046,7 @@ async function executeRename() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification(
@@ -7312,7 +7310,7 @@ async function deleteContentFromDatabase(contentId) {
             }
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             // Remove from local array
@@ -7532,7 +7530,7 @@ async function loadScheduleFilesFromFTP() {
             body: JSON.stringify({ server, path })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             displayScheduleFiles(result.files);
@@ -7629,7 +7627,7 @@ async function loadSelectedScheduleFromFTP() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Schedule loaded successfully!`);
@@ -7898,7 +7896,6 @@ async function fillScheduleGaps() {
                         search: ''
                     })
                 });
-                
                 const result = await response.json();
                 
                 if (result.success && result.content && result.content.length > 0) {
@@ -8170,7 +8167,7 @@ async function loadTemplateFiles() {
             body: JSON.stringify({ server, path })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.files) {
             if (result.files.length === 0) {
@@ -8244,7 +8241,7 @@ async function loadSelectedTemplate() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const result = await response.json();
         console.log('Load template result:', result);
         
         if (result.success && result.template) {
@@ -9549,22 +9546,6 @@ function deleteTemplate(index) {
     }
 }
 
-// Delete all templates from library
-function deleteAllTemplates() {
-    if (savedTemplates.length === 0) {
-        showNotification('No templates to delete', 'info');
-        return;
-    }
-    
-    if (confirm(`Delete all ${savedTemplates.length} templates? This cannot be undone.`)) {
-        savedTemplates = [];
-        localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
-        loadTemplateLibrary();
-        log('All templates deleted from library', 'info');
-        showNotification('All templates deleted', 'success');
-    }
-}
-
 // Save template when loaded
 function saveTemplateToLibrary(template) {
     // Add metadata
@@ -10428,7 +10409,7 @@ async function saveTemplateAsSchedule() {
             body: JSON.stringify(scheduleData)
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`Schedule created successfully! ${result.message}`, 'success');
@@ -10677,7 +10658,7 @@ async function refreshRecordingsList() {
         console.log('Fetching from:', `/api/meeting-recordings?${params}`);
         
         const response = await fetch(`/api/meeting-recordings?${params}`);
-        
+        const data = await response.json();
         
         console.log('Response data:', data);
         
@@ -10805,7 +10786,7 @@ window.downloadForTrim = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Store the temp path for later use
@@ -10882,7 +10863,7 @@ window.findTrimPoints = async function(useAI = false) {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             selectedFile.trimStart = data.start_time;
@@ -10989,7 +10970,7 @@ window.trimFile = async function() {
         
         const trimmedName = `${dateStr}_MTG_${title}.mp4`;
         
-        const response = await fetch(window.API ? `${window.APIConfig.baseURL}/trim-recording` : '/api/trim-recording', {
+        const response = await fetch('http://localhost:5000/api/trim-recording', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11001,7 +10982,7 @@ window.trimFile = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             selectedFile.trimmedPath = data.output_path;
@@ -11071,7 +11052,7 @@ window.copyToDestination = async function(targetServer) {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             statusDiv.className = 'alert alert-success';
@@ -11302,7 +11283,7 @@ async function executeTrim() {
     
     try {
         // Send trim request
-        const response = await fetch(window.API ? `${window.APIConfig.baseURL}/trim-recording` : '/api/trim-recording', {
+        const response = await fetch('http://localhost:5000/api/trim-recording', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11314,7 +11295,7 @@ async function executeTrim() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Store trimmed file info
@@ -11380,8 +11361,8 @@ function toggleRecordingsList() {
 
 async function autoTrimCheck() {
     try {
-        const result = await window.API.get('/');
-        
+        const response = await fetch('/api/meeting-recordings');
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Find untrimmed recordings
@@ -11477,8 +11458,8 @@ window.addEventListener('panelChanged', (e) => {
 // Load meetings from backend
 async function loadMeetings() {
     try {
-        const result = await window.API.get('/');
-        
+        const response = await fetch('/api/meetings');
+        const data = await response.json();
         
         if (data.status === 'success') {
             meetings = data.meetings;
@@ -11608,7 +11589,7 @@ window.saveMeeting = async function() {
             body: JSON.stringify(formData)
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification(editingMeetingId ? 'Meeting updated' : 'Meeting created', 'success');
@@ -11634,7 +11615,7 @@ window.deleteMeeting = async function(meetingId) {
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification('Meeting deleted', 'success');
@@ -11667,7 +11648,7 @@ window.importMeetingsFromWeb = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification(data.message, 'success');
@@ -11727,7 +11708,7 @@ async function loadDailyMeetings() {
     
     try {
         const response = await fetch(`/api/meetings/by-date?date=${date}`);
-        
+        const data = await response.json();
         console.log('Response data:', data);
         
         const container = document.getElementById('dailyMeetingsList');
@@ -11765,7 +11746,7 @@ window.generateDailySchedule = async function() {
             body: JSON.stringify({ meeting_ids: selectedMeetings })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Close import modal
@@ -12005,7 +11986,7 @@ async function loadMonthlyMeetings() {
     
     try {
         const response = await fetch(`/api/meetings/by-month?year=${year}&month=${month}`);
-        
+        const data = await response.json();
         
         const container = document.getElementById('monthlyMeetingsList');
         if (data.status === 'success' && data.meetings.length > 0) {
@@ -12046,7 +12027,7 @@ window.generateMonthlySchedule = async function() {
             body: JSON.stringify({ meeting_ids: selectedMeetings })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             closeImportMonthlyMeetingsModal();
@@ -12227,7 +12208,7 @@ async function loadRegion1Graphics() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             if (result.files.length === 0) {
@@ -12299,7 +12280,7 @@ async function loadRegion2Graphics() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             if (result.files.length === 0) {
@@ -12361,7 +12342,7 @@ async function loadMusicFiles() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             if (result.files.length === 0) {
@@ -12475,7 +12456,7 @@ async function generateProjectFile() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', result.message, 'success');

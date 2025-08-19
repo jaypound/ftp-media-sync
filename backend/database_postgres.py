@@ -964,8 +964,9 @@ class PostgreSQLDatabaseManager:
                 search_pattern = f'%{search}%'
                 params.extend([search_pattern, search_pattern, search_pattern])
             
-            # Include all content regardless of expiration status
-            # Only filter by availability flag
+            # Filter by availability flag only
+            # NOTE: Expiration date filtering should be done at schedule creation time
+            # by comparing expiry_date to the scheduled air date
             query += """
                 AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
             """

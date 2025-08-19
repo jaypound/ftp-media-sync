@@ -347,7 +347,7 @@ async function schedulingSetContentExpiration() {
         // First save the shelf life settings
         schedulingSaveShelfLifeFromModal();
         
-        const response = await fetch('http://127.0.0.1:5000/api/set-content-expiration', {
+        const response = await fetch('/api/set-content-expiration', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -386,7 +386,7 @@ async function schedulingSetContentExpiration() {
 // Get active and expired content counts
 async function schedulingGetContentCounts() {
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/content-expiration-stats');
+        const response = await fetch('/api/content-expiration-stats');
         const result = await response.json();
         
         if (result.success) {
@@ -478,7 +478,7 @@ async function schedulingClearAllExpirations() {
     }
     
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/clear-content-expirations', {
+        const response = await fetch('/api/clear-content-expirations', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

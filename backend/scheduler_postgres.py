@@ -48,19 +48,52 @@ class PostgreSQLScheduler:
         """Reset the rotation index"""
         self.rotation_index = 0
     
+    def _check_delay_constraint(self, asset_id: int, proposed_time: float, scheduled_times: dict, 
+                               delay_hours: float) -> bool:
+        """Check if scheduling an asset at proposed_time would violate delay constraints
+        
+        Args:
+            asset_id: The asset to check
+            proposed_time: When we want to schedule it (seconds from schedule start)
+            scheduled_times: Dict of asset_id -> list of scheduled times
+            delay_hours: Required delay between playbacks
+            
+        Returns:
+            True if the asset can be scheduled, False if it would violate delay
+        """
+        if asset_id not in scheduled_times:
+            return True  # Never scheduled, OK to use
+        
+        delay_seconds = delay_hours * 3600
+        
+        # Check each previous scheduling of this asset
+        for scheduled_time in scheduled_times[asset_id]:
+            time_diff = abs(proposed_time - scheduled_time)
+            if time_diff < delay_seconds:
+                logger.debug(f"Asset {asset_id} would violate delay: {time_diff/3600:.1f}h < {delay_hours}h")
+                return False
+        
+        return True
+    
     def update_rotation_order(self, rotation_order: List[str]):
         """Update the rotation order dynamically"""
         self.duration_rotation = rotation_order
         self.rotation_index = 0
         logger.info(f"Updated rotation order to: {rotation_order}")
     
-    def get_available_content(self, duration_category: str, exclude_ids: List[int] = None, ignore_delays: bool = False) -> List[Dict[str, Any]]:
+    def get_available_content(self, duration_category: str, exclude_ids: List[int] = None, ignore_delays: bool = False, schedule_date: str = None) -> List[Dict[str, Any]]:
         """Get available content for a specific duration category or content type
+        
+        IMPORTANT: This method filters out expired content based on schedule date
+        - If schedule_date is provided, only returns content where expiry_date > schedule_date
+        - If no schedule_date, uses CURRENT_TIMESTAMP
+        - Content with NULL expiry_date is treated as non-expiring
         
         Args:
             duration_category: The duration category (id, spots, short_form, long_form) or content type (AN, BMP, PSA, etc.) to filter by
             exclude_ids: List of asset IDs to exclude
             ignore_delays: If True, ignore replay delays (used as fallback)
+            schedule_date: The date the content will be scheduled for (YYYY-MM-DD format)
         """
         # Ensure database is connected
         if hasattr(db_manager, 'connected') and not db_manager.connected:
@@ -133,12 +166,16 @@ class PostgreSQLScheduler:
                     a.analysis_completed = TRUE
                     AND {filter_condition}
                     AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
-                    AND COALESCE(sm.content_expiry_date, CURRENT_TIMESTAMP + INTERVAL '1 year') > CURRENT_TIMESTAMP
+                    -- IMPORTANT: Filter out content that will be expired on the scheduled date
+                    -- If no schedule_date provided, use current timestamp
+                    -- Content with NULL expiry_date defaults to 1 year from schedule date (non-expiring)
+                    AND COALESCE(sm.content_expiry_date, %(compare_date)s::timestamp + INTERVAL '1 year') > %(compare_date)s::timestamp
                     AND NOT (i.file_path LIKE %(fill_pattern)s)
                     -- Check replay delay: either never scheduled OR enough time has passed
+                    -- Use scheduled date instead of current timestamp for accurate delay checking
                     AND (
                         sm.last_scheduled_date IS NULL 
-                        OR EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - sm.last_scheduled_date)) / 3600 >= (%(base_delay)s + (COALESCE(sm.total_airings, 0) * %(additional_delay)s))
+                        OR EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= (%(base_delay)s + (COALESCE(sm.total_airings, 0) * %(additional_delay)s))
                     )
                     -- Exclude assets that are disabled in any schedule
                     AND NOT EXISTS (
@@ -148,11 +185,23 @@ class PostgreSQLScheduler:
                     )
             """
             
+            # Determine the date to compare expiration against
+            if schedule_date:
+                # Parse the schedule date
+                try:
+                    compare_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+                except ValueError:
+                    logger.warning(f"Invalid schedule_date format: {schedule_date}, using current time")
+                    compare_date = datetime.now()
+            else:
+                compare_date = datetime.now()
+            
             params = {
                 'base_delay': base_delay,
                 'additional_delay': additional_delay,
                 'duration_category': duration_category,
-                'fill_pattern': '%FILL%'
+                'fill_pattern': '%FILL%',
+                'compare_date': compare_date
             }
             
             # Exclude already scheduled items
@@ -247,7 +296,8 @@ class PostgreSQLScheduler:
                 # Get available content
                 available_content = self.get_available_content(
                     duration_category, 
-                    exclude_ids=scheduled_asset_ids
+                    exclude_ids=scheduled_asset_ids,
+                    schedule_date=schedule_date
                 )
                 
                 # If no content available with delays, try without delays
@@ -256,7 +306,8 @@ class PostgreSQLScheduler:
                     available_content = self.get_available_content(
                         duration_category, 
                         exclude_ids=scheduled_asset_ids,
-                        ignore_delays=True
+                        ignore_delays=True,
+                        schedule_date=schedule_date
                     )
                 
                 if not available_content:
@@ -279,6 +330,39 @@ class PostgreSQLScheduler:
                 # Select the best content (first in the list due to our ordering)
                 content = available_content[0]
                 consecutive_errors = 0  # Reset consecutive error counter
+                
+                # Get delay configuration for this content's duration category
+                try:
+                    from config_manager import ConfigManager
+                    config_mgr = ConfigManager()
+                    scheduling_config = config_mgr.get_scheduling_settings()
+                    replay_delays = scheduling_config.get('replay_delays', {})
+                    
+                    # Get the delay for this content's duration category
+                    content_duration_category = content.get('duration_category', 'long_form')
+                    delay_hours = replay_delays.get(content_duration_category, 24)
+                except:
+                    delay_hours = 24  # Default to 24 hours if config fails
+                
+                # Check if this asset violates delay constraints
+                if not self._check_delay_constraint(content['asset_id'], total_duration, 
+                                                  scheduled_asset_times, delay_hours):
+                    logger.info(f"Asset {content['asset_id']} would violate {delay_hours}h delay at {total_duration/3600:.1f}h")
+                    # Try to find alternative content that respects delay
+                    found_alternative = False
+                    for alt_content in available_content[1:]:
+                        # Check delay constraint for alternative
+                        if self._check_delay_constraint(alt_content['asset_id'], total_duration,
+                                                      scheduled_asset_times, delay_hours):
+                            content = alt_content
+                            logger.info(f"Using alternative content that respects delay")
+                            found_alternative = True
+                            break
+                    
+                    if not found_alternative:
+                        # No suitable alternative found, skip this slot
+                        logger.warning(f"No content available that respects delay constraints")
+                        continue
                 
                 # Check if this content would cross midnight
                 content_duration = float(content['duration_seconds'])
@@ -319,14 +403,17 @@ class PostgreSQLScheduler:
                 
                 scheduled_items.append(item)
                 scheduled_asset_ids.append(content['asset_id'])
-                scheduled_updates[content['asset_id']] = datetime.now()
                 
                 # Update totals
                 total_duration += content_duration
                 sequence_number += 1
                 
-                # Immediately update the last_scheduled_date for this asset
-                self._update_asset_last_scheduled(content['asset_id'], datetime.now())
+                # Calculate actual air time for this item
+                # The item starts at (total_duration - content_duration) seconds from schedule start
+                actual_air_time = schedule_dt + timedelta(seconds=total_duration - content_duration)
+                
+                # Update the asset's last scheduled date with actual air time
+                self._update_asset_last_scheduled(content['asset_id'], actual_air_time)
                 
                 # Log progress
                 if sequence_number % 10 == 0:
@@ -1137,6 +1224,10 @@ class PostgreSQLScheduler:
             consecutive_errors = 0
             total_errors = 0
             
+            # Track all scheduled items with their air times to enforce delay logic
+            # Key: asset_id, Value: list of scheduled timestamps (in seconds from start)
+            scheduled_asset_times = {}
+            
             # Generate content for each day
             for day_offset in range(7):
                 current_day = start_date_obj + timedelta(days=day_offset)
@@ -1146,9 +1237,7 @@ class PostgreSQLScheduler:
                 # Reset rotation for each day
                 self._reset_rotation()
                 
-                # Reset scheduled assets for each day to allow content reuse across days
-                # This allows the same content to appear on different days of the week
-                # while still preventing duplicate content within the same day
+                # Track assets scheduled on current day (for duplicate prevention within day)
                 day_scheduled_asset_ids = []
                 
                 # Target 24 hours per day
@@ -1162,7 +1251,8 @@ class PostgreSQLScheduler:
                     # Get available content
                     available_content = self.get_available_content(
                         duration_category, 
-                        exclude_ids=day_scheduled_asset_ids
+                        exclude_ids=day_scheduled_asset_ids,
+                        schedule_date=current_day.strftime('%Y-%m-%d')
                     )
                     
                     # If no content available with delays, try without delays
@@ -1171,7 +1261,8 @@ class PostgreSQLScheduler:
                         available_content = self.get_available_content(
                             duration_category, 
                             exclude_ids=day_scheduled_asset_ids,
-                            ignore_delays=True
+                            ignore_delays=True,
+                            schedule_date=current_day.strftime('%Y-%m-%d')
                         )
                     
                     if not available_content:
@@ -1231,6 +1322,17 @@ class PostgreSQLScheduler:
                     # Debug logging
                     logger.debug(f"Item {sequence_number}: total_duration={total_duration:.6f}, time_in_day={time_in_day:.6f}, scheduled_start={scheduled_start}, duration={content_duration:.6f}")
                     
+                    # Track when this asset is scheduled (for delay enforcement)
+                    if content['asset_id'] not in scheduled_asset_times:
+                        scheduled_asset_times[content['asset_id']] = []
+                    scheduled_asset_times[content['asset_id']].append(total_duration)
+                    
+                    # Log delay tracking info
+                    if len(scheduled_asset_times[content['asset_id']]) > 1:
+                        prev_time = scheduled_asset_times[content['asset_id']][-2]
+                        time_since_last = (total_duration - prev_time) / 3600
+                        logger.info(f"Asset {content['asset_id']} scheduled again after {time_since_last:.1f}h (delay requirement: {delay_hours}h)")
+                    
                     # Add to schedule
                     item = {
                         'schedule_id': schedule_id,
@@ -1249,8 +1351,12 @@ class PostgreSQLScheduler:
                     total_duration += content_duration
                     sequence_number += 1
                     
-                    # Update the asset's last scheduled date
-                    self._update_asset_last_scheduled(content['asset_id'], datetime.now())
+                    # Calculate actual air time for this item
+                    # The item starts at (total_duration - content_duration) seconds from schedule start
+                    actual_air_time = start_date_obj + timedelta(seconds=total_duration - content_duration)
+                    
+                    # Update the asset's last scheduled date with actual air time
+                    self._update_asset_last_scheduled(content['asset_id'], actual_air_time)
                     
                     # Stop if we've filled the current day
                     if total_duration >= day_target_seconds:
@@ -1364,7 +1470,8 @@ class PostgreSQLScheduler:
                     # Get available content
                     available_content = self.get_available_content(
                         duration_category, 
-                        exclude_ids=day_scheduled_asset_ids
+                        exclude_ids=day_scheduled_asset_ids,
+                        schedule_date=current_day.strftime('%Y-%m-%d')
                     )
                     
                     # If no content available with delays, try without delays
@@ -1373,7 +1480,8 @@ class PostgreSQLScheduler:
                         available_content = self.get_available_content(
                             duration_category, 
                             exclude_ids=day_scheduled_asset_ids,
-                            ignore_delays=True
+                            ignore_delays=True,
+                            schedule_date=current_day.strftime('%Y-%m-%d')
                         )
                     
                     if not available_content:
@@ -1441,8 +1549,12 @@ class PostgreSQLScheduler:
                     total_duration += content_duration
                     sequence_number += 1
                     
-                    # Update the asset's last scheduled date
-                    self._update_asset_last_scheduled(content['asset_id'], datetime.now())
+                    # Calculate actual air time for this item
+                    # The item starts at (total_duration - content_duration) seconds from schedule start
+                    actual_air_time = start_date + timedelta(seconds=total_duration - content_duration)
+                    
+                    # Update the asset's last scheduled date with actual air time
+                    self._update_asset_last_scheduled(content['asset_id'], actual_air_time)
                     
                     # Stop if we've filled the current day
                     if total_duration >= day_target_seconds:

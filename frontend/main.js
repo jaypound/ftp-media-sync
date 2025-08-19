@@ -175,7 +175,8 @@ const ModuleLoader = {
 
 // API Configuration
 const APIConfig = {
-    baseURL: 'http://127.0.0.1:5000/api',
+    // Auto-detect environment based on port
+    baseURL: window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api',
     timeout: 30000,
     
     // Get full URL for an endpoint
@@ -241,6 +242,7 @@ const API = {
 // Initialize application
 async function initializeApp() {
     console.log('Initializing FTP Media Sync Application...');
+    console.log(`API Base URL: ${APIConfig.baseURL} (Port: ${window.location.port || 'default'})`);
     
     // Load all modules
     await ModuleLoader.loadAllModules();
