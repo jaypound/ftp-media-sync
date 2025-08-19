@@ -213,6 +213,9 @@ function schedulingShowTemplateLibrary() {
     }
     
     modal.style.display = 'block';
+    modal.style.visibility = 'visible';
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
     
     // Load the library
     schedulingLoadTemplateLibrary();

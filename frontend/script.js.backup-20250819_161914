@@ -1167,7 +1167,8 @@ async function loadConfig() {
     
     try {
         log('Loading configuration...');
-        const result = await window.API.get('/config');
+        const response = await fetch('http://127.0.0.1:5000/api/config');
+        const result = await response.json();
         
         if (result.success) {
             populateFormFromConfig(result.config);
@@ -1224,7 +1225,13 @@ async function saveConfig() {
         log('Saving configuration...');
         const config = getConfigFromForm();
         
-        const result = await window.API.post('/config', config);
+        const response = await fetch('http://127.0.0.1:5000/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        
+        const result = await response.json();
         
         if (result.success) {
             log('✅ Configuration saved successfully', 'success');
@@ -1275,7 +1282,11 @@ async function saveConfig() {
 async function createSampleConfig() {
     try {
         log('Creating sample configuration file...');
-        const result = await window.API.post('/config/sample');
+        const response = await fetch('http://127.0.0.1:5000/api/config/sample', {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
         
         if (result.success) {
             log('✅ Sample configuration file created: config.sample.json', 'success');
@@ -1416,7 +1427,7 @@ async function testConnection(serverType) {
     
     try {
         console.log('Testing connection with config:', config);
-        const response = await fetch('/api/test-connection', {
+        const response = await fetch('http://127.0.0.1:5000/api/test-connection', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -1428,7 +1439,7 @@ async function testConnection(serverType) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const result = await response.json();
         console.log('Test connection result:', result);
         
         if (result.success) {
@@ -1519,7 +1530,7 @@ async function scanFiles() {
         
         // Scan source server
         log(`Scanning source server: ${sourceHost}${sourcePath}`);
-        const sourceResponse = await fetch('/api/scan-files', {
+        const sourceResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1547,7 +1558,7 @@ async function scanFiles() {
         
         // Scan target server
         log(`Scanning target server: ${targetHost}${targetPath}`);
-        const targetResponse = await fetch('/api/scan-files', {
+        const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1630,7 +1641,7 @@ async function startSync() {
         // Update progress for request phase
         updateProgress(0, syncQueue.length, null);
         
-        const response = await fetch('/api/sync-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/sync-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -1644,7 +1655,7 @@ async function startSync() {
             throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
         
-        
+        const result = await response.json();
         log(`Debug: Full response: ${JSON.stringify(result, null, 2)}`);
         
         if (result.success) {
@@ -1805,7 +1816,8 @@ function updateDashboardStats() {
 // Check backend health
 async function checkBackendHealth() {
     try {
-        const result = await window.API.get('/health');
+        const response = await fetch('http://127.0.0.1:5000/api/health');
+        const result = await response.json();
         
         const backendStatus = document.getElementById('backendStatus');
         if (result.status === 'healthy') {
@@ -2209,7 +2221,8 @@ function updateAnalyzeAllButtonState() {
 // AI Settings Functions
 async function loadAISettings() {
     try {
-        const result = await window.API.get('/ai-config');
+        const response = await fetch('http://127.0.0.1:5000/api/ai-config');
+        const result = await response.json();
         
         if (result.success) {
             const config = result.config;
@@ -2262,13 +2275,13 @@ async function saveAISettings() {
             enable_batch_analysis: true
         };
         
-        const response = await fetch('/api/ai-config', {
+        const response = await fetch('http://127.0.0.1:5000/api/ai-config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ai_analysis: aiConfig })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log('AI settings saved successfully');
@@ -2430,13 +2443,13 @@ async function analyzeFiles() {
 
 async function checkAnalysisStatus() {
     try {
-        const response = await fetch('/api/analysis-status', {
+        const response = await fetch('http://127.0.0.1:5000/api/analysis-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ files: sourceFiles })
         });
         
-        
+        const result = await response.json();
         if (result.success) {
             analysisResults = result.analyzed_files || [];
             log(`Found ${analysisResults.length} previously analyzed files`);
@@ -2708,7 +2721,7 @@ async function startAnalysis() {
     };
     
     try {
-        const configResponse = await fetch('/api/ai-config');
+        const configResponse = await fetch('http://127.0.0.1:5000/api/ai-config');
         const configResult = await configResponse.json();
         if (configResult.success) {
             const backendConfig = configResult.config;
@@ -2751,7 +2764,7 @@ async function startAnalysis() {
             // Check if this file is being reanalyzed
             const isReanalysis = queueItem.is_reanalysis || queueItem.file.is_analyzed || false;
             
-            const response = await fetch('/api/analyze-files', {
+            const response = await fetch('http://127.0.0.1:5000/api/analyze-files', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -2762,7 +2775,7 @@ async function startAnalysis() {
                 })
             });
             
-            
+            const result = await response.json();
             
             if (result.success) {
                 const analysisResult = result.results[0];
@@ -2932,12 +2945,12 @@ async function clearAllAnalyses() {
     try {
         log('🗑️ Starting database clear operation...', 'warning');
         
-        const response = await fetch('/api/clear-all-analyses', {
+        const response = await fetch('http://127.0.0.1:5000/api/clear-all-analyses', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Successfully cleared database: ${result.message}`, 'success');
@@ -3073,7 +3086,7 @@ async function deleteFiles() {
             size: item.targetFile.size
         }));
         
-        const response = await fetch('/api/delete-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3083,7 +3096,7 @@ async function deleteFiles() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`Delete operation completed: ${result.success_count} successful, ${result.failure_count} failed${dryRun ? ' (DRY RUN)' : ''}`);
@@ -3850,7 +3863,7 @@ async function saveScheduleConfig() {
     
     // Save to backend
     try {
-        const response = await fetch('/api/config', {
+        const response = await fetch('http://127.0.0.1:5000/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3865,7 +3878,7 @@ async function saveScheduleConfig() {
             })
         });
         
-        
+        const result = await response.json();
         if (result.success) {
             log(`✅ ${configType} configuration saved successfully`);
         } else {
@@ -3984,7 +3997,7 @@ async function loadAvailableContent() {
         
         log(`🔍 Applying filters - Type: ${contentTypeFilter || 'All'}, Duration: ${durationCategoryFilter || 'All'}, Search: ${searchFilter || 'None'}`);
         
-        const response = await fetch('/api/analyzed-content', {
+        const response = await fetch('http://127.0.0.1:5000/api/analyzed-content', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4093,7 +4106,7 @@ let currentRenameContent = null;
 // Function to update content type
 async function updateContentType(contentId, newType) {
     try {
-        const response = await fetch('/api/update-content-type', {
+        const response = await fetch('http://127.0.0.1:5000/api/update-content-type', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4102,7 +4115,7 @@ async function updateContentType(contentId, newType) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Content Type Updated', `Successfully updated content type to ${newType}`, 'success');
@@ -4196,8 +4209,6 @@ function displayAvailableContent() {
         const engagementScore = content.engagement_score || 'N/A';
         
         // Format expiration date
-        // NOTE: Expired content is shown for informational purposes only
-        // The backend will prevent scheduling expired content based on the air date
         let expirationDisplay = 'Not Set';
         let expirationClass = '';
         if (content.scheduling?.content_expiry_date) {
@@ -4299,7 +4310,7 @@ async function createDailySchedule() {
             schedule_name: `Daily Schedule - ${scheduleDate}`
         };
         
-        const response = await fetch('/api/create-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/create-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -4372,7 +4383,7 @@ async function createWeeklySchedule() {
     log(`🔄 Creating schedule with 7 days of content...`);
     
     try {
-        const response = await fetch('/api/create-weekly-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/create-weekly-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4470,7 +4481,7 @@ async function createMonthlySchedule() {
     log(`🔄 Creating schedule for entire month...`);
     
     try {
-        const response = await fetch('/api/create-monthly-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/create-monthly-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4520,14 +4531,14 @@ async function listAllPlaylists() {
     log('📋 Loading playlists...', 'info');
     
     try {
-        const result = await window.API.get('/');
+        const response = await fetch('http://127.0.0.1:5000/api/list-playlists');
         console.log('Response status:', response.status);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const data = await response.json();
         console.log('Playlists data:', data);
         
         if (data.success) {
@@ -4610,8 +4621,8 @@ async function viewPlaylistItems(playlistId, playlistName, server = 'target', pa
     log(`📋 Loading playlist items for "${playlistName}" from ${server} server...`, 'info');
     
     try {
-        const response = await fetch(`/api/playlist/${playlistId}/items?server=${server}&path=${encodeURIComponent(path)}`);
-        
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${playlistId}/items?server=${server}&path=${encodeURIComponent(path)}`);
+        const data = await response.json();
         
         if (data.success) {
             displayPlaylistItems(data.playlist, data.items);
@@ -4680,7 +4691,7 @@ async function deletePlaylist(playlistId, server = 'target', path = '/mnt/main/P
     }
     
     try {
-        let url = `/api/playlist/${playlistId}?server=${server}&path=${encodeURIComponent(path)}`;
+        let url = `http://127.0.0.1:5000/api/playlist/${playlistId}?server=${server}&path=${encodeURIComponent(path)}`;
         if (name) {
             url += `&name=${encodeURIComponent(name)}`;
         }
@@ -4689,7 +4700,7 @@ async function deletePlaylist(playlistId, server = 'target', path = '/mnt/main/P
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ Playlist deleted successfully`, 'success');
@@ -4712,13 +4723,13 @@ async function exportPlaylist(playlistId, server = 'target') {
         console.log(`DEBUG: Fetching playlist ${playlistId} info for export from ${server} server...`);
         
         // First, get playlist info to populate the modal
-        const response = await fetch(`/api/playlist/${playlistId}/items?server=${server}`);
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${playlistId}/items?server=${server}`);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const data = await response.json();
         console.log('DEBUG: Playlist data received:', data);
         
         if (data.success) {
@@ -4769,11 +4780,11 @@ async function removePlaylistItem(playlistId, itemId) {
     }
     
     try {
-        const response = await fetch(`/api/playlist/${playlistId}/item/${itemId}`, {
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${playlistId}/item/${itemId}`, {
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ Item removed from playlist`, 'success');
@@ -4826,7 +4837,7 @@ async function previewPlaylistFiles() {
     log('🔍 Previewing files...', 'info');
     
     try {
-        const response = await fetch('/api/preview-playlist-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/preview-playlist-files', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -4837,7 +4848,7 @@ async function previewPlaylistFiles() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             const previewDiv = document.getElementById('playlistPreview');
@@ -4908,7 +4919,7 @@ async function confirmCreatePlaylist() {
         };
         console.log('Creating playlist with:', requestBody);
         
-        const response = await fetch('/api/generate-simple-playlist', {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-simple-playlist', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -4916,7 +4927,7 @@ async function confirmCreatePlaylist() {
             body: JSON.stringify(requestBody)
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ ${data.message}`, 'success');
@@ -5006,7 +5017,7 @@ async function confirmExportPlaylist() {
             shuffle: shuffle
         };
         
-        const response = await fetch(`/api/playlist/${window.currentExportPlaylist.id}/export`, {
+        const response = await fetch(`http://127.0.0.1:5000/api/playlist/${window.currentExportPlaylist.id}/export`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -5014,7 +5025,7 @@ async function confirmExportPlaylist() {
             body: JSON.stringify(requestBody)
         });
         
-        
+        const data = await response.json();
         
         if (data.success) {
             log(`✅ Playlist exported to ${data.path}`, 'success');
@@ -5049,7 +5060,7 @@ async function previewSchedule() {
     log(`👁️ Previewing schedule for ${scheduleDate} in ${timeslot} timeslot`);
     
     try {
-        const response = await fetch('/api/preview-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/preview-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5059,7 +5070,7 @@ async function previewSchedule() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             const preview = result.preview;
@@ -5098,7 +5109,7 @@ async function viewDailySchedule() {
     log(`📅 Loading schedule for ${viewDate}...`);
     
     try {
-        const response = await fetch('/api/get-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5106,7 +5117,7 @@ async function viewDailySchedule() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.schedule) {
             const schedule = result.schedule;
@@ -5138,7 +5149,7 @@ async function deleteSchedule() {
     
     // First get the schedule to find its ID
     try {
-        const response = await fetch('/api/get-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5146,7 +5157,7 @@ async function deleteSchedule() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (!result.success || !result.schedule) {
             log(`❌ No schedule found for ${viewDate}`, 'error');
@@ -5159,7 +5170,7 @@ async function deleteSchedule() {
         if (confirm(`Are you sure you want to delete the schedule for ${viewDate}?\n\nThis will delete ${schedule.total_items} scheduled items.`)) {
             log(`🗑️ Deleting schedule for ${viewDate}...`);
             
-            const deleteResponse = await fetch('/api/delete-schedule', {
+            const deleteResponse = await fetch('http://127.0.0.1:5000/api/delete-schedule', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -5193,8 +5204,8 @@ async function listAllSchedules() {
     log('📋 Loading all schedules...');
     
     try {
-        const result = await window.API.get('/');
-        
+        const response = await fetch('http://127.0.0.1:5000/api/list-schedules');
+        const result = await response.json();
         
         if (result.success) {
             displayScheduleList(result.schedules);
@@ -5299,7 +5310,7 @@ async function viewScheduleDetails(scheduleId, date) {
     document.getElementById('viewScheduleDate').value = date;
     
     try {
-        const response = await fetch('/api/get-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/get-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5307,7 +5318,7 @@ async function viewScheduleDetails(scheduleId, date) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.schedule) {
             currentSchedule = result.schedule;  // Store the schedule globally
@@ -5330,7 +5341,7 @@ async function deleteScheduleById(scheduleId, date) {
     log(`🗑️ Deleting schedule ${scheduleId}...`);
     
     try {
-        const response = await fetch('/api/delete-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5338,7 +5349,7 @@ async function deleteScheduleById(scheduleId, date) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ ${result.message}`);
@@ -5368,12 +5379,12 @@ async function deleteAllSchedules() {
     log('🗑️ Deleting all schedules...');
     
     try {
-        const response = await fetch('/api/delete-all-schedules', {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-all-schedules', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ ${result.message}`);
@@ -5515,7 +5526,7 @@ async function confirmExport() {
     log(`📋 Format: ${exportFormat === 'castus' ? 'Castus Daily Schedule' : exportFormat === 'castus_weekly' ? 'Castus Weekly Schedule' : 'Unknown'}`);
     
     try {
-        const response = await fetch('/api/export-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/export-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5782,7 +5793,7 @@ function displayScheduleDetails(schedule) {
 // Schedule item manipulation functions
 async function toggleScheduleItemAvailability(scheduleId, itemId, available) {
     try {
-        const response = await fetch('/api/toggle-schedule-item-availability', {
+        const response = await fetch('http://127.0.0.1:5000/api/toggle-schedule-item-availability', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5792,7 +5803,7 @@ async function toggleScheduleItemAvailability(scheduleId, itemId, available) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', result.message, 'success');
@@ -5833,7 +5844,7 @@ async function moveScheduleItem(scheduleId, index, direction) {
     
     try {
         // Send update to backend
-        const response = await fetch('/api/reorder-schedule-items', {
+        const response = await fetch('http://127.0.0.1:5000/api/reorder-schedule-items', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5844,7 +5855,7 @@ async function moveScheduleItem(scheduleId, index, direction) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', 'Item moved successfully', 'success');
@@ -5877,7 +5888,7 @@ async function deleteScheduleItem(scheduleId, itemId, index) {
     }
     
     try {
-        const response = await fetch('/api/delete-schedule-item', {
+        const response = await fetch('http://127.0.0.1:5000/api/delete-schedule-item', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5886,7 +5897,7 @@ async function deleteScheduleItem(scheduleId, itemId, index) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', 'Item deleted successfully', 'success');
@@ -6610,7 +6621,7 @@ async function performPeriodicRescan() {
         const queuedFilePaths = analysisQueue.map(item => item.file.path || item.file.name);
         
         if (queuedFilePaths.length > 0) {
-            const analysisStatusResult = await fetch('/api/analysis-status', {
+            const analysisStatusResult = await fetch('http://127.0.0.1:5000/api/analysis-status', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ files: sourceFiles })
@@ -6808,7 +6819,7 @@ async function addToSchedule(contentId) {
     try {
         log(`📅 Adding content ${contentId} to schedule ${currentSchedule.id}...`);
         
-        const response = await fetch('/api/add-item-to-schedule', {
+        const response = await fetch('http://127.0.0.1:5000/api/add-item-to-schedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -6817,7 +6828,7 @@ async function addToSchedule(contentId) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Content added to schedule successfully at position ${result.order_index + 1}`);
@@ -7036,7 +7047,7 @@ async function executeRename() {
     try {
         showNotification('Processing', 'Renaming file...', 'info');
         
-        const response = await fetch('/api/rename-content', {
+        const response = await fetch('http://127.0.0.1:5000/api/rename-content', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -7048,7 +7059,7 @@ async function executeRename() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification(
@@ -7305,14 +7316,14 @@ async function deleteContentFromDatabase(contentId) {
     }
     
     try {
-        const response = await fetch(`/api/content/${contentId}`, {
+        const response = await fetch(`http://127.0.0.1:5000/api/content/${contentId}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json'
             }
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             // Remove from local array
@@ -7454,7 +7465,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // Load scheduling configuration from backend
 async function loadSchedulingConfig() {
     try {
-        const config = await window.API.get('/config');
+        const response = await fetch('http://127.0.0.1:5000/api/config');
+        const config = await response.json();
         
         if (config.scheduling) {
             // Load replay delays
@@ -7526,13 +7538,13 @@ async function loadScheduleFilesFromFTP() {
     try {
         log(`Listing schedule files from ${server} server...`);
         
-        const response = await fetch('/api/list-schedule-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/list-schedule-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server, path })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             displayScheduleFiles(result.files);
@@ -7618,7 +7630,7 @@ async function loadSelectedScheduleFromFTP() {
     try {
         log(`Loading schedule ${selectedScheduleFile} from ${server} server...`);
         
-        const response = await fetch('/api/load-schedule-from-ftp', {
+        const response = await fetch('http://127.0.0.1:5000/api/load-schedule-from-ftp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -7629,7 +7641,7 @@ async function loadSelectedScheduleFromFTP() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Schedule loaded successfully!`);
@@ -7889,7 +7901,7 @@ async function fillScheduleGaps() {
             
             // Try to load available content
             try {
-                const response = await fetch('/api/analyzed-content', {
+                const response = await fetch('http://127.0.0.1:5000/api/analyzed-content', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -7898,7 +7910,6 @@ async function fillScheduleGaps() {
                         search: ''
                     })
                 });
-                
                 const result = await response.json();
                 
                 if (result.success && result.content && result.content.length > 0) {
@@ -8028,7 +8039,7 @@ async function fillScheduleGaps() {
                     return;
                 }
                 
-                const response = await fetch('/api/fill-template-gaps', {
+                const response = await fetch('http://127.0.0.1:5000/api/fill-template-gaps', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -8164,13 +8175,13 @@ async function loadTemplateFiles() {
     fileList.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading schedule files...</p>';
     
     try {
-        const response = await fetch('/api/list-schedule-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/list-schedule-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ server, path })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.files) {
             if (result.files.length === 0) {
@@ -8229,7 +8240,7 @@ async function loadSelectedTemplate() {
         log('Loading template...', 'info');
         log(`📥 Loading template: ${selectedTemplateFile.name} from ${server} server`);
         
-        const response = await fetch('/api/load-schedule-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/load-schedule-template', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -8244,7 +8255,7 @@ async function loadSelectedTemplate() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const result = await response.json();
         console.log('Load template result:', result);
         
         if (result.success && result.template) {
@@ -9549,22 +9560,6 @@ function deleteTemplate(index) {
     }
 }
 
-// Delete all templates from library
-function deleteAllTemplates() {
-    if (savedTemplates.length === 0) {
-        showNotification('No templates to delete', 'info');
-        return;
-    }
-    
-    if (confirm(`Delete all ${savedTemplates.length} templates? This cannot be undone.`)) {
-        savedTemplates = [];
-        localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
-        loadTemplateLibrary();
-        log('All templates deleted from library', 'info');
-        showNotification('All templates deleted', 'success');
-    }
-}
-
 // Save template when loaded
 function saveTemplateToLibrary(template) {
     // Add metadata
@@ -10183,7 +10178,7 @@ async function confirmTemplateExport() {
         };
         
         // Export the template as a schedule file
-        const response = await fetch('/api/export-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/export-template', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(scheduleData)
@@ -10267,7 +10262,7 @@ async function createScheduleFromTemplate() {
     log(`Creating schedule from template: ${scheduleName} for ${airDate}`, 'info');
     
     try {
-        const response = await fetch('/api/create-schedule-from-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/create-schedule-from-template', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -10422,13 +10417,13 @@ async function saveTemplateAsSchedule() {
         console.log('Schedule data being sent:', scheduleData);
         log(`Sending ${scheduleData.items.length} items to create schedule`, 'info');
         
-        const response = await fetch('/api/create-schedule-from-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/create-schedule-from-template', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(scheduleData)
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`Schedule created successfully! ${result.message}`, 'success');
@@ -10476,7 +10471,7 @@ async function exportTemplate() {
         
         try {
             // Generate schedule content for the template
-            const response = await fetch('/api/export-template', {
+            const response = await fetch('http://127.0.0.1:5000/api/export-template', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -10562,7 +10557,7 @@ async function scanSelectedFolders() {
             log('Scanning On-Air Content folder...');
             
             // Scan source
-            const sourceResponse = await fetch('/api/scan-files', {
+            const sourceResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -10581,7 +10576,7 @@ async function scanSelectedFolders() {
             log(`Found ${onAirSourceFiles.length} files in On-Air Content (source)`);
             
             // Scan target
-            const targetResponse = await fetch('/api/scan-files', {
+            const targetResponse = await fetch('http://127.0.0.1:5000/api/scan-files', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -10674,10 +10669,10 @@ async function refreshRecordingsList() {
             dest_path: trimSettings.dest_path
         });
         
-        console.log('Fetching from:', `/api/meeting-recordings?${params}`);
+        console.log('Fetching from:', `http://127.0.0.1:5000/api/meeting-recordings?${params}`);
         
-        const response = await fetch(`/api/meeting-recordings?${params}`);
-        
+        const response = await fetch(`http://127.0.0.1:5000/api/meeting-recordings?${params}`);
+        const data = await response.json();
         
         console.log('Response data:', data);
         
@@ -10796,7 +10791,7 @@ window.downloadForTrim = async function() {
         
         showNotification('Downloading file for trim operations...', 'info');
         
-        const response = await fetch('/api/download-for-trim', {
+        const response = await fetch('http://127.0.0.1:5000/api/download-for-trim', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -10805,7 +10800,7 @@ window.downloadForTrim = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Store the temp path for later use
@@ -10853,7 +10848,7 @@ window.viewOriginalFile = async function() {
         
         // Open the downloaded file via the backend
         const filename = selectedFile.tempPath.split('/').pop();
-        const fileUrl = `/api/view-temp-file/${filename}`;
+        const fileUrl = `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
         window.open(fileUrl, '_blank');
         
     } catch (error) {
@@ -10872,7 +10867,7 @@ window.findTrimPoints = async function(useAI = false) {
         document.getElementById('trimStartTimecode').value = 'Analyzing...';
         document.getElementById('trimEndTimecode').value = 'Analyzing...';
         
-        const response = await fetch('/api/analyze-trim-points', {
+        const response = await fetch('http://127.0.0.1:5000/api/analyze-trim-points', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -10882,7 +10877,7 @@ window.findTrimPoints = async function(useAI = false) {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             selectedFile.trimStart = data.start_time;
@@ -10989,7 +10984,7 @@ window.trimFile = async function() {
         
         const trimmedName = `${dateStr}_MTG_${title}.mp4`;
         
-        const response = await fetch(window.API ? `${window.APIConfig.baseURL}/trim-recording` : '/api/trim-recording', {
+        const response = await fetch('http://localhost:5000/api/trim-recording', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11001,7 +10996,7 @@ window.trimFile = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             selectedFile.trimmedPath = data.output_path;
@@ -11032,7 +11027,7 @@ window.viewTrimmedFile = async function() {
         
         // Open the trimmed file via the backend
         const filename = selectedFile.trimmedPath.split('/').pop();
-        const fileUrl = `/api/view-temp-file/${filename}`;
+        const fileUrl = `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
         window.open(fileUrl, '_blank');
     } catch (error) {
         console.error('Error viewing trimmed file:', error);
@@ -11059,7 +11054,7 @@ window.copyToDestination = async function(targetServer) {
         statusDiv.className = 'alert alert-info';
         document.getElementById('trimAnalysisStatusText').textContent = `Copying to ${targetServer}...`;
         
-        const response = await fetch('/api/copy-trimmed-recording', {
+        const response = await fetch('http://127.0.0.1:5000/api/copy-trimmed-recording', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11071,7 +11066,7 @@ window.copyToDestination = async function(targetServer) {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             statusDiv.className = 'alert alert-success';
@@ -11160,7 +11155,7 @@ function openVideoTrimModal(mode) {
     
     // Set video source
     const filename = selectedFile.tempPath.split('/').pop();
-    const videoUrl = `/api/view-temp-file/${filename}`;
+    const videoUrl = `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
     videoElement.src = videoUrl;
     
     // Set initial time based on mode
@@ -11302,7 +11297,7 @@ async function executeTrim() {
     
     try {
         // Send trim request
-        const response = await fetch(window.API ? `${window.APIConfig.baseURL}/trim-recording` : '/api/trim-recording', {
+        const response = await fetch('http://localhost:5000/api/trim-recording', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11314,7 +11309,7 @@ async function executeTrim() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Store trimmed file info
@@ -11380,8 +11375,8 @@ function toggleRecordingsList() {
 
 async function autoTrimCheck() {
     try {
-        const result = await window.API.get('/');
-        
+        const response = await fetch('http://127.0.0.1:5000/api/meeting-recordings');
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Find untrimmed recordings
@@ -11477,8 +11472,8 @@ window.addEventListener('panelChanged', (e) => {
 // Load meetings from backend
 async function loadMeetings() {
     try {
-        const result = await window.API.get('/');
-        
+        const response = await fetch('http://127.0.0.1:5000/api/meetings');
+        const data = await response.json();
         
         if (data.status === 'success') {
             meetings = data.meetings;
@@ -11597,8 +11592,8 @@ window.saveMeeting = async function() {
     
     try {
         const url = editingMeetingId 
-            ? `/api/meetings/${editingMeetingId}`
-            : '/api/meetings';
+            ? `http://127.0.0.1:5000/api/meetings/${editingMeetingId}`
+            : 'http://127.0.0.1:5000/api/meetings';
         
         const method = editingMeetingId ? 'PUT' : 'POST';
         
@@ -11608,7 +11603,7 @@ window.saveMeeting = async function() {
             body: JSON.stringify(formData)
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification(editingMeetingId ? 'Meeting updated' : 'Meeting created', 'success');
@@ -11630,11 +11625,11 @@ window.deleteMeeting = async function(meetingId) {
     }
     
     try {
-        const response = await fetch(`/api/meetings/${meetingId}`, {
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/${meetingId}`, {
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification('Meeting deleted', 'success');
@@ -11658,7 +11653,7 @@ window.importMeetingsFromWeb = async function() {
     importStatus.textContent = 'Fetching meetings from Atlanta City Council website...';
     
     try {
-        const response = await fetch('/api/meetings/import', {
+        const response = await fetch('http://127.0.0.1:5000/api/meetings/import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -11667,7 +11662,7 @@ window.importMeetingsFromWeb = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification(data.message, 'success');
@@ -11726,8 +11721,8 @@ async function loadDailyMeetings() {
     console.log('Loading meetings for date:', date);
     
     try {
-        const response = await fetch(`/api/meetings/by-date?date=${date}`);
-        
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/by-date?date=${date}`);
+        const data = await response.json();
         console.log('Response data:', data);
         
         const container = document.getElementById('dailyMeetingsList');
@@ -11759,13 +11754,13 @@ window.generateDailySchedule = async function() {
     }
     
     try {
-        const response = await fetch('/api/generate-daily-schedule-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-daily-schedule-template', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ meeting_ids: selectedMeetings })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Close import modal
@@ -11934,7 +11929,7 @@ window.generateWeeklySchedule = async function() {
     }
     
     try {
-        const response = await fetch('/api/generate-weekly-schedule-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-weekly-schedule-template', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ meeting_ids: selectedMeetings })
@@ -12004,8 +11999,8 @@ async function loadMonthlyMeetings() {
     if (!year || !month) return;
     
     try {
-        const response = await fetch(`/api/meetings/by-month?year=${year}&month=${month}`);
-        
+        const response = await fetch(`http://127.0.0.1:5000/api/meetings/by-month?year=${year}&month=${month}`);
+        const data = await response.json();
         
         const container = document.getElementById('monthlyMeetingsList');
         if (data.status === 'success' && data.meetings.length > 0) {
@@ -12040,13 +12035,13 @@ window.generateMonthlySchedule = async function() {
     }
     
     try {
-        const response = await fetch('/api/generate-monthly-schedule-template', {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-monthly-schedule-template', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ meeting_ids: selectedMeetings })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             closeImportMonthlyMeetingsModal();
@@ -12217,7 +12212,7 @@ async function loadRegion1Graphics() {
     listDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading graphics...</p>';
     
     try {
-        const response = await fetch('/api/list-graphics-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/list-graphics-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -12227,7 +12222,7 @@ async function loadRegion1Graphics() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             if (result.files.length === 0) {
@@ -12289,7 +12284,7 @@ async function loadRegion2Graphics() {
     listDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading graphics...</p>';
     
     try {
-        const response = await fetch('/api/list-graphics-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/list-graphics-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -12299,7 +12294,7 @@ async function loadRegion2Graphics() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             if (result.files.length === 0) {
@@ -12351,7 +12346,7 @@ async function loadMusicFiles() {
     listDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Loading music files...</p>';
     
     try {
-        const response = await fetch('/api/list-graphics-files', {
+        const response = await fetch('http://127.0.0.1:5000/api/list-graphics-files', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -12361,7 +12356,7 @@ async function loadMusicFiles() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             if (result.files.length === 0) {
@@ -12462,7 +12457,7 @@ async function generateProjectFile() {
     }
     
     try {
-        const response = await fetch('/api/generate-prj-file', {
+        const response = await fetch('http://127.0.0.1:5000/api/generate-prj-file', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -12475,7 +12470,7 @@ async function generateProjectFile() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', result.message, 'success');
