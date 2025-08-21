@@ -44,7 +44,7 @@
         "enabled": true,
         "provider": "openai",
         "openai_api_key": "${OPENAI_API_KEY}",
-        "anthropic_api_key": "${ANTHROPIC_API_KEY}"
+        "anthropic_api_key": "${ANTHROPIC_API_KEY}",
         "model": "gpt-3.5-turbo",
         "max_chunk_size": 4000,
         "enable_batch_analysis": true,

@@ -1719,10 +1719,10 @@ function showPanel(panelName) {
         activeNavItem.classList.add('active');
     }
     
-    // Show/hide Meeting Trimmer based on panel
+    // Show/hide Meeting Trimmer based on panel - show on dashboard
     const meetingTrimmerCard = document.getElementById('meetingTrimmerCard');
     if (meetingTrimmerCard) {
-        meetingTrimmerCard.style.display = (panelName === 'meetings') ? 'block' : 'none';
+        meetingTrimmerCard.style.display = (panelName === 'dashboard') ? 'block' : 'none';
     }
     
     // Show/hide Status & Logs based on panel - only show on dashboard
@@ -9228,7 +9228,7 @@ function closeTemplateLibraryModal() {
         // Force hide with multiple methods
         modal.style.display = 'none';
         modal.style.visibility = 'hidden';
-        modal.classList.remove('show');
+        modal.classList.remove('active');
         modal.setAttribute('style', 'display: none !important');
         
         console.log('Template library modal closed');
@@ -10644,11 +10644,11 @@ let autoTrimInterval = null;
 let selectedFile = null; // For enhanced trim modal
 
 function showTrimSettings() {
-    document.getElementById('trimSettingsModal').classList.add('show');
+    document.getElementById('trimSettingsModal').classList.add('active');
 }
 
 function closeTrimSettingsModal() {
-    document.getElementById('trimSettingsModal').classList.remove('show');
+    document.getElementById('trimSettingsModal').classList.remove('active');
 }
 
 function saveTrimSettings() {
@@ -10677,12 +10677,23 @@ async function refreshRecordingsList() {
         console.log('Fetching from:', `/api/meeting-recordings?${params}`);
         
         const response = await fetch(`/api/meeting-recordings?${params}`);
-        
+        const data = await response.json();
         
         console.log('Response data:', data);
         
         if (data.status === 'success') {
             console.log(`Found ${data.recordings.length} recordings`);
+            if (data.recordings.length === 0) {
+                // Check if FTP is configured
+                const configResponse = await fetch('/api/config');
+                const configData = await configResponse.json();
+                
+                if (!configData.config || !configData.config.target || !configData.config.target.host) {
+                    showNotification('Please configure the target server in the Servers tab first', 'warning');
+                    displayRecordings([]);
+                    return;
+                }
+            }
             displayRecordings(data.recordings);
         } else {
             console.error('Failed to load recordings:', data.message);
@@ -10779,7 +10790,7 @@ window.openTrimAnalysisModal = function(file) {
     }
     
     // Show modal
-    document.getElementById('trimAnalysisModal').classList.add('show');
+    document.getElementById('trimAnalysisModal').classList.add('active');
 }
 
 // Download file for trim operations
@@ -10805,7 +10816,7 @@ window.downloadForTrim = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Store the temp path for later use
@@ -10853,7 +10864,7 @@ window.viewOriginalFile = async function() {
         
         // Open the downloaded file via the backend
         const filename = selectedFile.tempPath.split('/').pop();
-        const fileUrl = `/api/view-temp-file/${filename}`;
+        const fileUrl = window.APIConfig ? window.APIConfig.getURL(`/view-temp-file/${filename}`) : `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
         window.open(fileUrl, '_blank');
         
     } catch (error) {
@@ -10882,7 +10893,7 @@ window.findTrimPoints = async function(useAI = false) {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             selectedFile.trimStart = data.start_time;
@@ -10924,6 +10935,9 @@ window.findTrimPoints = async function(useAI = false) {
     } catch (error) {
         console.error('Error analyzing trim points:', error);
         showNotification('Error analyzing file', 'error');
+        // Reset UI on error
+        document.getElementById('trimStartTimecode').value = '';
+        document.getElementById('trimEndTimecode').value = '';
     }
 };
 
@@ -11032,7 +11046,7 @@ window.viewTrimmedFile = async function() {
         
         // Open the trimmed file via the backend
         const filename = selectedFile.trimmedPath.split('/').pop();
-        const fileUrl = `/api/view-temp-file/${filename}`;
+        const fileUrl = window.APIConfig ? window.APIConfig.getURL(`/view-temp-file/${filename}`) : `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
         window.open(fileUrl, '_blank');
     } catch (error) {
         console.error('Error viewing trimmed file:', error);
@@ -11143,7 +11157,7 @@ function analyzeAndTrim(recording) {
 }
 
 window.closeTrimAnalysisModal = function() {
-    document.getElementById('trimAnalysisModal').classList.remove('show');
+    document.getElementById('trimAnalysisModal').classList.remove('active');
     selectedFile = null;
     currentTrimFile = null;
 }
@@ -11160,7 +11174,7 @@ function openVideoTrimModal(mode) {
     
     // Set video source
     const filename = selectedFile.tempPath.split('/').pop();
-    const videoUrl = `/api/view-temp-file/${filename}`;
+    const videoUrl = window.APIConfig ? window.APIConfig.getURL(`/view-temp-file/${filename}`) : `http://127.0.0.1:5000/api/view-temp-file/${filename}`;
     videoElement.src = videoUrl;
     
     // Set initial time based on mode
@@ -11181,7 +11195,7 @@ function openVideoTrimModal(mode) {
     // Update time display
     videoElement.addEventListener('timeupdate', updateVideoTimeDisplay);
     
-    modal.classList.add('show');
+    modal.classList.add('active');
 }
 
 // Close video trim modal
@@ -11192,7 +11206,7 @@ window.closeVideoTrimModal = function() {
         videoElement.removeEventListener('timeupdate', updateVideoTimeDisplay);
         videoElement.src = '';
     }
-    modal.classList.remove('show');
+    modal.classList.remove('active');
 }
 
 // Update video time display
@@ -11365,13 +11379,20 @@ function toggleAutoTrim() {
     }
 }
 
-function toggleRecordingsList() {
+async function toggleRecordingsList() {
     const recordingsList = document.getElementById('recordingsList');
     const toggleBtn = event.target.closest('button');
     
     if (recordingsList.style.display === 'none') {
         recordingsList.style.display = 'block';
         toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide List';
+        
+        // Auto-refresh the list when showing it
+        const currentContent = recordingsList.innerHTML;
+        if (currentContent.includes('Click "Refresh List" to load recordings') || 
+            currentContent.includes('No meeting recordings found')) {
+            await refreshRecordingsList();
+        }
     } else {
         recordingsList.style.display = 'none';
         toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show List';
