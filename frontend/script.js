@@ -11477,14 +11477,14 @@ window.addEventListener('panelChanged', (e) => {
 // Load meetings from backend
 async function loadMeetings() {
     try {
-        const result = await window.API.get('/');
+        const response = await fetch('/api/meetings');
+        const result = await response.json();
         
-        
-        if (data.status === 'success') {
-            meetings = data.meetings;
+        if (result.status === 'success') {
+            meetings = result.meetings || [];
             renderMeetingsTable();
         } else {
-            showNotification('Error loading meetings', 'error');
+            showNotification('Error loading meetings: ' + (result.message || 'Unknown error'), 'error');
         }
     } catch (error) {
         console.error('Error loading meetings:', error);
@@ -11515,7 +11515,7 @@ function renderMeetingsTable() {
                 <td>${formatMeetingDate(meeting.meeting_date)}</td>
                 <td>${meeting.start_time}</td>
                 <td>${meeting.duration_hours} hours</td>
-                <td>${meeting.room || ''}</td>
+                <td><span class="meeting-schedule-room">${meeting.room || ''}</span></td>
                 <td>${broadcastBadge}</td>
                 <td>
                     <div class="meeting-actions">
@@ -11608,7 +11608,7 @@ window.saveMeeting = async function() {
             body: JSON.stringify(formData)
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification(editingMeetingId ? 'Meeting updated' : 'Meeting created', 'success');
@@ -11634,7 +11634,7 @@ window.deleteMeeting = async function(meetingId) {
             method: 'DELETE'
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification('Meeting deleted', 'success');
@@ -11667,7 +11667,7 @@ window.importMeetingsFromWeb = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             showNotification(data.message, 'success');

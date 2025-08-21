@@ -132,6 +132,14 @@
     border-radius: 4px;
     font-size: 0.813rem;
     display: inline-block;
+    white-space: nowrap;
+}
+
+/* Ensure room column has minimum width and prevents wrapping */
+.meeting-schedule-table th:nth-child(5),
+.meeting-schedule-table td:nth-child(5) {
+    min-width: 150px;
+    white-space: nowrap;
 }
 
 /* ATL26 Column */
