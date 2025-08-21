@@ -6,19 +6,7 @@
             "port": 21,
             "user": "root",
             "password": "Atl#C1a26",
-            "path": "/mnt/main/ATL26 On-Air Content",
-            "paths": [
-                {
-                    "path": "/mnt/main/ATL26 On-Air Content",
-                    "label": "On-Air Content",
-                    "sync_direction": "source_to_target"
-                },
-                {
-                    "path": "/mnt/main/Recordings",
-                    "label": "Recordings",
-                    "sync_direction": "bidirectional"
-                }
-            ]
+            "path": "/mnt/main/ATL26 On-Air Content"
         },
         "target": {
             "name": "Target Server",
@@ -26,19 +14,7 @@
             "port": 21,
             "user": "root",
             "password": "Atl#C1a26",
-            "path": "/mnt/main/ATL26 On-Air Content",
-            "paths": [
-                {
-                    "path": "/mnt/main/ATL26 On-Air Content",
-                    "label": "On-Air Content",
-                    "sync_direction": "source_to_target"
-                },
-                {
-                    "path": "/mnt/main/Recordings",
-                    "label": "Recordings",
-                    "sync_direction": "bidirectional"
-                }
-            ]
+            "path": "/mnt/main/ATL26 On-Air Content"
         }
     },
     "sync_settings": {
@@ -67,19 +43,26 @@
     "ai_analysis": {
         "enabled": true,
         "provider": "openai",
-        "openai_api_key": "",
-        "anthropic_api_key": "",
+        "openai_api_key": "${OPENAI_API_KEY}",
+        "anthropic_api_key": "${ANTHROPIC_API_KEY}"
         "model": "gpt-3.5-turbo",
         "max_chunk_size": 4000,
         "enable_batch_analysis": true,
-        "transcription_only": false
+        "transcription_only": false,
+        "api_key": "***"
     },
     "scheduling": {
         "replay_delays": {
-            "id": 6,
-            "spots": 12,
-            "short_form": 24,
-            "long_form": 48
+            "id": 1,
+            "spots": 2,
+            "short_form": 4,
+            "long_form": 8
+        },
+        "additional_delay_per_airing": {
+            "id": 1,
+            "spots": 2,
+            "short_form": 4,
+            "long_form": 8
         },
         "content_expiration": {
             "id": 30,
@@ -144,8 +127,8 @@
         "rotation_order": [
             "id",
             "spots",
-            "short_form",
-            "long_form"
+            "long_form",
+            "short_form"
         ]
     }
 }
