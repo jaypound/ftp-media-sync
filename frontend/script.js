@@ -11553,7 +11553,7 @@ window.openAddMeetingModal = function() {
     document.getElementById('meetingForm').reset();
     document.getElementById('meetingBroadcast').checked = true;
     document.getElementById('meetingRoom').value = '';
-    document.getElementById('meetingModal').classList.add('show');
+    document.getElementById('meetingModal').classList.add('active');
 };
 
 // Open edit meeting modal
@@ -11570,12 +11570,12 @@ window.editMeeting = function(meetingId) {
     document.getElementById('meetingDuration').value = meeting.duration_hours;
     document.getElementById('meetingRoom').value = meeting.room || '';
     document.getElementById('meetingBroadcast').checked = meeting.atl26_broadcast;
-    document.getElementById('meetingModal').classList.add('show');
+    document.getElementById('meetingModal').classList.add('active');
 };
 
 // Close meeting modal
 window.closeMeetingModal = function() {
-    document.getElementById('meetingModal').classList.remove('show');
+    document.getElementById('meetingModal').classList.remove('active');
     editingMeetingId = null;
 };
 

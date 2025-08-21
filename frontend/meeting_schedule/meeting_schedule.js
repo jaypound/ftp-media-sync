@@ -152,7 +152,7 @@ function meetingScheduleOpenAddModal() {
     
     // Show modal
     const modal = document.getElementById('meetingModal');
-    if (modal) modal.style.display = 'block';
+    if (modal) modal.classList.add('active');
 }
 
 // Edit meeting
@@ -175,7 +175,7 @@ async function meetingScheduleEditMeeting(meetingId) {
     
     // Show modal
     const modal = document.getElementById('meetingModal');
-    if (modal) modal.style.display = 'block';
+    if (modal) modal.classList.add('active');
 }
 
 // Save meeting
@@ -228,7 +228,7 @@ async function meetingScheduleDeleteMeeting(meetingId) {
 // Close meeting modal
 function meetingScheduleCloseMeetingModal() {
     const modal = document.getElementById('meetingModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) modal.classList.remove('active');
 }
 
 // Load trim settings
@@ -253,7 +253,7 @@ function meetingScheduleSaveTrimSettings() {
     window.showNotification('Trim settings saved', 'success');
     
     const modal = document.getElementById('trimSettingsModal');
-    if (modal) modal.style.display = 'none';
+    if (modal) modal.classList.remove('active');
 }
 
 // Show trim settings modal
@@ -265,7 +265,7 @@ function meetingScheduleShowTrimSettings() {
     document.getElementById('keepOriginal').checked = meetingScheduleState.trimSettings.keepOriginal;
     
     const modal = document.getElementById('trimSettingsModal');
-    if (modal) modal.style.display = 'block';
+    if (modal) modal.classList.add('active');
 }
 
 // Refresh recordings list
@@ -353,7 +353,7 @@ function meetingScheduleOpenTrimAnalysis(filename) {
     
     // Show modal
     const modal = document.getElementById('trimAnalysisModal');
-    if (modal) modal.style.display = 'block';
+    if (modal) modal.classList.add('active');
 }
 
 // Format file size
