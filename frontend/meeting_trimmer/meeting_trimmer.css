@@ -1,0 +1,183 @@
+/* Meeting Trimmer Module CSS */
+/* All classes prefixed with 'meeting-trimmer-' to avoid conflicts */
+
+/* Recordings List Container */
+.meeting-trimmer-recordings-list,
+.recordings-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    background-color: var(--list-bg, #fafafa);
+    padding: 0.5rem;
+}
+
+/* Recording Item */
+.meeting-trimmer-recording-item,
+.recording-item {
+    padding: 1rem;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    background-color: var(--card-bg, #fff);
+    margin-bottom: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s ease;
+}
+
+.meeting-trimmer-recording-item:hover,
+.recording-item:hover {
+    background-color: var(--hover-bg, #f8f9fa);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.meeting-trimmer-recording-item:last-child,
+.recording-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Recording Info */
+.meeting-trimmer-recording-info,
+.recording-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.meeting-trimmer-recording-name,
+.recording-name {
+    font-weight: 500;
+    font-size: 0.875rem;
+    color: var(--text-primary, #333);
+    margin-bottom: 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.meeting-trimmer-recording-meta,
+.recording-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary, #666);
+}
+
+.meeting-trimmer-recording-meta span,
+.recording-meta span {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Recording Actions */
+.meeting-trimmer-recording-actions,
+.recording-actions {
+    flex-shrink: 0;
+    margin-left: 1rem;
+}
+
+/* Status Badge */
+.meeting-trimmer-status-badge,
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.meeting-trimmer-status-badge.trimmed,
+.status-badge.trimmed {
+    background-color: var(--success-bg, #e8f5e9);
+    color: var(--success-color, #4caf50);
+}
+
+/* No Recordings Message */
+.meeting-trimmer-no-recordings,
+.no-recordings {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted, #999);
+    font-size: 0.875rem;
+}
+
+/* Trimmer Content */
+.trimmer-content {
+    padding: 1rem;
+}
+
+/* Trimmer Buttons */
+.trimmer-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Auto Trim Toggle Button */
+#autoTrimToggle {
+    transition: all 0.2s ease;
+}
+
+#autoTrimToggle.active {
+    background-color: var(--success-color, #4caf50);
+    color: white;
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .meeting-trimmer-recordings-list,
+    .recordings-list {
+        background-color: #1a1a1a;
+        border-color: #333;
+    }
+    
+    .meeting-trimmer-recording-item,
+    .recording-item {
+        background-color: #2a2a2a;
+        border-color: #333;
+    }
+    
+    .meeting-trimmer-recording-item:hover,
+    .recording-item:hover {
+        background-color: #3a3a3a;
+    }
+    
+    .meeting-trimmer-recording-name,
+    .recording-name {
+        color: #e0e0e0;
+    }
+    
+    .meeting-trimmer-recording-meta,
+    .recording-meta {
+        color: #999;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .meeting-trimmer-recording-item,
+    .recording-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .meeting-trimmer-recording-actions,
+    .recording-actions {
+        margin-left: 0;
+        margin-top: 0.75rem;
+        width: 100%;
+    }
+    
+    .meeting-trimmer-recording-actions button,
+    .recording-actions button {
+        width: 100%;
+    }
+    
+    .trimmer-buttons {
+        flex-direction: column;
+    }
+    
+    .trimmer-buttons button {
+        width: 100%;
+    }
+}

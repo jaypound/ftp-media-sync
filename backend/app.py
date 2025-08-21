@@ -4672,7 +4672,18 @@ def view_temp_file(filename):
             
         # Return the file for viewing
         from flask import send_file
-        return send_file(temp_path, mimetype='video/mp4')
+        
+        # Get file size for proper content-length header
+        file_size = os.path.getsize(temp_path)
+        logger.info(f"Serving temp file: {safe_filename}, size: {file_size} bytes")
+        
+        # Use as_attachment=False to display in browser, and conditional=True for partial content support
+        return send_file(
+            temp_path, 
+            mimetype='video/mp4',
+            as_attachment=False,
+            conditional=True
+        )
         
     except Exception as e:
         logger.error(f"Error serving temp file: {str(e)}")

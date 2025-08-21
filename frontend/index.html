@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="admin/admin.css">
     <link rel="stylesheet" href="scheduling/scheduling.css">
     <link rel="stylesheet" href="meeting_schedule/meeting_schedule.css">
+    <link rel="stylesheet" href="meeting_trimmer/meeting_trimmer.css">
     <link rel="stylesheet" href="fill_graphics/fill_graphics.css">
 </head>
 <body>
@@ -999,7 +1000,7 @@
                         <i class="fas fa-sync"></i> Refresh List
                     </button>
                     <button class="button secondary small" onclick="toggleRecordingsList()">
-                        <i class="fas fa-eye-slash"></i> Hide List
+                        <i class="fas fa-eye"></i> Show List
                     </button>
                     <button class="button info small" id="autoTrimToggle" onclick="toggleAutoTrim()">
                         <i class="fas fa-robot"></i> Auto-Trim: OFF
@@ -1007,7 +1008,7 @@
                 </div>
             </div>
             <div class="trimmer-content">
-                <div id="recordingsList" class="recordings-list">
+                <div id="recordingsList" class="recordings-list" style="display: none;">
                     <p style="text-align: center; color: #666;">Click "Refresh List" to load recordings</p>
                 </div>
             </div>
