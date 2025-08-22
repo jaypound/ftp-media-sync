@@ -398,7 +398,18 @@ class PostgreSQLDatabaseManager:
                         update_data[f"{k}_enum"] = AsIs(f"'{asset_data[k]}'::duration_category")
                         update_parts.append(f"{k} = %({k}_enum)s")
                     elif k == 'shelf_life_score':
-                        update_data[f"{k}_enum"] = AsIs(f"'{asset_data[k]}'::shelf_life_rating")
+                        # Map AI shelf_life_score values to database enum values
+                        shelf_life_value = (asset_data[k] or 'medium').strip().lower()
+                        shelf_life_map = {
+                            'short': 'low',
+                            'medium': 'medium',
+                            'long': 'high',
+                            # Also support direct values
+                            'low': 'low',
+                            'high': 'high'
+                        }
+                        mapped_value = shelf_life_map.get(shelf_life_value, 'medium')
+                        update_data[f"{k}_enum"] = AsIs(f"'{mapped_value}'::shelf_life_rating")
                         update_parts.append(f"{k} = %({k}_enum)s")
                     else:
                         update_parts.append(f"{k} = %({k})s")
@@ -422,7 +433,18 @@ class PostgreSQLDatabaseManager:
                 # Clean and validate enum values
                 asset_data_with_enums['content_type'] = (asset_data['content_type'] or 'other').strip().lower()
                 asset_data_with_enums['duration_category'] = (asset_data['duration_category'] or 'short').strip().lower()
-                asset_data_with_enums['shelf_life_score'] = (asset_data['shelf_life_score'] or 'medium').strip().lower()
+                
+                # Map AI shelf_life_score values to database enum values
+                shelf_life_value = (asset_data['shelf_life_score'] or 'medium').strip().lower()
+                shelf_life_map = {
+                    'short': 'low',
+                    'medium': 'medium',
+                    'long': 'high',
+                    # Also support direct values
+                    'low': 'low',
+                    'high': 'high'
+                }
+                asset_data_with_enums['shelf_life_score'] = shelf_life_map.get(shelf_life_value, 'medium')
                 
                 # Log the values we're about to insert
                 logger.info(f"Inserting asset with enums - content_type: '{asset_data_with_enums['content_type']}', "

@@ -2762,7 +2762,7 @@ async function startAnalysis() {
                 })
             });
             
-            
+            const result = await response.json();
             
             if (result.success) {
                 const analysisResult = result.results[0];
