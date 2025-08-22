@@ -10769,12 +10769,11 @@ window.openTrimAnalysisModal = function(file) {
     document.getElementById('downloadForTrimBtn').innerHTML = '<i class="fas fa-download"></i> Download File';
     document.getElementById('downloadForTrimBtn').classList.remove('success');
     document.getElementById('viewOriginalBtn').disabled = true;
+    // Preview buttons will be enabled after download for manual trimming
     document.getElementById('previewStartBtn').disabled = true;
     document.getElementById('previewEndBtn').disabled = true;
     document.getElementById('executeTrimBtn').disabled = true;
     document.getElementById('viewTrimmedGroup').style.display = 'none';
-    document.getElementById('copyCastus1Btn').disabled = true;
-    document.getElementById('copyCastus2Btn').disabled = true;
     document.getElementById('deleteTrimmedBtn').disabled = true;
     
     // Clear any stored temp path
@@ -10827,6 +10826,19 @@ window.downloadForTrim = async function() {
             downloadBtn.innerHTML = '<i class="fas fa-check"></i> Downloaded';
             downloadBtn.classList.add('success');
             viewOriginalBtn.disabled = false;
+            
+            // Enable preview buttons for manual trimming
+            document.getElementById('previewStartBtn').disabled = false;
+            document.getElementById('previewEndBtn').disabled = false;
+            
+            // Store duration if available
+            if (data.duration) {
+                selectedFile.duration = data.duration;
+                // Set default end trim to last frame
+                document.getElementById('trimAnalysisEndTime').value = data.duration;
+                document.getElementById('trimEndTimecode').value = secondsToTimecode(data.duration);
+                selectedFile.trimEnd = data.duration;
+            }
             
             const sizeInMB = (data.file_size / (1024 * 1024)).toFixed(2);
             
@@ -11015,11 +11027,14 @@ window.trimFile = async function() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             selectedFile.trimmedPath = data.output_path;
             selectedFile.trimmedName = trimmedName;
+            
+            // Populate the filename field with the trimmed name
+            document.getElementById('trimAnalysisNewFilename').value = trimmedName;
             
             // Show view trimmed button and enable final step buttons
             document.getElementById('viewTrimmedGroup').style.display = 'block';
@@ -11067,6 +11082,25 @@ window.copyToDestination = async function(targetServer) {
             return;
         }
         
+        // First check if file exists on target server
+        const checkResponse = await fetch('/api/check-file-exists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: finalFilename,
+                dest_folder: trimSettings.dest_path,
+                server: targetServer
+            })
+        });
+        
+        const checkData = await checkResponse.json();
+        
+        if (checkData.exists) {
+            if (!confirm(`File "${finalFilename}" already exists on ${targetServer}. Do you want to overwrite it?`)) {
+                return;
+            }
+        }
+        
         // Show progress
         const statusDiv = document.getElementById('trimAnalysisStatus');
         statusDiv.style.display = 'block';
@@ -11085,7 +11119,7 @@ window.copyToDestination = async function(targetServer) {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             statusDiv.className = 'alert alert-success';
@@ -11179,10 +11213,24 @@ function openVideoTrimModal(mode) {
     
     // Set initial time based on mode
     videoElement.addEventListener('loadedmetadata', function() {
+        // Store video duration if not already set
+        if (!selectedFile.duration || selectedFile.duration === 0) {
+            selectedFile.duration = videoElement.duration;
+            // Set default end trim to video duration if not already set
+            if (!selectedFile.trimEnd || selectedFile.trimEnd === 0) {
+                selectedFile.trimEnd = videoElement.duration;
+                document.getElementById('trimAnalysisEndTime').value = videoElement.duration;
+                document.getElementById('trimEndTimecode').value = secondsToTimecode(videoElement.duration);
+            }
+        }
+        
         if (mode === 'start' && selectedFile.trimStart !== undefined) {
             videoElement.currentTime = selectedFile.trimStart;
         } else if (mode === 'end' && selectedFile.trimEnd !== undefined) {
             videoElement.currentTime = Math.max(0, selectedFile.trimEnd - 5);
+        } else if (mode === 'end') {
+            // For manual trimming, go near the end if no trim point set
+            videoElement.currentTime = Math.max(0, videoElement.duration - 5);
         }
     });
     
@@ -11258,11 +11306,27 @@ function updateNewDuration() {
     const startTime = parseFloat(document.getElementById('trimAnalysisStartTime').value) || 0;
     const endTime = parseFloat(document.getElementById('trimAnalysisEndTime').value) || 0;
     
+    // Update timecode displays
+    document.getElementById('trimStartTimecode').value = secondsToTimecode(startTime);
+    document.getElementById('trimEndTimecode').value = secondsToTimecode(endTime);
+    
+    // Update selectedFile with manual values
+    if (selectedFile) {
+        selectedFile.trimStart = startTime;
+        selectedFile.trimEnd = endTime;
+    }
+    
     if (endTime > startTime) {
         const newDuration = endTime - startTime;
         document.getElementById('trimAnalysisNewDuration').textContent = formatDuration(newDuration);
+        
+        // Enable trim button if we have valid trim points and file is downloaded
+        if (selectedFile && selectedFile.tempPath) {
+            document.getElementById('executeTrimBtn').disabled = false;
+        }
     } else {
         document.getElementById('trimAnalysisNewDuration').textContent = 'Invalid trim points';
+        document.getElementById('executeTrimBtn').disabled = true;
     }
 }
 
@@ -11328,7 +11392,7 @@ async function executeTrim() {
             })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Store trimmed file info
@@ -11343,17 +11407,14 @@ async function executeTrim() {
             document.getElementById('copyCastus2Btn').disabled = false;
             document.getElementById('deleteTrimmedBtn').disabled = false;
             
-            statusDiv.className = 'alert alert-success';
-            document.getElementById('trimAnalysisStatusText').textContent = 'File trimmed successfully! You can now view it or copy to destination.';
+            statusDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check"></i> <span id="trimAnalysisStatusText">File trimmed successfully! You can now view it or copy to destination.</span></div>';
             
         } else {
-            statusDiv.className = 'alert alert-error';
-            document.getElementById('trimAnalysisStatusText').textContent = 'Failed to trim: ' + data.message;
+            statusDiv.innerHTML = '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Failed to trim: ' + data.message + '</span></div>';
         }
     } catch (error) {
         console.error('Error trimming recording:', error);
-        statusDiv.className = 'alert alert-error';
-        document.getElementById('trimAnalysisStatusText').textContent = 'Error trimming recording';
+        statusDiv.innerHTML = '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Error trimming recording</span></div>';
     } finally {
         document.getElementById('executeTrimBtn').disabled = false;
     }
