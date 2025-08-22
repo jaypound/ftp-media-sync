@@ -84,6 +84,9 @@ async function serversLoadConfig() {
                 serversUpdateForm('target');
             }
         }
+        
+        // Check actual connection status from backend
+        await serversCheckConnectionStatus();
     } catch (error) {
         console.error('Failed to load server config:', error);
     }
@@ -269,8 +272,33 @@ function serversUpdatePath(serverType) {
     }
 }
 
+// Check connection status from backend
+async function serversCheckConnectionStatus() {
+    try {
+        const response = await window.API.get('/connection-status');
+        if (response.success && response.status) {
+            // Update source connection status
+            serversState.source.connected = response.status.source.connected;
+            serversUpdateConnectionStatus('source', serversState.source.connected ? 'connected' : 'disconnected');
+            
+            // Update target connection status
+            serversState.target.connected = response.status.target.connected;
+            serversUpdateConnectionStatus('target', serversState.target.connected ? 'connected' : 'disconnected');
+            
+            // Update AppState
+            AppState.setModule('servers', {
+                sourceConnected: serversState.source.connected,
+                targetConnected: serversState.target.connected
+            });
+        }
+    } catch (error) {
+        console.error('Failed to check connection status:', error);
+    }
+}
+
 // Export functions to global scope
 window.serversInit = serversInit;
 window.serversTestConnection = serversTestConnection;
 window.serversUpdatePath = serversUpdatePath;
+window.serversCheckConnectionStatus = serversCheckConnectionStatus;
 window.testConnection = serversTestConnection; // Legacy support

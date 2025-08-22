@@ -209,6 +209,17 @@ def save_config():
             if 'rotation_order' in data['scheduling']:
                 scheduler_postgres.update_rotation_order(data['scheduling']['rotation_order'])
         
+        if 'ai_settings' in data:
+            # Map ai_settings to ai_analysis for config_manager
+            ai_analysis_data = {
+                'enabled': data['ai_settings'].get('enabled', False),
+                'transcription_only': data['ai_settings'].get('transcriptionOnly', False),
+                'provider': data['ai_settings'].get('provider', 'openai'),
+                'model': data['ai_settings'].get('model', 'gpt-3.5-turbo'),
+                'max_chunk_size': data['ai_settings'].get('maxChunkSize', 4000)
+            }
+            config_manager.update_ai_analysis_settings(ai_analysis_data)
+        
         return jsonify({'success': True, 'message': 'Configuration saved'})
     except Exception as e:
         logger.error(f"Error saving config: {str(e)}")
@@ -225,6 +236,27 @@ def create_sample_config():
             return jsonify({'success': False, 'message': 'Failed to create sample config'})
     except Exception as e:
         logger.error(f"Error creating sample config: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/connection-status', methods=['GET'])
+def get_connection_status():
+    """Get current FTP connection status"""
+    try:
+        status = {
+            'source': {
+                'connected': 'source' in ftp_managers and ftp_managers['source'].connected
+            },
+            'target': {
+                'connected': 'target' in ftp_managers and ftp_managers['target'].connected
+            }
+        }
+        
+        return jsonify({
+            'success': True,
+            'status': status
+        })
+    except Exception as e:
+        logger.error(f"Error getting connection status: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -252,7 +284,8 @@ def test_connection():
         ftp_manager = FTPManager(ftp_config)
         
         logger.info("Attempting FTP connection...")
-        success = ftp_manager.test_connection()
+        # Use connect() instead of test_connection() to keep connection open
+        success = ftp_manager.connect()
         logger.info(f"Connection result: {success}")
         
         if success:

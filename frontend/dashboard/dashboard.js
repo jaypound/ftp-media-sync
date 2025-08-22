@@ -34,7 +34,12 @@ function dashboardInit() {
 // Update dashboard statistics
 async function dashboardUpdateStats() {
     try {
-        // Get server status
+        // First check actual connection status from backend
+        if (window.serversCheckConnectionStatus) {
+            await window.serversCheckConnectionStatus();
+        }
+        
+        // Get server status from AppState (now updated with actual status)
         const sourceConnected = AppState.getModule('servers').sourceConnected || false;
         const targetConnected = AppState.getModule('servers').targetConnected || false;
         

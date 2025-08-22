@@ -305,12 +305,15 @@ async function aiSettingsSaveConfig() {
             }
         };
         
-        // Save API keys separately
+        // Save API keys separately using the ai-config endpoint
         if (aiSettingsState.openaiApiKey && !aiSettingsState.openaiApiKey.includes('•••')) {
-            await window.API.post('/ai/api-keys', {
-                openai_key: aiSettingsState.openaiApiKey,
-                anthropic_key: aiSettingsState.anthropicApiKey
-            });
+            const apiKeyConfig = {
+                ai_analysis: {
+                    openai_api_key: aiSettingsState.openaiApiKey,
+                    anthropic_api_key: aiSettingsState.anthropicApiKey
+                }
+            };
+            await window.API.post('/ai-config', apiKeyConfig);
         }
         
         await window.API.post('/config', config);
