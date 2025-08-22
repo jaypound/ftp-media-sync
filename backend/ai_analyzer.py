@@ -36,26 +36,37 @@ class AIAnalyzer:
             logger.debug(f"API key present: {bool(self.api_key)}")
             
             if self.api_provider == "openai":
-                # For OpenAI client initialization (v1.0.0+)
+                # For OpenAI client initialization
                 try:
-                    # Try new client initialization first
-                    if self.api_key:
-                        self.client = OpenAI(api_key=self.api_key)
-                    else:
-                        self.client = OpenAI()
-                    logger.info(f"OpenAI client setup successful with model: {self.model}")
-                except TypeError as te:
-                    # Handle older OpenAI library version or parameter issues
-                    logger.warning(f"OpenAI client initialization failed with TypeError: {te}")
-                    # Remove proxies parameter and try again
+                    # Check if there's a proxies argument being injected
+                    import os
+                    
+                    # Clear any proxy-related environment variables that might affect OpenAI
+                    proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy']
+                    saved_proxies = {}
+                    for var in proxy_vars:
+                        if var in os.environ:
+                            saved_proxies[var] = os.environ[var]
+                            del os.environ[var]
+                    
                     try:
-                        self.client = OpenAI(api_key=self.api_key if self.api_key else None)
-                        logger.info("OpenAI client setup successful (without proxies)")
-                    except Exception as fallback_error:
-                        logger.error(f"OpenAI setup failed: {fallback_error}")
-                        self.client = None
-                except Exception as openai_error:
-                    logger.error(f"OpenAI client setup failed: {openai_error}")
+                        # Initialize with only api_key
+                        self.client = OpenAI(api_key=self.api_key) if self.api_key else OpenAI()
+                        logger.info(f"OpenAI client setup successful with model: {self.model}")
+                    finally:
+                        # Restore proxy settings
+                        for var, value in saved_proxies.items():
+                            os.environ[var] = value
+                            
+                except TypeError as e:
+                    if "proxies" in str(e):
+                        logger.error("OpenAI initialization failed due to proxies parameter. This is likely due to an outdated openai package or conflicting configuration.")
+                        logger.info("Please try: pip install --upgrade openai")
+                    else:
+                        logger.error(f"OpenAI setup failed with TypeError: {e}")
+                    self.client = None
+                except Exception as e:
+                    logger.error(f"OpenAI setup failed: {e}")
                     self.client = None
                 
             elif self.api_provider == "anthropic":
