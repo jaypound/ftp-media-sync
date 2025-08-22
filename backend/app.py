@@ -4882,25 +4882,28 @@ def copy_trimmed_recording():
         
         logger.info(f"Copying trimmed file to {server}: {dest_folder}/{filename}")
         
+        # Map server names to FTP managers
+        if server == 'castus1':
+            ftp_manager = ftp_managers.get('source')
+        elif server == 'castus2':
+            ftp_manager = ftp_managers.get('target')
+        else:
+            ftp_manager = None
+        
         # For FTP destination
-        if server in ftp_managers and ftp_managers[server].connected:
+        if ftp_manager and ftp_manager.connected:
             try:
-                dest_path = os.path.join(dest_folder, filename)
+                dest_path = os.path.join(dest_folder, filename).replace('\\', '/')
                 # Upload to FTP
-                ftp_managers[server].upload_file(source_path, dest_path)
+                ftp_manager.upload_file(source_path, dest_path)
                 logger.info(f"Successfully uploaded to FTP: {dest_path}")
+                dest_path = f"{server}:{dest_path}"  # Show server in response
             except Exception as e:
                 logger.error(f"Error uploading to FTP: {str(e)}")
                 return jsonify({'status': 'error', 'message': f'Failed to upload to FTP: {str(e)}'}), 500
         else:
-            # Local copy
-            dest_path = os.path.join(dest_folder, filename)
-            
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-            
-            # Copy the file
-            shutil.copy2(source_path, dest_path)
+            # This should not happen for castus1/castus2
+            return jsonify({'status': 'error', 'message': f'FTP connection not available for {server}'}), 500
         
         # Clean up temp file
         if source_path.startswith('/tmp/'):
@@ -4929,12 +4932,16 @@ def check_file_exists():
         
         # Get FTP manager for the server
         if server == 'castus1':
-            ftp_manager = source_ftp
+            ftp_manager = ftp_managers.get('source')
         elif server == 'castus2':
-            ftp_manager = target_ftp
+            ftp_manager = ftp_managers.get('target')
         else:
             return jsonify({'status': 'error', 'message': f'Unknown server: {server}'}), 400
         
+        # Ensure we have an FTP manager
+        if not ftp_manager:
+            return jsonify({'status': 'error', 'message': f'FTP connection not available for {server}'}), 500
+            
         # Ensure FTP connection
         if not ftp_manager.connected:
             ftp_manager.connect()
