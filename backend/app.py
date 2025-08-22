@@ -4915,6 +4915,53 @@ def copy_trimmed_recording():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@app.route('/api/check-file-exists', methods=['POST'])
+def check_file_exists():
+    """Check if a file exists on the FTP server"""
+    try:
+        data = request.json
+        filename = data.get('filename')
+        dest_folder = data.get('dest_folder', '')
+        server = data.get('server', 'castus1')
+        
+        if not filename:
+            return jsonify({'status': 'error', 'message': 'Filename is required'}), 400
+        
+        # Get FTP manager for the server
+        if server == 'castus1':
+            ftp_manager = source_ftp
+        elif server == 'castus2':
+            ftp_manager = target_ftp
+        else:
+            return jsonify({'status': 'error', 'message': f'Unknown server: {server}'}), 400
+        
+        # Ensure FTP connection
+        if not ftp_manager.connected:
+            ftp_manager.connect()
+        
+        # Build full path
+        if dest_folder:
+            full_path = f"{dest_folder}/{filename}".replace('//', '/')
+        else:
+            full_path = filename
+        
+        # Check if file exists
+        try:
+            # Try to get file size - if it succeeds, file exists
+            ftp_manager.ftp.size(full_path)
+            exists = True
+            logger.info(f"File exists on {server}: {full_path}")
+        except:
+            exists = False
+            logger.info(f"File does not exist on {server}: {full_path}")
+        
+        return jsonify({'status': 'success', 'exists': exists, 'path': full_path})
+        
+    except Exception as e:
+        logger.error(f"Error checking file existence: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 def get_video_duration(file_path):
     """Get video duration in seconds using ffprobe"""
     try:
