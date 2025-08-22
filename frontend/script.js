@@ -11122,24 +11122,18 @@ window.copyToDestination = async function(targetServer) {
         const data = await response.json();
         
         if (data.status === 'success') {
-            statusDiv.className = 'alert alert-success';
-            document.getElementById('trimAnalysisStatusText').textContent = `Successfully copied to: ${data.destination_path}`;
+            statusDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check"></i> <span id="trimAnalysisStatusText">Successfully copied to: ' + data.destination_path + '</span></div>';
             
-            // Close modal and refresh list after delay
-            setTimeout(() => {
-                closeTrimAnalysisModal();
-                refreshRecordingsList();
-            }, 2000);
+            // Refresh the recordings list but keep modal open
+            refreshRecordingsList();
         } else {
-            statusDiv.className = 'alert alert-error';
-            document.getElementById('trimAnalysisStatusText').textContent = `Failed to copy: ${data.message}`;
+            statusDiv.innerHTML = '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Failed to copy: ' + data.message + '</span></div>';
         }
     } catch (error) {
         console.error('Error copying to destination:', error);
         const statusDiv = document.getElementById('trimAnalysisStatus');
         statusDiv.style.display = 'block';
-        statusDiv.className = 'alert alert-error';
-        document.getElementById('trimAnalysisStatusText').textContent = 'Error copying to destination';
+        statusDiv.innerHTML = '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Error copying to destination</span></div>';
     }
 };
 
