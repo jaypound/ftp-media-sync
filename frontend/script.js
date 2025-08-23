@@ -3850,26 +3850,24 @@ async function saveScheduleConfig() {
     
     // Save to backend
     try {
-        const response = await fetch('/api/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                scheduling: {
-                    replay_delays: scheduleConfig.REPLAY_DELAYS,
-                    additional_delay_per_airing: scheduleConfig.ADDITIONAL_DELAY_PER_AIRING,
-                    content_expiration: scheduleConfig.CONTENT_EXPIRATION,
-                    timeslots: scheduleConfig.TIMESLOTS,
-                    duration_categories: scheduleConfig.DURATION_CATEGORIES,
-                    rotation_order: scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form']
-                }
-            })
+        const result = await window.API.post('/config', {
+            scheduling: {
+                replay_delays: scheduleConfig.REPLAY_DELAYS,
+                additional_delay_per_airing: scheduleConfig.ADDITIONAL_DELAY_PER_AIRING,
+                content_expiration: scheduleConfig.CONTENT_EXPIRATION,
+                timeslots: scheduleConfig.TIMESLOTS,
+                duration_categories: scheduleConfig.DURATION_CATEGORIES,
+                rotation_order: scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form']
+            }
         });
-        
         
         if (result.success) {
             log(`✅ ${configType} configuration saved successfully`);
+            // Show success notification
+            showNotification(`${configType.charAt(0).toUpperCase() + configType.slice(1)} configuration saved permanently`, 'success');
         } else {
             log(`❌ Failed to save configuration: ${result.message}`, 'error');
+            showNotification(`Failed to save configuration: ${result.message}`, 'error');
         }
     } catch (error) {
         log(`❌ Error saving configuration: ${error.message}`, 'error');
@@ -7454,12 +7452,16 @@ document.addEventListener('DOMContentLoaded', function() {
 // Load scheduling configuration from backend
 async function loadSchedulingConfig() {
     try {
-        const config = await window.API.get('/config');
+        const response = await window.API.get('/config');
+        const config = response.success ? response.config : response;
         
-        if (config.scheduling) {
+        if (config && config.scheduling) {
+            console.log('Loading scheduling configuration:', config.scheduling);
+            
             // Load replay delays
             if (config.scheduling.replay_delays) {
                 scheduleConfig.REPLAY_DELAYS = config.scheduling.replay_delays;
+                console.log('Loaded replay delays:', scheduleConfig.REPLAY_DELAYS);
                 // Update UI if config modal is open
                 if (document.getElementById('id_replay_delay')) {
                     document.getElementById('id_replay_delay').value = config.scheduling.replay_delays.id || 6;

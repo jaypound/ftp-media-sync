@@ -43,11 +43,91 @@
     "ai_analysis": {
         "enabled": false,
         "provider": "anthropic",
-        "openai_api_key": "***7jIA",
-        "anthropic_api_key": "***8QAA",
+        "openai_api_key": ",
+        "anthropic_api_key": "",
         "model": "claude-3-sonnet-20240229",
         "max_chunk_size": 4000,
         "enable_batch_analysis": true,
         "transcription_only": false
+    },
+    "scheduling": {
+        "replay_delays": {
+            "id": 1,
+            "spots": 2,
+            "short_form": 4,
+            "long_form": 8
+        },
+        "additional_delay_per_airing": {
+            "id": 1,
+            "spots": 2,
+            "short_form": 4,
+            "long_form": 8
+        },
+        "content_expiration": {
+            "id": 30,
+            "spots": 60,
+            "short_form": 90,
+            "long_form": 180
+        },
+        "timeslots": {
+            "overnight": {
+                "start": 0,
+                "end": 6,
+                "label": "Overnight (12-6 AM)"
+            },
+            "early_morning": {
+                "start": 6,
+                "end": 9,
+                "label": "Early Morning (6-9 AM)"
+            },
+            "morning": {
+                "start": 9,
+                "end": 12,
+                "label": "Morning (9 AM-12 PM)"
+            },
+            "afternoon": {
+                "start": 12,
+                "end": 18,
+                "label": "Afternoon (12-6 PM)"
+            },
+            "prime_time": {
+                "start": 18,
+                "end": 21,
+                "label": "Prime Time (6-9 PM)"
+            },
+            "evening": {
+                "start": 21,
+                "end": 24,
+                "label": "Evening (9 PM-12 AM)"
+            }
+        },
+        "duration_categories": {
+            "id": {
+                "min": 0,
+                "max": 16,
+                "label": "ID (< 16s)"
+            },
+            "spots": {
+                "min": 16,
+                "max": 120,
+                "label": "Spots (16s - 2min)"
+            },
+            "short_form": {
+                "min": 120,
+                "max": 1200,
+                "label": "Short Form (2-20min)"
+            },
+            "long_form": {
+                "min": 1200,
+                "max": null,
+                "label": "Long Form (> 20min)"
+            }
+        },
+        "rotation_order": [
+            "id",
+            "spots",
+            "short_form",
+            "long_form"
+        ]
     }
 }
