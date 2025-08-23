@@ -11810,6 +11810,7 @@ async function loadDailyMeetings() {
     
     try {
         const response = await fetch(`/api/meetings/by-date?date=${date}`);
+        const data = await response.json();
         
         console.log('Response data:', data);
         
