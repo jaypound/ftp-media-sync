@@ -198,6 +198,14 @@ window.schedulingTemplatesInit = schedulingTemplatesInit;
 window.schedulingDisplayTemplate = schedulingDisplayTemplate;
 window.schedulingGenerateTemplateHTML = schedulingGenerateTemplateHTML;
 
+// Hook into global template loading
+window.addEventListener('templateLoaded', function(event) {
+    console.log('Scheduling module: template loaded event received');
+    if (event.detail && event.detail.template) {
+        schedulingDisplayTemplate(event.detail.template);
+    }
+});
+
 // Initialize when loaded
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', schedulingTemplatesInit);

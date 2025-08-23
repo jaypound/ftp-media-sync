@@ -8172,7 +8172,7 @@ async function loadTemplateFiles() {
             body: JSON.stringify({ server, path })
         });
         
-        
+        const result = await response.json();
         
         if (result.success && result.files) {
             if (result.files.length === 0) {
@@ -8246,7 +8246,7 @@ async function loadSelectedTemplate() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        
+        const result = await response.json();
         console.log('Load template result:', result);
         
         if (result.success && result.template) {
@@ -8275,6 +8275,11 @@ async function loadSelectedTemplate() {
             currentTemplate.items.slice(0, 3).forEach((item, idx) => {
                 console.log(`  Item ${idx}: start_time="${item.start_time}", title="${item.title || item.file_name}"`);
             });
+            
+            // Dispatch event for scheduling module
+            window.dispatchEvent(new CustomEvent('templateLoaded', {
+                detail: { template: currentTemplate }
+            }));
             
             // Update available content to show add buttons
             if (availableContent && availableContent.length > 0) {
