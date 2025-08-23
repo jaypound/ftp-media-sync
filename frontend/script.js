@@ -11849,7 +11849,7 @@ window.generateDailySchedule = async function() {
             body: JSON.stringify({ meeting_ids: selectedMeetings })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             // Close import modal
@@ -11876,6 +11876,11 @@ window.generateDailySchedule = async function() {
             } else {
                 displayTemplate();
             }
+            
+            // Dispatch event for scheduling module to display the imported meetings
+            window.dispatchEvent(new CustomEvent('templateLoaded', {
+                detail: { template: currentTemplate }
+            }));
             
             // Save to template library
             savedTemplates.push(JSON.parse(JSON.stringify(currentTemplate)));
@@ -12048,6 +12053,11 @@ window.generateWeeklySchedule = async function() {
                 displayTemplate();
             }
             
+            // Dispatch event for scheduling module to display the imported meetings
+            window.dispatchEvent(new CustomEvent('templateLoaded', {
+                detail: { template: currentTemplate }
+            }));
+            
             // Save to template library
             savedTemplates.push(JSON.parse(JSON.stringify(currentTemplate)));
             localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates));
@@ -12089,7 +12099,7 @@ async function loadMonthlyMeetings() {
     
     try {
         const response = await fetch(`/api/meetings/by-month?year=${year}&month=${month}`);
-        
+        const data = await response.json();
         
         const container = document.getElementById('monthlyMeetingsList');
         if (data.status === 'success' && data.meetings.length > 0) {
@@ -12130,7 +12140,7 @@ window.generateMonthlySchedule = async function() {
             body: JSON.stringify({ meeting_ids: selectedMeetings })
         });
         
-        
+        const data = await response.json();
         
         if (data.status === 'success') {
             closeImportMonthlyMeetingsModal();
@@ -12153,6 +12163,11 @@ window.generateMonthlySchedule = async function() {
             } else {
                 displayTemplate();
             }
+            
+            // Dispatch event for scheduling module to display the imported meetings
+            window.dispatchEvent(new CustomEvent('templateLoaded', {
+                detail: { template: currentTemplate }
+            }));
             
             // Save to template library
             savedTemplates.push(JSON.parse(JSON.stringify(currentTemplate)));
