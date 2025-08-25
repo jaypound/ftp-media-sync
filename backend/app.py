@@ -5752,12 +5752,22 @@ def get_meetings_by_week():
         if not year or not week:
             return jsonify({'status': 'error', 'message': 'Year and week parameters are required'}), 400
         
-        # Calculate start and end dates for the week
+        # Calculate start and end dates for the week using ISO week date
         from datetime import datetime, timedelta
+        
+        # Find the first Monday of the year
         jan1 = datetime(year, 1, 1)
-        days_to_week = (week - 1) * 7
-        week_start = jan1 + timedelta(days=days_to_week - jan1.weekday())
+        # Days until first Monday (0 = Monday, 6 = Sunday)
+        days_to_first_monday = (7 - jan1.weekday()) % 7
+        if days_to_first_monday == 0 and jan1.weekday() != 0:
+            days_to_first_monday = 7
+        first_monday = jan1 + timedelta(days=days_to_first_monday)
+        
+        # Calculate the start of the requested week
+        week_start = first_monday + timedelta(weeks=week - 1)
         week_end = week_start + timedelta(days=6)
+        
+        logger.info(f"Week {week} of {year}: {week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
         
         meetings = db_manager.get_meetings_by_date_range(
             week_start.strftime('%Y-%m-%d'),

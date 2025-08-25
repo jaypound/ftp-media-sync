@@ -190,8 +190,9 @@ async function serversTestConnection(serverType) {
             server_type: serverType,
             host: server.host,
             port: server.port,
-            username: server.user,
-            password: server.pass
+            user: server.user,
+            password: server.pass,
+            path: server.path
         });
         
         if (response.success) {

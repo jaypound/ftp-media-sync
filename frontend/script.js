@@ -5136,15 +5136,9 @@ async function deleteSchedule() {
     
     // First get the schedule to find its ID
     try {
-        const response = await fetch('/api/get-schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date: viewDate
-            })
+        const result = await window.API.post('/get-schedule', {
+            date: viewDate
         });
-        
-        
         
         if (!result.success || !result.schedule) {
             log(`❌ No schedule found for ${viewDate}`, 'error');
@@ -5157,15 +5151,9 @@ async function deleteSchedule() {
         if (confirm(`Are you sure you want to delete the schedule for ${viewDate}?\n\nThis will delete ${schedule.total_items} scheduled items.`)) {
             log(`🗑️ Deleting schedule for ${viewDate}...`);
             
-            const deleteResponse = await fetch('/api/delete-schedule', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    schedule_id: scheduleId
-                })
+            const deleteResult = await window.API.post('/delete-schedule', {
+                schedule_id: scheduleId
             });
-            
-            const deleteResult = await deleteResponse.json();
             
             if (deleteResult.success) {
                 log(`✅ ${deleteResult.message}`);
@@ -5191,7 +5179,7 @@ async function listAllSchedules() {
     log('📋 Loading all schedules...');
     
     try {
-        const result = await window.API.get('/');
+        const result = await window.API.get('/list-schedules');
         
         
         if (result.success) {
@@ -5297,15 +5285,9 @@ async function viewScheduleDetails(scheduleId, date) {
     document.getElementById('viewScheduleDate').value = date;
     
     try {
-        const response = await fetch('/api/get-schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date: date
-            })
+        const result = await window.API.post('/get-schedule', {
+            date: date
         });
-        
-        
         
         if (result.success && result.schedule) {
             currentSchedule = result.schedule;  // Store the schedule globally
@@ -5328,15 +5310,9 @@ async function deleteScheduleById(scheduleId, date) {
     log(`🗑️ Deleting schedule ${scheduleId}...`);
     
     try {
-        const response = await fetch('/api/delete-schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                schedule_id: scheduleId
-            })
+        const result = await window.API.post('/delete-schedule', {
+            schedule_id: scheduleId
         });
-        
-        
         
         if (result.success) {
             log(`✅ ${result.message}`);
@@ -5366,12 +5342,7 @@ async function deleteAllSchedules() {
     log('🗑️ Deleting all schedules...');
     
     try {
-        const response = await fetch('/api/delete-all-schedules', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        
+        const result = await window.API.post('/delete-all-schedules');
         
         if (result.success) {
             log(`✅ ${result.message}`);
@@ -12104,8 +12075,9 @@ async function loadMonthlyMeetings() {
         const container = document.getElementById('monthlyMeetingsList');
         if (data.status === 'success' && data.meetings.length > 0) {
             container.innerHTML = data.meetings.map(meeting => {
-                const date = new Date(meeting.meeting_date);
-                const dayOfMonth = date.getDate();
+                // Parse date components directly to avoid timezone issues
+                const [year, month, day] = meeting.meeting_date.split('-').map(num => parseInt(num));
+                const dayOfMonth = day;
                 return `
                     <div class="meeting-selection-item">
                         <label>
