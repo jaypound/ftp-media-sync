@@ -878,7 +878,10 @@ def get_schedule():
             # Convert time objects to strings and ensure duration is a proper number
             for item in items:
                 if 'scheduled_start_time' in item and hasattr(item['scheduled_start_time'], 'strftime'):
-                    item['scheduled_start_time'] = item['scheduled_start_time'].strftime('%H:%M:%S')
+                    # Include microseconds in the time format
+                    time_obj = item['scheduled_start_time']
+                    milliseconds = time_obj.microsecond // 1000
+                    item['scheduled_start_time'] = f"{time_obj.strftime('%H:%M:%S')}.{milliseconds:03d}"
                 # Ensure scheduled_duration_seconds is a float, not Decimal
                 if 'scheduled_duration_seconds' in item and item['scheduled_duration_seconds'] is not None:
                     item['scheduled_duration_seconds'] = float(item['scheduled_duration_seconds'])
@@ -2331,6 +2334,11 @@ def export_schedule():
                 'message': f'No schedule found for {date}'
             })
         
+        # Check if this is a weekly schedule
+        is_weekly_schedule = False
+        if '[WEEKLY]' in schedule.get('schedule_name', ''):
+            is_weekly_schedule = True
+            
         # Get schedule items
         items = scheduler_postgres.get_schedule_items(schedule['id'])
         logger.info(f"Got {len(items)} items for schedule export")
@@ -2340,7 +2348,7 @@ def export_schedule():
         # Generate Castus format schedule
         if format_type == 'castus' or format_type == 'castus_weekly' or format_type == 'castus_monthly':
             # Determine export format
-            if format_type == 'castus_weekly':
+            if format_type == 'castus_weekly' or is_weekly_schedule:
                 export_format = 'weekly'
             elif format_type == 'castus_monthly':
                 export_format = 'monthly'
@@ -2548,6 +2556,14 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         if 'duration_seconds' in item:
             logger.debug(f"  Item also has duration_seconds: {item['duration_seconds']}")
         
+        # Get metadata for weekly schedules
+        metadata = item.get('metadata', {})
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except:
+                metadata = {}
+        
         # Calculate end time
         # Handle different time formats
         if isinstance(start_time, str):
@@ -2714,9 +2730,18 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             # For weekly schedules, we need to track cumulative time to determine day boundaries
             # but use exact start times from previous items to avoid precision issues
             
+            # Check if we have metadata with day information
+            day_prefix = metadata.get('day_prefix', '')
+            day_offset = metadata.get('day_offset', 0)
+            
             # Parse the actual start time from the database
-            item_day_index = 0  # Default to Sunday
-            if isinstance(start_time, str):
+            item_day_index = day_offset  # Use metadata if available
+            if day_prefix:
+                # Use the day prefix from metadata
+                day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                item_day_index = day_map.get(day_prefix, day_offset)
+                item_day_name = day_prefix
+            elif isinstance(start_time, str):
                 # Check if this is a weekly format time with day prefix
                 if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
                     # Extract day and time parts
@@ -2747,10 +2772,14 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                 db_seconds = start_time.second + start_time.microsecond / 1000000.0
             
             # Calculate the actual start time in seconds from the database
-            # For weekly schedules with day prefixes, use the day index directly
-            # Check if we found a day prefix (has_day_prefix would be better but checking the original condition)
-            if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
-                # Calculate exact start time based on day index
+            # For weekly schedules, check metadata for day information
+            if format_type == 'weekly' and day_prefix and day_offset is not None:
+                # Use metadata to calculate exact position in week
+                item_start_seconds = (day_offset * 24 * 60 * 60) + (db_hours * 3600) + (db_minutes * 60) + db_seconds
+                current_day = day_offset
+                logger.debug(f"Using metadata: day_prefix={day_prefix}, day_offset={day_offset}, calculated seconds={item_start_seconds}")
+            elif isinstance(start_time, str) and ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                # Calculate exact start time based on day index from string
                 item_start_seconds = (item_day_index * 24 * 60 * 60) + (db_hours * 3600) + (db_minutes * 60) + db_seconds
                 current_day = item_day_index
             elif idx == 0:
@@ -2823,8 +2852,11 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                     item_start_seconds = (current_day + 1) * 24 * 60 * 60
             
             # Calculate which day of the week this item is on
-            # For weekly schedules, use the actual day from the input if available
-            if format_type == 'weekly' and ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+            # For weekly schedules, prefer metadata
+            if format_type == 'weekly' and day_prefix:
+                # Use day prefix from metadata
+                item_day_name = day_prefix
+            elif format_type == 'weekly' and isinstance(start_time, str) and ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
                 # Use the day name we already parsed
                 day_names = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
                 item_day_name = day_names[item_day_index]
@@ -3296,9 +3328,10 @@ def create_schedule_from_template():
         air_date = data.get('air_date')
         schedule_name = data.get('schedule_name', 'Daily Schedule')
         channel = data.get('channel', 'Comcast Channel 26')
+        template_type = data.get('template_type', 'daily')  # Get template type
         items = data.get('items', [])
         
-        logger.info(f"Creating schedule from template: {schedule_name} for {air_date} with {len(items)} items")
+        logger.info(f"Creating {template_type} schedule from template: {schedule_name} for {air_date} with {len(items)} items")
         
         if not air_date:
             return jsonify({
@@ -3306,11 +3339,170 @@ def create_schedule_from_template():
                 'message': 'Air date is required'
             })
         
-        # Create an empty schedule using the new method
-        result = scheduler_postgres.create_empty_schedule(
-            schedule_date=air_date,
-            schedule_name=schedule_name
-        )
+        # For weekly schedules, we need to handle this differently
+        if template_type == 'weekly':
+            # Create a single weekly schedule
+            from datetime import datetime, timedelta
+            start_date = datetime.strptime(air_date, '%Y-%m-%d')
+            
+            # Create a single schedule for the entire week
+            result = scheduler_postgres.create_empty_schedule(
+                schedule_date=air_date,
+                schedule_name=f"{schedule_name} - Weekly"
+            )
+            
+            if not result['success']:
+                return jsonify(result)
+            
+            schedule_id = result['schedule_id']
+            logger.info(f"Created weekly schedule with ID: {schedule_id}")
+            
+            # Group items by day
+            items_by_day = {}
+            for i in range(7):
+                items_by_day[i] = []
+            
+            # Distribute items to their respective days
+            for idx, item in enumerate(items):
+                # Get the day index from the item (0 = Sunday, 6 = Saturday)
+                # Check if item has start_time with day prefix for weekly templates
+                start_time = item.get('start_time', '')
+                day_index = None
+                
+                # Try to extract day from start_time if it has day prefix
+                if isinstance(start_time, str) and ' ' in start_time:
+                    parts = start_time.split(' ', 1)
+                    day_prefix = parts[0].lower()
+                    day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                    if day_prefix in day_map:
+                        day_index = day_map[day_prefix]
+                        logger.debug(f"Item {idx} has day prefix '{day_prefix}', assigned to day {day_index}")
+                
+                # Fall back to 'day' field if no day prefix found
+                if day_index is None:
+                    day_index = item.get('day', None)
+                    
+                # If still no day, for weekly templates distribute evenly
+                if day_index is None:
+                    if template_type == 'weekly' and len(items) > 0:
+                        # Distribute items evenly across the week
+                        day_index = idx % 7
+                        logger.debug(f"Item {idx} has no day info, distributing to day {day_index}")
+                    else:
+                        day_index = 0  # Default to Sunday
+                
+                if 0 <= day_index < 7:
+                    items_by_day[day_index].append(item)
+                    logger.debug(f"Added item {idx} to day {day_index}")
+                else:
+                    logger.warning(f"Item {idx} has invalid day index {day_index}, skipping")
+            
+            # Add all items to the single schedule with proper day prefixes and times
+            added_count = 0
+            skipped_count = 0
+            order_index = 0
+            
+            # Process each day in order (Sunday=0 to Saturday=6)
+            for day_offset in range(7):
+                current_date = start_date + timedelta(days=day_offset)
+                day_name = current_date.strftime('%A')
+                day_prefix = current_date.strftime('%a').lower()  # sun, mon, tue, etc.
+                day_items = items_by_day.get(day_offset, [])
+                
+                logger.info(f"Adding {len(day_items)} items for {day_name}")
+                
+                # Add items for this day
+                for item in day_items:
+                    asset_id = item.get('asset_id')
+                    
+                    if asset_id and isinstance(asset_id, str) and len(asset_id) == 24 and all(c in '0123456789abcdef' for c in asset_id.lower()):
+                        logger.warning(f"Asset ID {asset_id} appears to be a MongoDB ObjectId, not a PostgreSQL integer")
+                        skipped_count += 1
+                        continue
+                    
+                    if asset_id:
+                        try:
+                            # Get the start time and remove day prefix if present
+                            start_time = item.get('start_time', '00:00:00')
+                            logger.debug(f"Processing item {added_count}: raw start_time = '{start_time}'")
+                            
+                            # If start time has day prefix, remove it for database storage
+                            if isinstance(start_time, str) and ' ' in start_time:
+                                parts = start_time.split(' ', 1)
+                                if any(day in parts[0].lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                                    # Extract just the time part
+                                    time_part = parts[1] if len(parts) > 1 else '00:00:00'
+                                    # Convert from 12-hour to 24-hour format if needed
+                                    if 'am' in time_part.lower() or 'pm' in time_part.lower():
+                                        from datetime import datetime as dt
+                                        # Parse and convert to 24-hour format
+                                        try:
+                                            # Remove extra spaces and normalize
+                                            time_part = ' '.join(time_part.split())
+                                            
+                                            # Check if time has milliseconds
+                                            if '.' in time_part:
+                                                # Split time and milliseconds
+                                                time_base, ms_part = time_part.rsplit('.', 1)
+                                                # Extract milliseconds and am/pm
+                                                ms_str = ''
+                                                for char in ms_part:
+                                                    if char.isdigit():
+                                                        ms_str += char
+                                                    else:
+                                                        break
+                                                milliseconds = ms_str[:3].ljust(3, '0')  # Ensure 3 digits
+                                                # Parse the base time
+                                                parsed_time = dt.strptime(time_base.strip() + ' ' + ms_part.lstrip('0123456789').strip(), '%I:%M:%S %p')
+                                                start_time = parsed_time.strftime('%H:%M:%S') + '.' + milliseconds
+                                            else:
+                                                # No milliseconds
+                                                parsed_time = dt.strptime(time_part, '%I:%M:%S %p')
+                                                start_time = parsed_time.strftime('%H:%M:%S')
+                                        except Exception as e:
+                                            logger.warning(f"Failed to parse time '{time_part}': {e}")
+                                            # If parsing fails, use default
+                                            start_time = '00:00:00'
+                                    else:
+                                        start_time = time_part
+                            
+                            logger.debug(f"Item {added_count}: final start_time for DB = '{start_time}'")
+                            
+                            # Store the day prefix in metadata for the export function
+                            scheduler_postgres.add_item_to_schedule(
+                                schedule_id,
+                                int(asset_id),
+                                order_index=order_index,
+                                scheduled_start_time=start_time,
+                                scheduled_duration_seconds=item.get('duration_seconds', 0),
+                                metadata={'day_prefix': day_prefix, 'day_offset': day_offset}
+                            )
+                            added_count += 1
+                            order_index += 1
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"Invalid asset_id {asset_id}: {str(e)}")
+                            skipped_count += 1
+                    else:
+                        logger.warning(f"Skipping item - no asset_id")
+                        skipped_count += 1
+            
+            # Mark this schedule as weekly type
+            scheduler_postgres.update_schedule_metadata(schedule_id, {'type': 'weekly'})
+            
+            return jsonify({
+                'success': True,
+                'message': f'Weekly schedule created successfully with {added_count} items',
+                'schedule_id': schedule_id,
+                'added_count': added_count,
+                'skipped_count': skipped_count
+            })
+        
+        else:
+            # Create a daily schedule using the existing method
+            result = scheduler_postgres.create_empty_schedule(
+                schedule_date=air_date,
+                schedule_name=schedule_name
+            )
         
         if not result['success']:
             return jsonify(result)

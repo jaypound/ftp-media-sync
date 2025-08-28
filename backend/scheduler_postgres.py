@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from database import db_manager
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,10 @@ class PostgreSQLScheduler:
                 schedule_name=schedule_name or f"Daily Schedule - {schedule_date}"
             )
             
+            # Track all scheduled items with their air times to enforce delay logic
+            # Key: asset_id, Value: list of scheduled timestamps (in seconds from start)
+            scheduled_asset_times = {}
+            
             if not schedule_id:
                 return {
                     'success': False,
@@ -415,8 +420,18 @@ class PostgreSQLScheduler:
                 scheduled_items.append(item)
                 scheduled_asset_ids.append(content['asset_id'])
                 
+                # Track when this asset is scheduled (for delay enforcement)
+                if content['asset_id'] not in scheduled_asset_times:
+                    scheduled_asset_times[content['asset_id']] = []
+                scheduled_asset_times[content['asset_id']].append(total_duration)
+                
                 # Update totals
                 total_duration += content_duration
+                
+                # Add one frame gap between items (29.976 fps)
+                frame_gap = 1.0 / 29.976  # approximately 0.033367 seconds
+                total_duration += frame_gap
+                
                 sequence_number += 1
                 
                 # Advance rotation after successfully scheduling content
@@ -457,8 +472,10 @@ class PostgreSQLScheduler:
             }
     
     def add_item_to_schedule(self, schedule_id: int, asset_id: str, order_index: int = 0, 
-                           scheduled_start_time: str = '00:00:00', scheduled_duration_seconds: float = 0) -> bool:
+                           scheduled_start_time: str = '00:00:00', scheduled_duration_seconds: float = 0, 
+                           metadata: Dict[str, Any] = None) -> bool:
         """Add a single item to an existing schedule"""
+        logger.debug(f"add_item_to_schedule: scheduled_start_time='{scheduled_start_time}' (type: {type(scheduled_start_time)})")
         conn = db_manager._get_connection()
         try:
             cursor = conn.cursor()
@@ -482,23 +499,52 @@ class PostgreSQLScheduler:
                 logger.error(f"Asset not found: {asset_id}")
                 return False
             
-            # Insert schedule item
+            # Check if scheduled_items table has metadata column
             cursor.execute("""
-                INSERT INTO scheduled_items (
-                    schedule_id, asset_id, instance_id, sequence_number,
-                    scheduled_start_time, scheduled_duration_seconds, created_at
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s
-                )
-            """, (
-                schedule_id,
-                asset['asset_id'],
-                asset['instance_id'],
-                order_index + 1,  # sequence_number is 1-based
-                scheduled_start_time,
-                scheduled_duration_seconds or asset['duration_seconds'],
-                datetime.now()
-            ))
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='scheduled_items' AND column_name='metadata'
+            """)
+            result = cursor.fetchone()
+            has_metadata_column = result is not None
+            
+            if has_metadata_column and metadata:
+                # Insert with metadata
+                cursor.execute("""
+                    INSERT INTO scheduled_items (
+                        schedule_id, asset_id, instance_id, sequence_number,
+                        scheduled_start_time, scheduled_duration_seconds, metadata, created_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                """, (
+                    schedule_id,
+                    asset['asset_id'],
+                    asset['instance_id'],
+                    order_index + 1,  # sequence_number is 1-based
+                    scheduled_start_time,
+                    scheduled_duration_seconds or asset['duration_seconds'],
+                    json.dumps(metadata) if metadata else None,
+                    datetime.now()
+                ))
+            else:
+                # Insert without metadata (backward compatibility)
+                cursor.execute("""
+                    INSERT INTO scheduled_items (
+                        schedule_id, asset_id, instance_id, sequence_number,
+                        scheduled_start_time, scheduled_duration_seconds, created_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s
+                    )
+                """, (
+                    schedule_id,
+                    asset['asset_id'],
+                    asset['instance_id'],
+                    order_index + 1,  # sequence_number is 1-based
+                    scheduled_start_time,
+                    scheduled_duration_seconds or asset['duration_seconds'],
+                    datetime.now()
+                ))
             
             conn.commit()
             cursor.close()
@@ -512,7 +558,7 @@ class PostgreSQLScheduler:
             db_manager._put_connection(conn)
     
     def recalculate_schedule_times(self, schedule_id: int) -> bool:
-        """Recalculate start times for all items in a schedule"""
+        """Recalculate start times for all items in a schedule with frame-accurate gaps"""
         conn = db_manager._get_connection()
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -527,15 +573,21 @@ class PostgreSQLScheduler:
             
             items = cursor.fetchall()
             
-            # Update start times
-            current_time = 0  # Start at midnight (0 seconds)
+            # Update start times with frame-accurate gaps
+            current_time = 0.0  # Start at midnight (0 seconds)
+            fps = 29.976  # NTSC frame rate
+            frame_duration = 1.0 / fps  # One frame duration in seconds (approximately 0.033367)
             
-            for item in items:
-                # Convert seconds to time string
+            for idx, item in enumerate(items):
+                # Convert seconds to time string with microseconds
                 hours = int(current_time // 3600)
                 minutes = int((current_time % 3600) // 60)
-                seconds = int(current_time % 60)
-                start_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                seconds_total = current_time % 60
+                seconds = int(seconds_total)
+                microseconds = int((seconds_total - seconds) * 1000000)
+                
+                # Format as HH:MM:SS.microseconds for PostgreSQL TIME type
+                start_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{microseconds:06d}"
                 
                 # Update the item
                 cursor.execute("""
@@ -544,8 +596,13 @@ class PostgreSQLScheduler:
                     WHERE id = %s
                 """, (start_time, item['id']))
                 
-                # Add duration for next item
-                current_time += float(item['scheduled_duration_seconds'])
+                # Add duration plus one frame gap for next item
+                duration = float(item['scheduled_duration_seconds'])
+                current_time += duration
+                
+                # Add one frame gap between items (except after the last item)
+                if idx < len(items) - 1:
+                    current_time += frame_duration
             
             # Update total duration in schedule
             cursor.execute("""
@@ -571,14 +628,7 @@ class PostgreSQLScheduler:
             # Parse date
             schedule_dt = datetime.strptime(schedule_date, '%Y-%m-%d')
             
-            # Check if schedule already exists
-            existing = self.get_schedule_by_date(schedule_date)
-            if existing:
-                return {
-                    'success': False,
-                    'message': f'Schedule already exists for {schedule_date}',
-                    'schedule_id': existing['id']
-                }
+            # Note: Removed check for existing schedule to allow multiple schedules per day
             
             # Create schedule record
             schedule_id = self._create_schedule_record(
@@ -802,26 +852,57 @@ class PostgreSQLScheduler:
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
+            # Check if scheduled_items table has metadata column
             cursor.execute("""
-                SELECT 
-                    si.*,
-                    a.content_type,
-                    a.content_title,
-                    a.duration_category,
-                    a.engagement_score,
-                    a.summary,
-                    i.file_name,
-                    i.file_path,
-                    i.encoded_date,
-                    sm.last_scheduled_date,
-                    sm.total_airings
-                FROM scheduled_items si
-                JOIN assets a ON si.asset_id = a.id
-                JOIN instances i ON si.instance_id = i.id
-                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
-                WHERE si.schedule_id = %s
-                ORDER BY si.sequence_number
-            """, (schedule_id,))
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='scheduled_items' AND column_name='metadata'
+            """)
+            result = cursor.fetchone()
+            has_metadata_column = result is not None
+            
+            if has_metadata_column:
+                cursor.execute("""
+                    SELECT 
+                        si.*,
+                        a.content_type,
+                        a.content_title,
+                        a.duration_category,
+                        a.engagement_score,
+                        a.summary,
+                        i.file_name,
+                        i.file_path,
+                        i.encoded_date,
+                        sm.last_scheduled_date,
+                        sm.total_airings
+                    FROM scheduled_items si
+                    JOIN assets a ON si.asset_id = a.id
+                    JOIN instances i ON si.instance_id = i.id
+                    LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                    WHERE si.schedule_id = %s
+                    ORDER BY si.sequence_number
+                """, (schedule_id,))
+            else:
+                cursor.execute("""
+                    SELECT 
+                        si.*,
+                        a.content_type,
+                        a.content_title,
+                        a.duration_category,
+                        a.engagement_score,
+                        a.summary,
+                        i.file_name,
+                        i.file_path,
+                        i.encoded_date,
+                        sm.last_scheduled_date,
+                        sm.total_airings
+                    FROM scheduled_items si
+                    JOIN assets a ON si.asset_id = a.id
+                    JOIN instances i ON si.instance_id = i.id
+                    LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                    WHERE si.schedule_id = %s
+                    ORDER BY si.sequence_number
+                """, (schedule_id,))
             
             results = cursor.fetchall()
             
@@ -1616,6 +1697,47 @@ class PostgreSQLScheduler:
                 'success': False,
                 'message': f'Error creating monthly schedule: {str(e)}'
             }
+    
+    def update_schedule_metadata(self, schedule_id: int, metadata: Dict[str, Any]) -> bool:
+        """Update schedule metadata"""
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Check if schedules table has metadata column
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='schedules' AND column_name='metadata'
+            """)
+            result = cursor.fetchone()
+            has_metadata_column = result is not None
+            
+            if has_metadata_column:
+                cursor.execute("""
+                    UPDATE schedules 
+                    SET metadata = %s
+                    WHERE id = %s
+                """, (json.dumps(metadata), schedule_id))
+            else:
+                # If no metadata column, we'll store the type in the name for now
+                if 'type' in metadata and metadata['type'] == 'weekly':
+                    cursor.execute("""
+                        UPDATE schedules 
+                        SET schedule_name = schedule_name || ' [WEEKLY]'
+                        WHERE id = %s AND schedule_name NOT LIKE '%[WEEKLY]%'
+                    """, (schedule_id,))
+            
+            conn.commit()
+            cursor.close()
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error updating schedule metadata: {str(e)}")
+            return False
+        finally:
+            db_manager._put_connection(conn)
 
 
 # Create global scheduler instance

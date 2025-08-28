@@ -119,9 +119,9 @@ CREATE TABLE scheduled_items (
     asset_id INTEGER NOT NULL REFERENCES assets(id),
     instance_id INTEGER REFERENCES instances(id), -- Specific file instance to use
     sequence_number INTEGER NOT NULL,
-    scheduled_start_time TIME,
+    scheduled_start_time TIME(3),
     scheduled_duration_seconds NUMERIC(10,3),
-    actual_start_time TIME,
+    actual_start_time TIME(3),
     actual_duration_seconds NUMERIC(10,3),
     status VARCHAR(50) DEFAULT 'scheduled', -- 'scheduled', 'aired', 'skipped', 'error'
     notes TEXT,

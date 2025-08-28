@@ -157,8 +157,8 @@ function schedulingDisplayScheduleDetails(schedule) {
             
             html += `
                 <div class="scheduling-schedule-item-row ${rowClass}" data-item-id="${item.id}" data-schedule-id="${schedule.id}">
-                    <span class="scheduling-col-start-time">${formatTimeWithFrames(startTime)}</span>
-                    <span class="scheduling-col-end-time">${formatTimeWithFrames(endTime)}</span>
+                    <span class="scheduling-col-start-time">${formatTimeWithMilliseconds(startTime)}</span>
+                    <span class="scheduling-col-end-time">${endTime}</span>
                     <span class="scheduling-col-title" title="${item.file_name}">${title}</span>
                     <span class="scheduling-col-category">${categoryLabel}</span>
                     <span class="scheduling-col-duration">${durationTimecode}</span>

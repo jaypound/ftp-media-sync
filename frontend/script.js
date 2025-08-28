@@ -5394,13 +5394,22 @@ async function deleteAllSchedules() {
                 'success'
             );
             
+            // Clear any cached schedules
+            currentSchedule = null;
+            
             // Clear the schedule display
             clearScheduleDisplay();
             
-            // Refresh the schedule list if it's open
+            // Force refresh the schedule list - always show empty list after deletion
             const scheduleDisplay = document.getElementById('scheduleDisplay');
-            if (scheduleDisplay && scheduleDisplay.innerHTML.includes('schedule-list-item')) {
-                await listAllSchedules();
+            if (scheduleDisplay) {
+                // Clear any existing content first
+                scheduleDisplay.innerHTML = '<p style="color: #666; text-align: center;">No schedules found. All schedules have been deleted.</p>';
+                
+                // Then refresh to ensure we're showing current state
+                setTimeout(async () => {
+                    await listAllSchedules();
+                }, 100);
             }
         } else {
             log(`❌ Failed to delete all schedules: ${result.message}`, 'error');
@@ -5454,11 +5463,14 @@ function exportSchedule() {
     // Parse date components to avoid timezone issues
     const [year, month, day] = viewDate.split('-').map(num => parseInt(num));
     
-    // Format as YYMMDD
+    // Format as YY_MM_DD_HHMM
+    const now = new Date();
     const yy = year.toString().slice(-2);
     const mm = month.toString().padStart(2, '0');
     const dd = day.toString().padStart(2, '0');
-    const dateStr = `${yy}${mm}${dd}`;
+    const hh = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const dateStr = `${yy}_${mm}_${dd}_${hh}${min}`;
     
     // Determine schedule type
     let scheduleType = 'daily';
@@ -6055,62 +6067,64 @@ function formatTimeHHMMSSmmm(seconds) {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
-// Calculate end time from start time and duration with frame precision
+// Calculate end time from start time and duration with millisecond precision
 function calculateEndTime(startTime, durationSeconds, fps = 30) {
     // Handle time with microseconds (e.g., "00:00:15.015000")
     let timeParts;
-    let hours = 0, minutes = 0, seconds = 0, frames = 0;
+    let hours = 0, minutes = 0, seconds = 0, milliseconds = 0;
     
     if (startTime.includes('.')) {
         const [timePart, microPart] = startTime.split('.');
         timeParts = timePart.split(':');
-        // Convert microseconds to frames
-        const microseconds = parseFloat('0.' + microPart);
-        frames = Math.floor(microseconds * fps);
+        // Convert microseconds to milliseconds
+        const microStr = microPart.padEnd(6, '0'); // Ensure 6 digits
+        milliseconds = Math.round(parseInt(microStr) / 1000);
     } else {
         // Parse start time - can be HH:MM:SS or HH:MM:SS:FF
         timeParts = startTime.split(':');
+        // If we have frames (4th part), convert to milliseconds
+        if (timeParts.length >= 4) {
+            const frames = parseInt(timeParts[3]) || 0;
+            milliseconds = Math.round((frames / fps) * 1000);
+        }
     }
     
     if (timeParts.length >= 3) {
         hours = parseInt(timeParts[0]) || 0;
         minutes = parseInt(timeParts[1]) || 0;
         seconds = parseInt(timeParts[2]) || 0;
-        if (timeParts.length >= 4) {
-            frames = parseInt(timeParts[3]) || 0;
-        }
     }
     
     // Ensure durationSeconds is a number
     const duration = parseFloat(durationSeconds) || 0;
     
-    // Convert everything to frames for precise calculation
-    const startTotalFrames = (hours * 3600 + minutes * 60 + seconds) * fps + frames;
-    const durationFrames = Math.round(duration * fps);
-    const endTotalFrames = startTotalFrames + durationFrames;
+    // Convert everything to milliseconds for precise calculation
+    const startTotalMs = (hours * 3600 + minutes * 60 + seconds) * 1000 + milliseconds;
+    const durationMs = Math.round(duration * 1000);
+    const endTotalMs = startTotalMs + durationMs;
     
     // Convert back to time components
-    const totalSeconds = Math.floor(endTotalFrames / fps);
-    const endFrames = endTotalFrames % fps;
+    const totalSeconds = Math.floor(endTotalMs / 1000);
+    const endMilliseconds = endTotalMs % 1000;
     const endHours = Math.floor(totalSeconds / 3600) % 24;
     const endMinutes = Math.floor((totalSeconds % 3600) / 60);
     const endSeconds = Math.floor(totalSeconds % 60);
     
-    // Format as HH:MM:SS:FF
-    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:${endSeconds.toString().padStart(2, '0')}:${endFrames.toString().padStart(2, '0')}`;
+    // Format as HH:MM:SS.mmm (with milliseconds)
+    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:${endSeconds.toString().padStart(2, '0')}.${endMilliseconds.toString().padStart(3, '0')}`;
 }
 
-// Format duration in seconds to HH:MM:SS:FF format (with frames)
+// Format duration in seconds to HH:MM:SS.mmm format (with milliseconds)
 function formatDurationTimecode(durationSeconds, fps = 30) {
     const duration = parseFloat(durationSeconds) || 0;
     
     const hours = Math.floor(duration / 3600);
     const minutes = Math.floor((duration % 3600) / 60);
     const seconds = Math.floor(duration % 60);
-    const frames = Math.floor((duration % 1) * fps);
+    const milliseconds = Math.round((duration % 1) * 1000);
     
-    // Format as HH:MM:SS:FF
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+    // Format as HH:MM:SS.mmm
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
 // Format duration with milliseconds preserved
@@ -6230,11 +6244,58 @@ function formatTimeWithFrames(timeStr, fps = 30) {
         // Already has frames
         return timeStr;
     } else if (parts.length === 3) {
-        // Add :00 frames
-        return `${timeStr}:00`;
-    } else {
-        return '00:00:00:00';
+        // Add frames
+        return timeStr + ':00';
     }
+    
+    return '00:00:00:00';
+}
+
+// Convert HH:MM:SS or HH:MM:SS.microseconds to HH:MM:SS.000 format (with milliseconds)
+function formatTimeWithMilliseconds(timeStr) {
+    if (!timeStr) return '00:00:00.000';
+    
+    // Handle weekly format times that include day prefix (e.g., "wed 12:00:15.040 am")
+    let cleanTime = timeStr;
+    if (timeStr.includes(' ') && (timeStr.includes('am') || timeStr.includes('pm'))) {
+        // Extract just the time part
+        const parts = timeStr.split(' ');
+        if (parts.length >= 2) {
+            // Skip the day prefix if present
+            const timePartIndex = parts[0].length <= 3 ? 1 : 0;
+            cleanTime = parts.slice(timePartIndex).join(' ');
+        }
+        
+        // Convert 12-hour to 24-hour format first
+        const time24 = convert12to24Hour(cleanTime);
+        if (time24) {
+            cleanTime = time24;
+        }
+    }
+    
+    // Parse time parts
+    const parts = cleanTime.split(':');
+    if (parts.length < 3) return cleanTime;
+    
+    const hours = parts[0].padStart(2, '0');
+    const minutes = parts[1].padStart(2, '0');
+    
+    // Handle seconds and milliseconds
+    const secondsParts = parts[2].split('.');
+    const seconds = secondsParts[0].padStart(2, '0');
+    
+    let millis = '000';
+    if (secondsParts.length > 1) {
+        // Extract milliseconds, handling microsecond format
+        const fracPart = secondsParts[1];
+        if (fracPart.length >= 3) {
+            millis = fracPart.substring(0, 3);
+        } else {
+            millis = fracPart.padEnd(3, '0');
+        }
+    }
+    
+    return `${hours}:${minutes}:${seconds}.${millis}`;
 }
 
 // Get content type label from configuration
@@ -8538,6 +8599,7 @@ function fillGapsWithProperTimes() {
 function fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
     const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
     let newItemIndex = 0;
+    const frameGap = 1.0 / 29.976; // One frame at 29.976 fps (approximately 0.033367 seconds)
     
     // Process each day separately
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
@@ -8575,12 +8637,12 @@ function fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
                 const item = itemsWithoutTimes[newItemIndex];
                 const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
                 
-                // Check if item fits within this day (don't cross midnight)
-                if (currentDayTime + duration <= gapEnd && currentDayTime + duration <= 24 * 3600) {
+                // Check if item fits within this day (don't cross midnight) including frame gap
+                if (currentDayTime + duration + frameGap <= gapEnd && currentDayTime + duration + frameGap <= 24 * 3600) {
                     item.start_time = formatWeeklyTime(dayName, currentDayTime);
                     item.end_time = formatWeeklyTime(dayName, currentDayTime + duration);
                     newItemsArray.push(item);
-                    currentDayTime += duration;
+                    currentDayTime += duration + frameGap; // Add frame gap after item
                     newItemIndex++;
                 } else {
                     // Item doesn't fit in remaining time today
@@ -8596,10 +8658,10 @@ function fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
                 const fixedItem = dayFixedItems[i].item;
                 console.log('Adding fixed item:', fixedItem.title || fixedItem.file_name, 'at', fixedItem.start_time);
                 newItemsArray.push(fixedItem);
-                // Update current time to after this fixed item
+                // Update current time to after this fixed item plus frame gap
                 const fixedStartTime = extractTimeFromWeeklyTime(fixedItem.start_time);
                 const fixedDuration = parseFloat(fixedItem.duration_seconds || 0);
-                currentDayTime = fixedStartTime + fixedDuration;
+                currentDayTime = fixedStartTime + fixedDuration + frameGap;
             }
         }
     }
@@ -8609,6 +8671,7 @@ function fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
     // Now fill gaps with the new items
     let newItemIndex = 0;
     let currentTime = 0; // Start from midnight
+    const frameGap = 1.0 / 29.976; // One frame at 29.976 fps (approximately 0.033367 seconds)
     
     // Add items before the first fixed item
     if (itemsWithTimes.length > 0) {
@@ -8619,12 +8682,12 @@ function fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
             const item = itemsWithoutTimes[newItemIndex];
             const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
             
-            // Check if this item fits before the fixed item
-            if (currentTime + duration <= firstFixedTime) {
+            // Check if this item fits before the fixed item (including frame gap)
+            if (currentTime + duration + frameGap <= firstFixedTime) {
                 item.start_time = formatTimeFromSeconds(currentTime);
                 item.end_time = formatTimeFromSeconds(currentTime + duration);
                 newItemsArray.push(item);
-                currentTime += duration;
+                currentTime += duration + frameGap; // Add frame gap after item
                 newItemIndex++;
             } else {
                 // Item doesn't fit, skip to after the fixed item
@@ -8641,7 +8704,7 @@ function fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
         // Update current time to end of this fixed item
         const fixedStartTime = parseTimeToSeconds(fixedItem.start_time);
         const fixedDuration = parseFloat(fixedItem.duration_seconds || 0);
-        currentTime = fixedStartTime + fixedDuration;
+        currentTime = fixedStartTime + fixedDuration + frameGap; // Add frame gap after fixed item
         
         // Determine the next fixed item time or end of day
         const nextFixedTime = (i < itemsWithTimes.length - 1) 
@@ -8653,12 +8716,12 @@ function fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
             const item = itemsWithoutTimes[newItemIndex];
             const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
             
-            // Check if this item fits before the next fixed item
-            if (currentTime + duration <= nextFixedTime) {
+            // Check if this item fits before the next fixed item (including frame gap)
+            if (currentTime + duration + frameGap <= nextFixedTime) {
                 item.start_time = formatTimeFromSeconds(currentTime);
                 item.end_time = formatTimeFromSeconds(currentTime + duration);
                 newItemsArray.push(item);
-                currentTime += duration;
+                currentTime += duration + frameGap; // Add frame gap after item
                 newItemIndex++;
             } else {
                 // Item doesn't fit, skip to after the next fixed item
@@ -8675,7 +8738,7 @@ function fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
         item.start_time = formatTimeFromSeconds(currentTime);
         item.end_time = formatTimeFromSeconds(currentTime + duration);
         newItemsArray.push(item);
-        currentTime += duration;
+        currentTime += duration + frameGap; // Add frame gap after item
         newItemIndex++;
     }
 }
@@ -8714,7 +8777,13 @@ function parseWeeklyTimeToSeconds(timeStr) {
     const timeParts = timePart.split(':');
     let hours = parseInt(timeParts[0]) || 0;
     const minutes = parseInt(timeParts[1]) || 0;
-    const seconds = parseFloat(timeParts[2]) || 0;
+    // Parse seconds as float to preserve milliseconds
+    let seconds = 0;
+    if (timeParts.length > 2) {
+        // Remove milliseconds temporarily if they exist (e.g., "45.123")
+        const secPart = timeParts[2].split('.');
+        seconds = parseFloat(timeParts[2]) || 0;
+    }
     
     // Convert to 24-hour format if needed
     if (!is24HourFormat) {
@@ -8768,7 +8837,8 @@ function formatWeeklyTime(dayName, totalSeconds) {
     
     const hours = Math.floor(daySeconds / 3600);
     const minutes = Math.floor((daySeconds % 3600) / 60);
-    const seconds = Math.floor(daySeconds % 60);
+    const wholeSeconds = Math.floor(daySeconds % 60);
+    const milliseconds = Math.round((daySeconds % 1) * 1000);
     
     // Convert to 12-hour format
     let displayHours = hours;
@@ -8780,7 +8850,7 @@ function formatWeeklyTime(dayName, totalSeconds) {
     }
     if (displayHours === 0) displayHours = 12;
     
-    return `${dayName} ${displayHours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')} ${period}`;
+    return `${dayName} ${displayHours}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')} ${period}`;
 }
 
 function parseTimeToSeconds(timeStr) {
@@ -8802,14 +8872,15 @@ function parseTimeToSeconds(timeStr) {
 function formatTimeFromSeconds(totalSeconds, format = 'daily') {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = Math.floor(totalSeconds % 60);
-    const frames = 0; // We'll use 0 frames for simplicity
+    const wholeSeconds = Math.floor(totalSeconds % 60);
+    const milliseconds = Math.round((totalSeconds % 1) * 1000);
     
+    // Format with milliseconds instead of frames
     if (format === 'daily') {
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
     }
     // Add weekly format support if needed
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
 }
 
 function recalculateTemplateTimes() {
@@ -8995,9 +9066,9 @@ function displayTemplate() {
             const isLiveInput = item.filename && item.filename.toLowerCase().includes('live input');
             const itemClasses = isLiveInput ? 'template-item live-input' : 'template-item';
             
-            // Format start and end times to show frames
-            const startTimeFormatted = formatTimeToTimecode(item.start_time || '00:00:00');
-            const endTimeFormatted = formatTimeToTimecode(item.end_time || '00:00:00');
+            // Format start and end times to show milliseconds
+            const startTimeFormatted = formatTimeWithMilliseconds(item.start_time || '00:00:00');
+            const endTimeFormatted = formatTimeWithMilliseconds(item.end_time || '00:00:00');
             
             html += `
                 <div class="${itemClasses}" ${!hasAssetId ? 'style="opacity: 0.6;"' : ''}>
@@ -9411,8 +9482,9 @@ function displayDashboardTemplate() {
         const durationTimecode = item.duration_timecode || formatDurationTimecodeWithMs(item.duration_seconds);
         const hasAssetId = item.asset_id || item.id;
         
-        // Format start time as timecode with milliseconds
-        const startTimeTimecode = formatTimeToTimecode(item.start_time || '00:00:00');
+        // Format start and end times with milliseconds
+        const startTimeTimecode = formatTimeWithMilliseconds(item.start_time || '00:00:00');
+        const endTimeTimecode = formatTimeWithMilliseconds(item.end_time || '00:00:00');
         
         html += `
             <div class="template-item ${!hasAssetId ? 'missing-asset' : ''}">
@@ -9423,7 +9495,7 @@ function displayDashboardTemplate() {
                     ${!hasAssetId ? ' <i class="fas fa-exclamation-triangle" style="color: #ffc107;"></i>' : ''}
                 </span>
                 <span class="template-item-duration">${durationTimecode}</span>
-                <span class="template-item-end">${item.end_time || '00:00:00'}</span>
+                <span class="template-item-end">${endTimeTimecode}</span>
                 <div class="template-item-actions">
                     <button class="button info small" onclick="showTemplateItemInfo(${index})">
                         <i class="fas fa-info-circle"></i>
@@ -10292,6 +10364,7 @@ async function createScheduleFromTemplate() {
                 air_date: airDate,
                 schedule_name: scheduleName,
                 channel: 'Comcast Channel 26',
+                template_type: template.type || 'daily',  // Include template type
                 items: template.items
             })
         });
@@ -10299,8 +10372,16 @@ async function createScheduleFromTemplate() {
         const result = await response.json();
         
         if (result.success) {
-            log(`Schedule created successfully! Schedule ID: ${result.schedule_id}`, 'success');
-            alert(`Schedule created successfully!\n\nSchedule: ${scheduleName}\nAir Date: ${airDate}\nItems: ${result.added_count}\n\nYou can now view this schedule in the Schedules panel.`);
+            // Handle both daily and weekly schedule responses
+            if (result.schedule_ids) {
+                // Weekly schedule created
+                log(`Weekly schedule created successfully! ${result.days_created} days created`, 'success');
+                alert(`Weekly schedule created successfully!\n\nSchedule: ${scheduleName}\nStart Date: ${airDate}\nDays Created: ${result.days_created}\nItems: ${result.added_count} total\n\nYou can now view these schedules in the Schedules panel.`);
+            } else {
+                // Daily schedule created
+                log(`Schedule created successfully! Schedule ID: ${result.schedule_id}`, 'success');
+                alert(`Schedule created successfully!\n\nSchedule: ${scheduleName}\nAir Date: ${airDate}\nItems: ${result.added_count}\n\nYou can now view this schedule in the Schedules panel.`);
+            }
             
             // Optionally switch to schedules view
             const switchToSchedules = confirm('Would you like to switch to the Schedules panel to view the new schedule?');

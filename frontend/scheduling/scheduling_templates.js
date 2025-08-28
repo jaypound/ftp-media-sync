@@ -154,7 +154,10 @@ function schedulingGenerateItemHTML(item, index) {
         }
     }
     
-    const startTime = item.start_time || '00:00:00';
+    // Format time with milliseconds if formatTimeWithMilliseconds function is available
+    const startTime = typeof formatTimeWithMilliseconds === 'function' 
+        ? formatTimeWithMilliseconds(item.start_time || '00:00:00')
+        : (item.start_time || '00:00:00');
     const duration = schedulingFormatDuration(item.duration_seconds || item.file_duration || 0);
     const category = item.category || item.duration_category || 'No Category';
     
@@ -163,8 +166,8 @@ function schedulingGenerateItemHTML(item, index) {
             <span class="scheduling-template-item-number">${index + 1}</span>
             <span class="scheduling-template-item-time">${startTime}</span>
             <span class="scheduling-template-item-title" title="${title}">${title}</span>
-            <span class="scheduling-template-item-category">${category}</span>
             <span class="scheduling-template-item-duration">${duration}</span>
+            <span class="scheduling-template-item-category">${category}</span>
         </div>
     `;
 }
@@ -184,19 +187,35 @@ function schedulingGroupItemsByDay(items) {
     return groups;
 }
 
-// Format duration in seconds to HH:MM:SS
+// Format duration in seconds to HH:MM:SS.mmm with milliseconds
 function schedulingFormatDuration(seconds) {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
+    const duration = parseFloat(seconds) || 0;
+    const hours = Math.floor(duration / 3600);
+    const minutes = Math.floor((duration % 3600) / 60);
+    const secs = Math.floor(duration % 60);
+    const milliseconds = Math.round((duration % 1) * 1000);
     
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+}
+
+// Format time string to ensure it has milliseconds (HH:MM:SS.mmm)
+function formatTimeWithMilliseconds(timeStr) {
+    if (!timeStr) return '00:00:00.000';
+    
+    // If already has milliseconds, return as is
+    if (timeStr.includes('.')) {
+        return timeStr;
+    }
+    
+    // Add .000 milliseconds if missing
+    return timeStr + '.000';
 }
 
 // Export functions to global scope
 window.schedulingTemplatesInit = schedulingTemplatesInit;
 window.schedulingDisplayTemplate = schedulingDisplayTemplate;
 window.schedulingGenerateTemplateHTML = schedulingGenerateTemplateHTML;
+window.formatTimeWithMilliseconds = formatTimeWithMilliseconds;
 
 // Hook into global template loading
 window.addEventListener('templateLoaded', function(event) {
