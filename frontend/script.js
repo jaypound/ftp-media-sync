@@ -201,6 +201,8 @@ async function compareFiles() {
     targetFiles.forEach(file => {
         const relativePath = file.path || file.name;
         targetFileMap.set(relativePath, file);
+        // Also add by name only as a fallback
+        targetFileMap.set(file.name, file);
     });
     
     // Create a map of source files for quick lookup using relative path
@@ -208,6 +210,8 @@ async function compareFiles() {
     sourceFiles.forEach(file => {
         const relativePath = file.path || file.name;
         sourceFileMap.set(relativePath, file);
+        // Also add by name only as a fallback
+        sourceFileMap.set(file.name, file);
     });
     
     // Debug: Log sample paths from both servers
@@ -235,7 +239,15 @@ async function compareFiles() {
     // Process source files (existing logic)
     sourceFiles.forEach(sourceFile => {
         const sourceRelativePath = sourceFile.path || sourceFile.name;
-        const targetFile = targetFileMap.get(sourceRelativePath);
+        // Try to find target file by path first, then by name
+        let targetFile = targetFileMap.get(sourceRelativePath);
+        if (!targetFile && sourceFile.path !== sourceFile.name) {
+            // Try matching by name only if path lookup failed
+            targetFile = targetFileMap.get(sourceFile.name);
+            if (targetFile) {
+                log(`Matched ${sourceFile.name} by filename (path mismatch: source='${sourceRelativePath}' vs target='${targetFile.path || targetFile.name}')`);
+            }
+        }
         
         // Create a unique identifier for the file (using relative path)
         const fileId = btoa(sourceRelativePath).replace(/[^a-zA-Z0-9]/g, ''); // Base64 encode and clean for HTML ID
@@ -268,7 +280,15 @@ async function compareFiles() {
     // Process target files to find target-only files
     targetFiles.forEach(targetFile => {
         const targetRelativePath = targetFile.path || targetFile.name;
-        const sourceFile = sourceFileMap.get(targetRelativePath);
+        // Try to find source file by path first, then by name
+        let sourceFile = sourceFileMap.get(targetRelativePath);
+        if (!sourceFile && targetFile.path !== targetFile.name) {
+            // Try matching by name only if path lookup failed
+            sourceFile = sourceFileMap.get(targetFile.name);
+            if (sourceFile) {
+                log(`Matched ${targetFile.name} by filename for target-only check (path mismatch: target='${targetRelativePath}' vs source='${sourceFile.path || sourceFile.name}')`);
+            }
+        }
         
         if (!sourceFile) {
             // File exists on target but not on source
@@ -1071,12 +1091,30 @@ async function processResultsWithProgress(results) {
             log(`✅ ${item.action === 'copy' ? 'Copied' : 'Updated'} ${item.file}`, 'success');
             syncStats.processed++;
             
-            // Remove successfully synced file from target-only list if it was a target-to-source sync
+            // Remove successfully synced file from the appropriate lists
+            const fileId = item.id;
+            const fileName = item.file;
+            
+            // Remove from available files
+            availableFiles = availableFiles.filter(f => f.id !== fileId);
+            
+            // Update comparison results to mark as synced
+            allComparisonResults = allComparisonResults.map(result => {
+                if (result.fileId === fileId || result.relativePath === fileName || result.sourceFile?.name === fileName) {
+                    result.status = 'identical'; // Mark as synced
+                    result.justSynced = true; // Add flag for UI indication
+                }
+                return result;
+            });
+            
+            // Remove from target-only list if it was a target-to-source sync
             if (item.direction === 'target_to_source') {
-                const fileId = item.id || `${item.file}_${item.size}`;
                 targetOnlyFiles = targetOnlyFiles.filter(f => f.fileId !== fileId);
                 log(`Debug: Removed ${item.file} from target-only list (${targetOnlyFiles.length} remaining)`);
             }
+            
+            // Remove from sync queue
+            syncQueue = syncQueue.filter(q => q.id !== fileId);
         } else {
             // Enhanced error logging
             const errorMsg = item.error || item.message || 'No error details provided by server';

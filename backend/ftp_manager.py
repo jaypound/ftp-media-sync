@@ -776,11 +776,77 @@ class FTPManager:
             
             # Delete the file (quote path if needed)
             quoted_path = self._quote_path_if_needed(full_remote_path)
-            self.ftp.delete(quoted_path)
+            logger.info(f"Attempting to delete with quoted path: {quoted_path}")
+            
+            # Try to delete the file
+            delete_success = False
+            last_error = None
+            
+            # First try with the quoted path
+            try:
+                self.ftp.delete(quoted_path)
+                delete_success = True
+            except Exception as e:
+                last_error = e
+                if "550" in str(e):
+                    # Try alternative paths if the standard path fails
+                    alternative_paths = self._generate_alternative_paths(full_remote_path)
+                    
+                    for alt_desc, alt_path in alternative_paths[1:]:  # Skip the first one (original)
+                        try:
+                            logger.info(f"Trying alternative path ({alt_desc}): {alt_path}")
+                            # Quote the alternative path if needed
+                            alt_quoted = self._quote_path_if_needed(alt_path)
+                            self.ftp.delete(alt_quoted)
+                            delete_success = True
+                            logger.info(f"Success with alternative path: {alt_path}")
+                            break
+                        except Exception as alt_e:
+                            logger.debug(f"Alternative path failed: {alt_e}")
+                            continue
+                            
+            if not delete_success:
+                raise last_error
             
             logger.info(f"Successfully deleted file: {full_remote_path}")
             return True
                 
         except Exception as e:
-            logger.error(f"Delete failed for {remote_path}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Delete failed for {remote_path}: {error_msg}")
+            
+            # Provide more specific error information based on FTP error codes
+            if "550" in error_msg:
+                # Check if file exists
+                try:
+                    self.ftp.size(quoted_path)
+                    # File exists, so it's likely a permission issue
+                    logger.error("Error 550: File exists but cannot be deleted - likely a permission issue")
+                    logger.error("Possible causes:")
+                    logger.error("  1. User lacks delete permissions on the FTP server")
+                    logger.error("  2. File is locked or in use by another process")
+                    logger.error("  3. Parent directory is write-protected")
+                except:
+                    # File doesn't exist or can't check size
+                    logger.error("Error 550: File may not exist at the specified path")
+                    logger.error(f"Attempted to delete: {full_remote_path}")
+                    
+                # Try to check current directory permissions
+                try:
+                    current_dir = os.path.dirname(full_remote_path)
+                    logger.info(f"Checking permissions for directory: {current_dir}")
+                    # Try to list the directory to verify access
+                    self.ftp.cwd(current_dir)
+                    logger.info(f"Can access directory: {current_dir}")
+                    # Return to original directory
+                    self.ftp.cwd(base_path)
+                except Exception as perm_e:
+                    logger.error(f"Cannot access parent directory: {perm_e}")
+            elif "530" in error_msg:
+                logger.error("Error 530: Not logged in or authentication failed")
+            elif "553" in error_msg:
+                logger.error("Error 553: Requested action not taken - file name not allowed")
+            else:
+                logger.error(f"FTP Error: {error_msg}")
+                
             return False
