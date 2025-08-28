@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Related Documentation
+- [Content Rotation System](./CONTENT_ROTATION.md) - Detailed guide for configuring and troubleshooting the content rotation system
+
 ## Development Commands
 
 ### Running the Application
@@ -93,6 +96,24 @@ The application filters files based on:
 - File size limits (min/max)
 - Subdirectory inclusion
 - Overwrite policies
+
+### Scheduling System
+The application includes a sophisticated content scheduling system:
+- **PostgreSQL-based scheduler** (`scheduler_postgres.py`) - Manages schedule creation and content rotation
+- **Content rotation system** - Cycles through duration categories (ID, SPOTS, SHORT_FORM, LONG_FORM)
+- **Template-based scheduling** - Import/export daily, weekly, and monthly templates
+- **Gap filling** - Automatically fills empty time slots with appropriate content
+- **Replay delays** - Prevents content from repeating too frequently
+- **Content expiration** - Manages content lifecycle with expiration dates
+
+Key scheduling features:
+- Create daily/weekly schedules
+- Import meeting schedules from PDFs
+- Fill template gaps with rotation-aware content selection
+- Export schedules in various formats
+- Track content usage and prevent over-rotation
+
+See [CONTENT_ROTATION.md](./CONTENT_ROTATION.md) for detailed rotation configuration.
 
 ## Important Notes
 

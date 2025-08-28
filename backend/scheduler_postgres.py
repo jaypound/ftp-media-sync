@@ -28,10 +28,13 @@ class PostgreSQLScheduler:
                 from config_manager import ConfigManager
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
+                logger.info(f"Scheduling config loaded: {scheduling_config}")
                 rotation_order = scheduling_config.get('rotation_order')
                 if rotation_order:
                     self.duration_rotation = rotation_order
                     logger.info(f"Loaded rotation order from config: {rotation_order}")
+                else:
+                    logger.warning(f"No rotation_order in config, using default: {self.duration_rotation}")
                 self._config_loaded = True
             except Exception as e:
                 logger.warning(f"Could not load rotation config: {e}")
@@ -41,8 +44,12 @@ class PostgreSQLScheduler:
         """Get the next duration category in rotation"""
         self._load_config_if_needed()
         category = self.duration_rotation[self.rotation_index]
-        self.rotation_index = (self.rotation_index + 1) % len(self.duration_rotation)
+        # Don't advance here - wait until content is actually scheduled
         return category
+    
+    def _advance_rotation(self):
+        """Advance to the next category in rotation"""
+        self.rotation_index = (self.rotation_index + 1) % len(self.duration_rotation)
     
     def _reset_rotation(self):
         """Reset the rotation index"""
@@ -248,6 +255,10 @@ class PostgreSQLScheduler:
     def create_daily_schedule(self, schedule_date: str, schedule_name: str = None, max_errors: int = 100) -> Dict[str, Any]:
         """Create a daily schedule for the specified date"""
         try:
+            # Force reload of configuration to ensure we have the latest rotation order
+            self._config_loaded = False
+            self._load_config_if_needed()
+            
             # Parse date
             schedule_dt = datetime.strptime(schedule_date, '%Y-%m-%d')
             
@@ -407,6 +418,9 @@ class PostgreSQLScheduler:
                 # Update totals
                 total_duration += content_duration
                 sequence_number += 1
+                
+                # Advance rotation after successfully scheduling content
+                self._advance_rotation()
                 
                 # Calculate actual air time for this item
                 # The item starts at (total_duration - content_duration) seconds from schedule start
@@ -1043,6 +1057,10 @@ class PostgreSQLScheduler:
         logger.info(f"Creating weekly schedule starting {start_date}")
         
         try:
+            # Force reload of configuration to ensure we have the latest rotation order
+            self._config_loaded = False
+            self._load_config_if_needed()
+            
             # Parse start date and ensure it's a Monday
             start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
             
@@ -1351,6 +1369,9 @@ class PostgreSQLScheduler:
                     total_duration += content_duration
                     sequence_number += 1
                     
+                    # Advance rotation after successfully scheduling content
+                    self._advance_rotation()
+                    
                     # Calculate actual air time for this item
                     # The item starts at (total_duration - content_duration) seconds from schedule start
                     actual_air_time = start_date_obj + timedelta(seconds=total_duration - content_duration)
@@ -1404,6 +1425,10 @@ class PostgreSQLScheduler:
         logger.info(f"Creating monthly schedule for {year}-{month:02d}")
         
         try:
+            # Force reload of configuration to ensure we have the latest rotation order
+            self._config_loaded = False
+            self._load_config_if_needed()
+            
             # Calculate start and end dates for the month
             start_date = datetime(year, month, 1)
             
@@ -1548,6 +1573,9 @@ class PostgreSQLScheduler:
                     # Update totals
                     total_duration += content_duration
                     sequence_number += 1
+                    
+                    # Advance rotation after successfully scheduling content
+                    self._advance_rotation()
                     
                     # Calculate actual air time for this item
                     # The item starts at (total_duration - content_duration) seconds from schedule start

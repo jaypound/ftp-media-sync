@@ -56,6 +56,11 @@ class ConfigManager:
                 "max_chunk_size": 4000,
                 "enable_batch_analysis": True,
                 "transcription_only": False
+            },
+            "scheduling": {
+                "default_export_server": "target",
+                "default_export_path": "/mnt/md127/Schedules/Contributors/Jay",
+                "max_consecutive_errors": 100
             }
         }
     
@@ -97,6 +102,9 @@ class ConfigManager:
                     self._merge_config(default[key], value)
                 else:
                     default[key] = value
+            else:
+                # Add new keys that don't exist in defaults
+                default[key] = value
     
     def get_server_config(self, server_type: str) -> Optional[Dict[str, Any]]:
         """Get configuration for a specific server"""

@@ -203,10 +203,12 @@ def save_config():
             config_manager.update_sync_settings(data['sync_settings'])
         
         if 'scheduling' in data:
+            logger.info(f"Updating scheduling settings: {data['scheduling']}")
             config_manager.update_scheduling_settings(data['scheduling'])
             
             # Update scheduler rotation order if provided
             if 'rotation_order' in data['scheduling']:
+                logger.info(f"Updating rotation order to: {data['scheduling']['rotation_order']}")
                 scheduler_postgres.update_rotation_order(data['scheduling']['rotation_order'])
         
         if 'ai_settings' in data:
@@ -3909,6 +3911,14 @@ def fill_template_gaps():
         total_cycles_without_content = 0
         max_cycles = 20  # After trying all categories 20 times, stop
         
+        # Reset rotation to ensure consistent starting point
+        scheduler._reset_rotation()
+        
+        # Force reload of configuration to ensure we have the latest rotation order
+        scheduler._config_loaded = False
+        scheduler._load_config_if_needed()
+        logger.info(f"Using rotation order: {scheduler.duration_rotation}")
+        
         # Process each gap individually
         for gap in gaps:
             gap_start = gap['start']
@@ -4098,6 +4108,9 @@ def fill_template_gaps():
                     asset_schedule_times[content_id].append(current_position)
                     
                     current_position += duration
+                    
+                    # Advance rotation after successfully scheduling content
+                    scheduler._advance_rotation()
                 
                 # Log progress every 10 items to prevent timeout appearance
                 if len(items_added) % 10 == 0:
