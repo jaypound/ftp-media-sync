@@ -8547,29 +8547,57 @@ function fillGapsWithProperTimes() {
     
     const isWeekly = currentTemplate.type === 'weekly';
     
-    // Separate items with fixed times (imported) from items without times (newly added)
-    const itemsWithTimes = [];
-    const itemsWithoutTimes = [];
+    // ALL existing template items should be preserved
+    const existingItems = [];
+    const newItemsToAdd = [];
     
     console.log('fillGapsWithProperTimes: Total items before:', currentTemplate.items.length);
     
     currentTemplate.items.forEach((item, index) => {
-        if (item.start_time && 
-            item.start_time !== "00:00:00:00" && 
-            item.start_time !== "00:00:00" && 
-            item.start_time !== null) {
-            // Store the original item with its index to preserve it exactly
-            itemsWithTimes.push({item: item, originalIndex: index});
-            console.log('Fixed item found:', item.title || item.file_name, 'at', item.start_time);
+        // Debug logging
+        console.log(`Examining item ${index}:`, {
+            title: item.title || item.file_name,
+            start_time: item.start_time,
+            is_fixed_time: item.is_fixed_time,
+            has_start_time: !!item.start_time
+        });
+        
+        // Check if this is a fixed-time item (like imported meetings) that must be preserved
+        // Also check for "Live Input" items which are always fixed-time events
+        if (item.is_fixed_time === true || item.title === 'Live Input') {
+            // This is a fixed-time item (imported meeting, live event, etc) - MUST preserve it
+            existingItems.push({item: item, originalIndex: index});
+            console.log('✓ Fixed-time item:', item.title || item.file_name, 'at', item.start_time);
+        } else if (!item.start_time || 
+                   item.start_time === "00:00:00:00" || 
+                   item.start_time === "00:00:00" || 
+                   item.start_time === null) {
+            // This is a newly added item without a time yet
+            newItemsToAdd.push(item);
+            console.log('➕ New item to add:', item.title || item.file_name);
         } else {
-            itemsWithoutTimes.push(item);
+            // This is a previously scheduled item that can be rescheduled if needed
+            newItemsToAdd.push(item);
+            console.log('♻️ Reschedulable item:', item.title || item.file_name, 'at', item.start_time);
         }
     });
     
-    console.log('Fixed items:', itemsWithTimes.length, 'New items:', itemsWithoutTimes.length);
+    console.log('Existing template items:', existingItems.length, 'New items to schedule:', newItemsToAdd.length);
     
-    // Sort items with times by their start time
-    itemsWithTimes.sort((a, b) => {
+    // Log the available content for filling
+    if (newItemsToAdd.length > 0) {
+        console.log('\nAvailable content for gap filling:');
+        newItemsToAdd.slice(0, 5).forEach((item, idx) => {
+            const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
+            console.log(`  ${idx}: "${item.title || item.file_name}" - ${formatTimeFromSeconds(duration)} (${duration}s)`);
+        });
+        if (newItemsToAdd.length > 5) {
+            console.log(`  ... and ${newItemsToAdd.length - 5} more items`);
+        }
+    }
+    
+    // Sort existing items by their start time
+    existingItems.sort((a, b) => {
         if (isWeekly) {
             const timeA = parseWeeklyTimeToSeconds(a.item.start_time);
             const timeB = parseWeeklyTimeToSeconds(b.item.start_time);
@@ -8581,19 +8609,123 @@ function fillGapsWithProperTimes() {
         }
     });
     
-    // DON'T clear items - we'll build a new array and replace at the end
-    const newItemsArray = [];
+    // Build new array preserving all existing items and filling gaps with new items
+    const finalItemsArray = [];
     
     if (isWeekly) {
-        fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray);
+        fillWeeklyGapsPreservingExisting(existingItems, newItemsToAdd, finalItemsArray);
     } else {
-        fillDailyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray);
+        fillDailyGapsPreservingExisting(existingItems, newItemsToAdd, finalItemsArray);
     }
     
-    // Now replace the items array with our properly ordered array
-    currentTemplate.items = newItemsArray;
+    // Replace the items array with our properly ordered array
+    currentTemplate.items = finalItemsArray;
     
     console.log('fillGapsWithProperTimes: Total items after:', currentTemplate.items.length);
+}
+
+function fillWeeklyGapsPreservingExisting(existingItems, newItemsToAdd, finalItemsArray) {
+    const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    let newItemIndex = 0;
+    const frameGap = 1.0 / 29.976; // One frame at 29.976 fps
+    
+    // Process each day
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const dayName = days[dayIndex];
+        let currentDayTime = 0; // Start from midnight of this day
+        
+        // Get existing items for this day only
+        const dayExistingItems = existingItems.filter(wrapper => {
+            const itemDay = extractDayFromWeeklyTime(wrapper.item.start_time);
+            return itemDay === dayName;
+        });
+        
+        // Sort existing items for this day by time
+        dayExistingItems.sort((a, b) => {
+            const timeA = extractTimeFromWeeklyTime(a.item.start_time);
+            const timeB = extractTimeFromWeeklyTime(b.item.start_time);
+            return timeA - timeB;
+        });
+        
+        // Process each existing item for this day
+        for (let i = 0; i < dayExistingItems.length; i++) {
+            const existingItem = dayExistingItems[i].item;
+            const existingStartTime = extractTimeFromWeeklyTime(existingItem.start_time);
+            
+            // Fill gap before this existing item
+            const gapEndTime = existingStartTime;
+            
+            while (currentDayTime < gapEndTime && newItemIndex < newItemsToAdd.length) {
+                let foundFittingItem = false;
+                
+                // Try to find an item that fits in the remaining gap
+                for (let j = newItemIndex; j < newItemsToAdd.length; j++) {
+                    const newItem = newItemsToAdd[j];
+                    const duration = parseFloat(newItem.duration_seconds || newItem.file_duration || 0);
+                    
+                    // Check if this item fits in the remaining gap (with frame gap)
+                    if (currentDayTime + duration + frameGap <= gapEndTime) {
+                        newItem.start_time = formatWeeklyTime(dayName, currentDayTime);
+                        newItem.end_time = formatWeeklyTime(dayName, currentDayTime + duration);
+                        finalItemsArray.push(newItem);
+                        currentDayTime += duration + frameGap;
+                        
+                        // Remove this item from the array by swapping with newItemIndex and incrementing
+                        if (j !== newItemIndex) {
+                            newItemsToAdd[j] = newItemsToAdd[newItemIndex];
+                        }
+                        newItemIndex++;
+                        foundFittingItem = true;
+                        break;
+                    }
+                }
+                
+                // If no item fits, we're done trying to fill this gap
+                if (!foundFittingItem) {
+                    const remainingGap = gapEndTime - currentDayTime;
+                    if (remainingGap > 600) { // Log gaps larger than 10 minutes
+                        console.warn(`⚠️ Gap of ${formatTimeFromSeconds(remainingGap)} remains before "${existingItem.title || existingItem.file_name}" at ${existingItem.start_time}`);
+                    } else if (remainingGap > 60) { // Gaps between 1-10 minutes are acceptable
+                        console.log(`Acceptable gap of ${formatTimeFromSeconds(remainingGap)} before "${existingItem.title || existingItem.file_name}" at ${existingItem.start_time}`);
+                    }
+                    break;
+                }
+            }
+            
+            // Add the existing item (preserve it exactly as is)
+            finalItemsArray.push(existingItem);
+            
+            // Update current time to end of existing item
+            const existingDuration = parseFloat(existingItem.duration_seconds || existingItem.file_duration || 0);
+            currentDayTime = existingStartTime + existingDuration + frameGap;
+        }
+        
+        // Fill remaining time in this day after all existing items
+        while (currentDayTime < 24 * 3600 && newItemIndex < newItemsToAdd.length) {
+            const newItem = newItemsToAdd[newItemIndex];
+            const duration = parseFloat(newItem.duration_seconds || newItem.file_duration || 0);
+            
+            // Check if item fits within remaining day time
+            if (currentDayTime + duration + frameGap <= 24 * 3600) {
+                newItem.start_time = formatWeeklyTime(dayName, currentDayTime);
+                newItem.end_time = formatWeeklyTime(dayName, currentDayTime + duration);
+                finalItemsArray.push(newItem);
+                currentDayTime += duration + frameGap;
+                newItemIndex++;
+            } else {
+                // Item doesn't fit in remaining time today, skip to next day
+                break;
+            }
+        }
+        
+        // Log any remaining gap at end of this day
+        const remainingDayTime = 24 * 3600 - currentDayTime;
+        if (remainingDayTime > 600) { // Log gaps larger than 10 minutes
+            console.warn(`⚠️ Gap of ${formatTimeFromSeconds(remainingDayTime)} remains at end of ${dayName}`);
+        } else if (remainingDayTime > 60) { // Gaps between 1-10 minutes are acceptable
+            console.log(`Acceptable gap of ${formatTimeFromSeconds(remainingDayTime)} at end of ${dayName}`);
+        }
+    }
 }
 
 function fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
@@ -8663,6 +8795,119 @@ function fillWeeklyGaps(itemsWithTimes, itemsWithoutTimes, newItemsArray) {
                 const fixedDuration = parseFloat(fixedItem.duration_seconds || 0);
                 currentDayTime = fixedStartTime + fixedDuration + frameGap;
             }
+        }
+    }
+}
+
+function fillDailyGapsPreservingExisting(existingItems, newItemsToAdd, finalItemsArray) {
+    // Fill gaps between existing items with new content
+    let newItemIndex = 0;
+    let currentTime = 0; // Start from midnight
+    const frameGap = 1.0 / 29.976; // One frame at 29.976 fps
+    
+    // Process each existing item and fill gaps before it
+    for (let i = 0; i < existingItems.length; i++) {
+        const existingItem = existingItems[i].item;
+        const existingStartTime = parseTimeToSeconds(existingItem.start_time);
+        
+        console.log(`\n📍 Processing fixed item ${i}: "${existingItem.title}" at ${existingItem.start_time} (${existingStartTime}s)`);
+        console.log(`   Current time position: ${formatTimeFromSeconds(currentTime)} (${currentTime}s)`);
+        
+        // Fill gap before this existing item
+        const gapEndTime = existingStartTime;
+        const skippedItems = [];
+        
+        while (currentTime < gapEndTime && newItemIndex < newItemsToAdd.length) {
+            let foundFittingItem = false;
+            
+            // Try to find an item that fits in the remaining gap
+            for (let j = newItemIndex; j < newItemsToAdd.length; j++) {
+                const newItem = newItemsToAdd[j];
+                const duration = parseFloat(newItem.duration_seconds || newItem.file_duration || 0);
+                
+                // Check if this item fits in the remaining gap (with frame gap)
+                if (currentTime + duration + frameGap <= gapEndTime) {
+                    newItem.start_time = formatTimeFromSeconds(currentTime);
+                    newItem.end_time = formatTimeFromSeconds(currentTime + duration);
+                    finalItemsArray.push(newItem);
+                    currentTime += duration + frameGap;
+                    
+                    // Remove this item from the array by swapping with newItemIndex and incrementing
+                    if (j !== newItemIndex) {
+                        newItemsToAdd[j] = newItemsToAdd[newItemIndex];
+                    }
+                    newItemIndex++;
+                    foundFittingItem = true;
+                    break;
+                }
+            }
+            
+            // If no item fits, we're done trying to fill this gap
+            if (!foundFittingItem) {
+                const remainingGap = gapEndTime - currentTime;
+                if (remainingGap > 600) { // Log gaps larger than 10 minutes
+                    console.warn(`⚠️ Gap of ${formatTimeFromSeconds(remainingGap)} remains before "${existingItem.title || existingItem.file_name}" at ${existingItem.start_time}`);
+                } else if (remainingGap > 60) { // Gaps between 1-10 minutes are acceptable
+                    console.log(`Acceptable gap of ${formatTimeFromSeconds(remainingGap)} before "${existingItem.title || existingItem.file_name}" at ${existingItem.start_time}`);
+                }
+                break;
+            }
+        }
+        
+        // Add the existing item (preserve it exactly as is)
+        finalItemsArray.push(existingItem);
+        console.log(`   ✓ Added fixed item to final array`);
+        
+        // Update current time to end of existing item
+        let existingDuration = parseFloat(existingItem.duration_seconds || existingItem.file_duration || 0);
+        
+        // If duration is 0 but we have end_time, calculate duration
+        if (existingDuration === 0 && existingItem.end_time) {
+            const endTime = parseTimeToSeconds(existingItem.end_time);
+            existingDuration = endTime - existingStartTime;
+            console.log(`   Calculated duration from end_time: ${existingDuration}s`);
+        }
+        
+        currentTime = existingStartTime + existingDuration + frameGap;
+        console.log(`   Duration: ${existingDuration}s, New current time: ${formatTimeFromSeconds(currentTime)} (${currentTime}s)`);
+    }
+    
+    // Fill any remaining time after the last existing item
+    const endOfDay = 24 * 60 * 60;
+    while (currentTime < endOfDay && newItemIndex < newItemsToAdd.length) {
+        let foundFittingItem = false;
+        
+        // Try to find an item that fits in the remaining time
+        for (let j = newItemIndex; j < newItemsToAdd.length; j++) {
+            const newItem = newItemsToAdd[j];
+            const duration = parseFloat(newItem.duration_seconds || newItem.file_duration || 0);
+            
+            // Check if this item fits in the remaining day time
+            if (currentTime + duration + frameGap <= endOfDay) {
+                newItem.start_time = formatTimeFromSeconds(currentTime);
+                newItem.end_time = formatTimeFromSeconds(currentTime + duration);
+                finalItemsArray.push(newItem);
+                currentTime += duration + frameGap;
+                
+                // Remove this item from the array by swapping with newItemIndex and incrementing
+                if (j !== newItemIndex) {
+                    newItemsToAdd[j] = newItemsToAdd[newItemIndex];
+                }
+                newItemIndex++;
+                foundFittingItem = true;
+                break;
+            }
+        }
+        
+        // If no item fits, we're done
+        if (!foundFittingItem) {
+            const remainingTime = endOfDay - currentTime;
+            if (remainingTime > 600) { // Log gaps larger than 10 minutes
+                console.warn(`⚠️ Gap of ${formatTimeFromSeconds(remainingTime)} remains at end of day starting at ${formatTimeFromSeconds(currentTime)}`);
+            } else if (remainingTime > 60) { // Gaps between 1-10 minutes are acceptable
+                console.log(`Acceptable gap of ${formatTimeFromSeconds(remainingTime)} at end of day starting at ${formatTimeFromSeconds(currentTime)}`);
+            }
+            break;
         }
     }
 }
@@ -12291,7 +12536,8 @@ function parseScheduleTemplate(templateContent) {
             currentItem = {
                 file_path: trimmedLine.substring(5),
                 title: 'Live Input',
-                duration_seconds: 0
+                duration_seconds: 0,
+                is_fixed_time: true  // Mark as fixed-time event that cannot be moved
             };
         } else if (currentItem && trimmedLine.startsWith('start=')) {
             currentItem.start_time = trimmedLine.substring(6);

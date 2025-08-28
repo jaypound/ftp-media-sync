@@ -4229,8 +4229,69 @@ def fill_template_gaps():
                             break
                     
                     if not found_fit:
-                        # No content fits in this gap, move to next gap
-                        break
+                        # Current category doesn't have content that fits
+                        # Try all other categories to find content that fits this gap
+                        logger.info(f"No {duration_category} content fits remaining gap of {remaining/60:.1f} minutes")
+                        logger.info(f"Searching all categories for content that fits...")
+                        
+                        best_fit = None
+                        best_duration = 0
+                        
+                        # Define category priority for small gaps (prefer shorter content)
+                        gap_minutes = remaining / 60
+                        if gap_minutes < 2:
+                            category_priority = ['id', 'spots', 'short_form', 'long_form']
+                        elif gap_minutes < 20:
+                            category_priority = ['spots', 'short_form', 'id', 'long_form']
+                        else:
+                            category_priority = ['short_form', 'spots', 'long_form', 'id']
+                        
+                        # Try each category in priority order
+                        for try_category in category_priority:
+                            if try_category == duration_category:
+                                continue  # Already tried this category
+                            
+                            for content in available_content:
+                                # Skip content from Recordings folder
+                                file_path = content.get('file_path', '')
+                                if '/mnt/main/Recordings' in file_path:
+                                    continue
+                                
+                                # Check if content is in the category we're trying
+                                if content.get('duration_category') != try_category:
+                                    continue
+                                
+                                # Check duration
+                                content_duration = float(content.get('duration_seconds', content.get('file_duration', 0)))
+                                if content_duration <= remaining - safety_margin:
+                                    # Check replay delay
+                                    content_id = content.get('id')
+                                    can_schedule = True
+                                    
+                                    if content_id in asset_schedule_times:
+                                        last_times = asset_schedule_times[content_id]
+                                        replay_delay_hours = replay_delays.get(try_category, 24)
+                                        replay_delay_seconds = replay_delay_hours * 3600
+                                        
+                                        for last_time in last_times:
+                                            time_since_last = current_position - last_time
+                                            if time_since_last < replay_delay_seconds:
+                                                can_schedule = False
+                                                break
+                                    
+                                    if can_schedule and content_duration > best_duration:
+                                        # Found a better fitting item
+                                        best_fit = content
+                                        best_duration = content_duration
+                        
+                        if best_fit:
+                            selected = best_fit
+                            duration = best_duration
+                            logger.info(f"Found {best_fit.get('duration_category')} content '{best_fit.get('content_title', best_fit.get('file_name'))}' ({duration/60:.1f} min) that fits gap")
+                        else:
+                            logger.warning(f"No content from any category fits remaining gap of {remaining/60:.1f} minutes")
+                            # Move to next gap
+                            break
             
                 # Check for overlap with original items before adding
                 new_item_start = current_position
