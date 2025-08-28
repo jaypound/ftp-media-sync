@@ -1142,8 +1142,15 @@ class PostgreSQLScheduler:
             self._config_loaded = False
             self._load_config_if_needed()
             
-            # Parse start date and ensure it's a Monday
+            # Parse start date and ensure it's a Sunday
             start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+            
+            # Adjust to previous Sunday if not already Sunday
+            if start_date_obj.weekday() != 6:  # 6 is Sunday in Python
+                # Go back to the previous Sunday
+                days_since_sunday = (start_date_obj.weekday() + 1) % 7
+                start_date_obj = start_date_obj - timedelta(days=days_since_sunday)
+                logger.info(f"Adjusted start date to Sunday: {start_date_obj.strftime('%Y-%m-%d')}")
             
             created_schedules = []
             failed_days = []

@@ -1,24 +1,4 @@
-/* Scheduling Module JavaScript */
-/* All scheduling-specific functions with proper namespacing */
 
-// Initialize Scheduling Module
-function schedulingInit() {
-    console.log('Initializing Scheduling module...');
-    
-    // Override viewScheduleDetails to add debugging
-    const originalViewScheduleDetails = window.viewScheduleDetails;
-    window.viewScheduleDetails = function(scheduleId, date) {
-        console.log('viewScheduleDetails called with:', { scheduleId, date });
-        if (!date) {
-            console.error('Date parameter is missing!');
-            window.showNotification('Error: Schedule date is missing', 'error');
-            return;
-        }
-        return originalViewScheduleDetails.call(this, scheduleId, date);
-    };
-}
-
-// Display schedule details with proper CSS classes
 function schedulingDisplayScheduleDetails(schedule) {
     const scheduleDisplay = document.getElementById('scheduleDisplay');
     
@@ -173,44 +153,43 @@ function schedulingDisplayScheduleDetails(schedule) {
                         <button class="button danger small" onclick="deleteScheduleItem(${schedule.id}, ${item.id}, ${index})" title="Delete item">
                             <i class="fas fa-trash"></i>
                         </button>
-                        <button class="button secondary small" onclick="moveScheduleItem(${schedule.id}, ${index}, 'up')" ${index === 0 ? 'disabled' : ''} title="Move up">
-                            <i class="fas fa-arrow-up"></i>
-                        </button>
-                        <button class="button secondary small" onclick="moveScheduleItem(${schedule.id}, ${index}, 'down')" ${index === schedule.items.length - 1 ? 'disabled' : ''} title="Move down">
-                            <i class="fas fa-arrow-down"></i>
-                        </button>
                     </span>
                 </div>
             `;
         });
     } else {
-        html += '<div class="scheduling-schedule-no-items">No scheduled items found.</div>';
+        html += `<p>No items in this schedule.</p>`;
     }
     
     html += '</div>';
     
+    // Add export and delete buttons at the bottom
+    html += `
+        <div class="scheduling-schedule-actions">
+            <button class="button secondary" onclick="exportSchedule()">
+                <i class="fas fa-download"></i> Export Schedule
+            </button>
+            <button class="button danger" onclick="deleteScheduleById(${schedule.id}, '${airDate}')">
+                <i class="fas fa-trash"></i> Delete This Schedule
+            </button>
+        </div>
+    `;
+    
     scheduleDisplay.innerHTML = html;
+    
+    // Store the schedule globally for export function to use
+    currentSchedule = schedule;
 }
 
-// Display schedule list with proper CSS classes
+// Function to show list of schedules
 function schedulingDisplayScheduleList(schedules) {
     const scheduleDisplay = document.getElementById('scheduleDisplay');
     
     if (!scheduleDisplay) return;
     
-    if (!schedules || schedules.length === 0) {
-        scheduleDisplay.innerHTML = '<p>📅 No schedules found. Create a schedule to get started.</p>';
-        return;
-    }
-    
-    let html = `
-        <div class="scheduling-schedule-list-header">
-            <h3>📅 All Schedules (${schedules.length})</h3>
-        </div>
-    `;
-    
-    // Sort schedules by air date (newest first)
-    schedules.sort((a, b) => new Date(b.air_date) - new Date(a.air_date));
+    let html = '<div class="scheduling-schedules-list">';
+    html += '<h3>All Schedules</h3>';
+    html += '<div class="scheduling-schedule-cards">';
     
     schedules.forEach(schedule => {
         const airDate = schedule.air_date ? schedule.air_date.split('T')[0] : 'Unknown';
@@ -223,34 +202,31 @@ function schedulingDisplayScheduleList(schedules) {
             hour12: true
         });
         const totalDurationHours = schedule.total_duration_hours || 0;
-        const itemCount = schedule.total_items || 0;
+        const isWeeklySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('weekly');
+        const isMonthlySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('monthly');
         
-        // Determine schedule type based on name
-        let scheduleType = '📅 Daily';
-        let typeClass = 'daily';
-        if (schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('weekly')) {
-            scheduleType = '📆 Weekly';
-            typeClass = 'weekly';
-        } else if (schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('monthly')) {
-            scheduleType = '🗓️ Monthly';
-            typeClass = 'monthly';
-        }
+        let scheduleIcon = '📅';
+        if (isWeeklySchedule) scheduleIcon = '📆';
+        if (isMonthlySchedule) scheduleIcon = '🗓️';
         
         html += `
-            <div class="scheduling-schedule-list-item schedule-type-${typeClass}">
-                <div class="scheduling-schedule-info">
-                    <h4>${scheduleType} ${schedule.schedule_name || 'Schedule'}</h4>
-                    <p><strong>Air Date:</strong> ${airDate} | <strong>Items:</strong> ${itemCount} | <strong>Duration:</strong> ${totalDurationHours.toFixed(1)} hours</p>
-                    <p><small>Created: ${createdAt}</small></p>
+            <div class="scheduling-schedule-card">
+                <div class="scheduling-schedule-card-header">
+                    <h4>${scheduleIcon} ${schedule.schedule_name || 'Daily Schedule'}</h4>
+                    <span class="scheduling-schedule-date">${airDate}</span>
                 </div>
-                <div class="scheduling-schedule-actions">
+                <div class="scheduling-schedule-card-content">
+                    <p><strong>Items:</strong> ${schedule.total_items || 0} | <strong>Duration:</strong> ${totalDurationHours.toFixed(1)}h</p>
+                    <p><strong>Created:</strong> ${createdAt}</p>
+                </div>
+                <div class="scheduling-schedule-card-actions">
                     <button class="button primary small" onclick="viewScheduleDetails(${schedule.id}, '${airDate}')">
                         <i class="fas fa-eye"></i> View
                     </button>
                     <button class="button secondary small" onclick="exportSchedule(${schedule.id}, '${airDate}')">
                         <i class="fas fa-download"></i> Export
                     </button>
-                    <button class="button danger small" onclick="deleteSchedule(${schedule.id}, '${airDate}')">
+                    <button class="button danger small" onclick="deleteScheduleById(${schedule.id}, '${airDate}')">
                         <i class="fas fa-trash"></i> Delete
                     </button>
                 </div>
@@ -258,10 +234,11 @@ function schedulingDisplayScheduleList(schedules) {
         `;
     });
     
+    html += '</div></div>';
+    
     scheduleDisplay.innerHTML = html;
 }
 
-// Export the functions to global scope for compatibility
-window.schedulingInit = schedulingInit;
+// Export functions to global scope
 window.schedulingDisplayScheduleDetails = schedulingDisplayScheduleDetails;
 window.schedulingDisplayScheduleList = schedulingDisplayScheduleList;
