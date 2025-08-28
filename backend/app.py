@@ -6589,6 +6589,64 @@ def clear_content_expirations():
         return jsonify({'success': False, 'message': error_msg})
 
 
+@app.route('/api/update-content-expiration', methods=['POST'])
+def update_content_expiration():
+    """Update expiration date for a single content item"""
+    logger.info("=== UPDATE CONTENT EXPIRATION REQUEST ===")
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        expiry_date = data.get('expiry_date')
+        
+        if not asset_id:
+            return jsonify({
+                'success': False,
+                'message': 'asset_id is required'
+            }), 400
+        
+        logger.info(f"Updating expiration date for asset {asset_id} to {expiry_date}")
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor() as cur:
+                if expiry_date:
+                    # Update or insert the expiration date
+                    cur.execute("""
+                        INSERT INTO scheduling_metadata (asset_id, content_expiry_date)
+                        VALUES (%s, %s)
+                        ON CONFLICT (asset_id) 
+                        DO UPDATE SET content_expiry_date = EXCLUDED.content_expiry_date
+                    """, (asset_id, expiry_date))
+                else:
+                    # Clear the expiration date (set to NULL)
+                    cur.execute("""
+                        UPDATE scheduling_metadata 
+                        SET content_expiry_date = NULL 
+                        WHERE asset_id = %s
+                    """, (asset_id,))
+                
+                conn.commit()
+        
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+                
+        logger.info(f"Successfully updated expiration date for asset {asset_id}")
+        return jsonify({
+            'success': True,
+            'message': 'Expiration date updated successfully'
+        })
+        
+    except Exception as e:
+        error_msg = f"Update content expiration error: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        }), 500
+
 @app.route('/api/content-expiration-stats', methods=['GET'])
 def get_content_expiration_stats():
     """Get statistics about active and expired content"""

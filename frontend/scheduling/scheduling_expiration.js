@@ -511,6 +511,84 @@ async function schedulingClearAllExpirations() {
     }
 }
 
+// Edit individual content expiration date
+async function schedulingEditExpiration(assetId, currentExpiry) {
+    // Create a simple date input modal
+    const today = new Date().toISOString().split('T')[0];
+    const currentDate = currentExpiry ? new Date(currentExpiry).toISOString().split('T')[0] : '';
+    
+    const modalHtml = `
+        <div class="modal" id="editExpirationModal" style="display: block;">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>Edit Expiration Date</h3>
+                    <button class="modal-close" onclick="document.getElementById('editExpirationModal').remove()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="expirationDate">Expiration Date:</label>
+                        <input type="date" id="expirationDate" value="${currentDate}" min="${today}" class="form-control">
+                        <small class="form-text text-muted">Leave empty to clear expiration date</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="button secondary" onclick="document.getElementById('editExpirationModal').remove()">Cancel</button>
+                    <button class="button primary" onclick="schedulingSaveIndividualExpiration('${assetId}')">Save</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Focus on the date input
+    document.getElementById('expirationDate').focus();
+}
+
+// Save individual content expiration date
+async function schedulingSaveIndividualExpiration(assetId) {
+    const dateInput = document.getElementById('expirationDate');
+    const expiryDate = dateInput.value;
+    
+    try {
+        const response = await fetch('/api/update-content-expiration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                asset_id: assetId,
+                expiry_date: expiryDate || null
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (window.showNotification) {
+                window.showNotification('Expiration date updated successfully', 'success');
+            }
+            
+            // Remove the modal
+            document.getElementById('editExpirationModal').remove();
+            
+            // Reload available content to show the updated expiration date
+            if (window.loadAvailableContent) {
+                window.loadAvailableContent();
+            }
+        } else {
+            if (window.showNotification) {
+                window.showNotification(`Failed to update expiration date: ${result.message}`, 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Error updating expiration date:', error);
+        if (window.showNotification) {
+            window.showNotification('Error updating expiration date', 'error');
+        }
+    }
+}
+
 // Export functions to global scope
 window.schedulingExpirationInit = schedulingExpirationInit;
 window.schedulingShowExpirationModal = schedulingShowExpirationModal;
@@ -520,6 +598,8 @@ window.schedulingGetContentCounts = schedulingGetContentCounts;
 window.schedulingSortByExpiration = schedulingSortByExpiration;
 window.schedulingDisplayAvailableContentWithExpiration = schedulingDisplayAvailableContentWithExpiration;
 window.schedulingClearAllExpirations = schedulingClearAllExpirations;
+window.schedulingEditExpiration = schedulingEditExpiration;
+window.schedulingSaveIndividualExpiration = schedulingSaveIndividualExpiration;
 
 // Initialize when loaded
 if (document.readyState === 'loading') {

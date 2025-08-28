@@ -4286,8 +4286,8 @@ function displayAvailableContent() {
                 <span class="content-score">${engagementScore}%</span>
                 <span class="content-expiration ${expirationClass}">${expirationDisplay}</span>
                 <div class="content-actions">
-                    <button class="button small primary" onclick="addToSchedule('${contentId}')" title="Add to Schedule">
-                        <i class="fas fa-calendar-plus"></i>
+                    <button class="button small primary" onclick="schedulingEditExpiration('${contentId}', '${content.scheduling?.content_expiry_date || ''}')" title="Edit Expiration Date">
+                        <i class="fas fa-calendar-alt"></i>
                     </button>`;
         
         // Show add to template button if template is loaded
