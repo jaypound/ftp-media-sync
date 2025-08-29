@@ -543,6 +543,98 @@
     }
 }
 
+/* Compact Schedule List */
+.scheduling-schedules-list.compact h3 {
+    margin-bottom: 1rem;
+    color: var(--text-primary, #333);
+}
+
+.scheduling-schedule-table {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.scheduling-schedule-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background-color: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.scheduling-schedule-row:hover {
+    border-color: var(--primary-color, #2c3e50);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.scheduling-schedule-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.scheduling-schedule-info {
+    flex: 1;
+}
+
+.scheduling-schedule-title {
+    font-weight: 600;
+    color: var(--text-primary, #333);
+    font-size: 0.9375rem;
+}
+
+.scheduling-schedule-meta {
+    font-size: 0.8125rem;
+    color: var(--text-secondary, #666);
+    margin-top: 0.125rem;
+}
+
+.scheduling-schedule-actions {
+    display: flex;
+    gap: 0.375rem;
+    flex-shrink: 0;
+}
+
+.scheduling-schedule-actions .button.icon-only {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.scheduling-schedule-actions .button.icon-only i {
+    font-size: 0.875rem;
+}
+
+/* Dark Mode for Compact List */
+@media (prefers-color-scheme: dark) {
+    .scheduling-schedules-list.compact h3 {
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-schedule-row {
+        background-color: var(--card-bg-dark, #1a1a1a);
+        border-color: var(--border-dark, #333);
+    }
+    
+    .scheduling-schedule-row:hover {
+        border-color: var(--primary-color-light, #5a7a9a);
+    }
+    
+    .scheduling-schedule-title {
+        color: var(--text-primary-dark, #e0e0e0);
+    }
+    
+    .scheduling-schedule-meta {
+        color: var(--text-secondary-dark, #999);
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .scheduling-schedule-table-header,

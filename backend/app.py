@@ -2564,6 +2564,10 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             except:
                 metadata = {}
         
+        # Debug logging for live inputs
+        if item.get('asset_id') == 300:
+            logger.info(f"Item {idx} - asset_id=300, metadata type: {type(metadata)}, metadata: {metadata}")
+        
         # Calculate end time
         # Handle different time formats
         if isinstance(start_time, str):
@@ -2731,8 +2735,8 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             # but use exact start times from previous items to avoid precision issues
             
             # Check if we have metadata with day information
-            day_prefix = metadata.get('day_prefix', '')
-            day_offset = metadata.get('day_offset', 0)
+            day_prefix = metadata.get('day_prefix', '') if metadata else ''
+            day_offset = metadata.get('day_offset', 0) if metadata else 0
             
             # Parse the actual start time from the database
             item_day_index = day_offset  # Use metadata if available
@@ -2957,8 +2961,40 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         # Get the file path from the database
         file_path = item.get('file_path', '')
         
+        # Check if this is a live input (placeholder asset or metadata flag)
+        # Live inputs use asset_id=300 (placeholder) or have is_live_input in metadata
+        if item.get('asset_id') == 300 or (metadata and metadata.get('is_live_input')):
+            # This is a live input, get file_path from metadata
+            if metadata:
+                file_path = metadata.get('file_path', '')
+                if not file_path and metadata.get('title'):
+                    # Try to determine SDI input from title
+                    title = metadata.get('title', '')
+                    if 'Committee Room 1' in title:
+                        file_path = '/mnt/main/tv/inputs/2-SDI in'
+                    elif 'Committee Room 2' in title:
+                        file_path = '/mnt/main/tv/inputs/3-SDI in'
+                    elif 'Council Chamber' in title:
+                        file_path = '/mnt/main/tv/inputs/1-SDI in'
+                logger.info(f"Live input item detected: {metadata.get('title')} - {file_path}")
+            else:
+                # No metadata but asset_id=300, try to get from content_title
+                title = item.get('content_title', '')
+                if 'Committee Room 1' in title:
+                    file_path = '/mnt/main/tv/inputs/2-SDI in'
+                elif 'Committee Room 2' in title:
+                    file_path = '/mnt/main/tv/inputs/3-SDI in'
+                elif 'Council Chamber' in title:
+                    file_path = '/mnt/main/tv/inputs/1-SDI in'
+                logger.info(f"Live input item detected (no metadata): {title} - {file_path}")
+        
+        # Handle None file_path
+        if not file_path:
+            logger.error(f"No file path for item at index {idx}: asset_id={item.get('asset_id')}, title={item.get('content_title')}")
+            file_path = '/mnt/main/ATL26 On-Air Content/MISSING_FILE.mp4'
+        
         # Check if this is an SDI input (live broadcast)
-        if file_path.startswith('/mnt/main/tv/inputs/') and 'SDI in' in file_path:
+        if file_path.startswith('/mnt/main/tv/inputs/') and 'SDI' in file_path:
             # This is a live SDI input - keep the path as is
             pass
         # If the path doesn't start with the expected prefix, we need to construct it
@@ -2991,10 +3027,13 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         # Explicitly use TAB character (ASCII 9) to ensure it's not converted
         TAB = chr(9)
         lines.append(f"{TAB}item={file_path}")
-        lines.append(f"{TAB}loop=0")
         
-        # Use GUID if available from assets
-        guid = item.get('guid', str(uuid.uuid4()))
+        # Get loop value from metadata for live inputs, default to 0
+        loop_value = (metadata.get('loop', '0') if metadata and metadata.get('is_live_input') else '0')
+        lines.append(f"{TAB}loop={loop_value}")
+        
+        # Use GUID if available from assets or metadata
+        guid = (metadata.get('guid') if metadata and metadata.get('is_live_input') else item.get('guid', str(uuid.uuid4())))
         lines.append(f"{TAB}guid={{{guid}}}")
         
         # Daily format times
@@ -3414,6 +3453,43 @@ def create_schedule_from_template():
                 # Add items for this day
                 for item in day_items:
                     asset_id = item.get('asset_id')
+                    is_live_input = item.get('is_live_input', False) or item.get('title', '').startswith('Live Input')
+                    file_path = item.get('file_path', '')
+                    
+                    # Check if this is a Live Input item (SDI input)
+                    if is_live_input or '/mnt/main/tv/inputs/' in file_path:
+                        # This is a live input for weekly schedule
+                        start_time = item.get('start_time', '00:00:00')
+                        
+                        # Remove day prefix from start time if present
+                        if isinstance(start_time, str) and ' ' in start_time:
+                            parts = start_time.split(' ', 1)
+                            if any(day in parts[0].lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
+                                start_time = parts[1] if len(parts) > 1 else '00:00:00'
+                        
+                        # For live inputs, create special metadata
+                        live_metadata = {
+                            'is_live_input': True,
+                            'file_path': file_path,
+                            'title': item.get('title', 'Live Input'),
+                            'guid': item.get('guid', ''),
+                            'loop': item.get('loop', '0'),
+                            'day_prefix': day_prefix,
+                            'day_offset': day_offset
+                        }
+                        
+                        scheduler_postgres.add_item_to_schedule(
+                            schedule_id,
+                            0,  # Special asset_id for live inputs
+                            order_index=order_index,
+                            scheduled_start_time=start_time,
+                            scheduled_duration_seconds=item.get('duration_seconds', 0),
+                            metadata=live_metadata
+                        )
+                        added_count += 1
+                        order_index += 1
+                        logger.info(f"Added weekly live input item: {file_path} on {day_name}")
+                        continue
                     
                     if asset_id and isinstance(asset_id, str) and len(asset_id) == 24 and all(c in '0123456789abcdef' for c in asset_id.lower()):
                         logger.warning(f"Asset ID {asset_id} appears to be a MongoDB ObjectId, not a PostgreSQL integer")
@@ -3514,11 +3590,48 @@ def create_schedule_from_template():
         skipped_count = 0
         
         # Now add only the template items
+        logger.info(f"Adding {len(items)} items to schedule")
         for idx, item in enumerate(items):
+            logger.info(f"Item {idx}: title='{item.get('title') or item.get('content_title') or item.get('file_name')}', start_time='{item.get('start_time')}', asset_id={item.get('asset_id')}")
+            
             asset_id = item.get('asset_id')
+            is_live_input = item.get('is_live_input', False) or item.get('title', '').startswith('Live Input')
+            file_path = item.get('file_path', '')
             
             # Debug logging
-            logger.info(f"Processing item {idx}: asset_id={asset_id}, type={type(asset_id)}")
+            logger.info(f"Processing item {idx}: asset_id={asset_id}, is_live_input={is_live_input}, file_path={file_path}")
+            
+            # Check if this is a Live Input item (SDI input)
+            if is_live_input or '/mnt/main/tv/inputs/' in file_path:
+                # This is a live input, add it directly without asset_id
+                start_time = item.get('start_time', '00:00:00')
+                duration = item.get('duration_seconds', 0)
+                
+                logger.info(f"Processing Live Input item {idx}: title='{item.get('title')}', start_time='{start_time}', duration={duration}")
+                
+                # For live inputs, we need to add them as special items
+                # Create a placeholder entry in the schedule_items table
+                # The file_path will be stored in metadata
+                metadata = {
+                    'is_live_input': True,
+                    'file_path': file_path,
+                    'title': item.get('title', 'Live Input'),
+                    'guid': item.get('guid', ''),
+                    'loop': item.get('loop', '0')
+                }
+                
+                # Use a special asset_id (0) for live inputs
+                scheduler_postgres.add_item_to_schedule(
+                    schedule_id,
+                    0,  # Special asset_id for live inputs
+                    order_index=idx,
+                    scheduled_start_time=start_time,
+                    scheduled_duration_seconds=duration,
+                    metadata=metadata
+                )
+                added_count += 1
+                logger.info(f"Added live input item {idx}: {file_path} at {start_time} for {duration}s")
+                continue
             
             # Check if asset_id looks like a MongoDB ObjectId (24 hex chars)
             if asset_id and isinstance(asset_id, str) and len(asset_id) == 24 and all(c in '0123456789abcdef' for c in asset_id.lower()):
@@ -3531,12 +3644,15 @@ def create_schedule_from_template():
                     # Ensure asset_id is an integer
                     asset_id = int(asset_id)
                     
+                    # Use the time from the template if available
+                    start_time = item.get('start_time', '00:00:00')
+                    
                     scheduler_postgres.add_item_to_schedule(
                         schedule_id,
                         asset_id,
                         order_index=idx,
-                        scheduled_start_time='00:00:00',  # Will be recalculated
-                        scheduled_duration_seconds=item.get('scheduled_duration_seconds', 0)
+                        scheduled_start_time=start_time,
+                        scheduled_duration_seconds=item.get('scheduled_duration_seconds', 0) or item.get('duration_seconds', 0)
                     )
                     added_count += 1
                     logger.info(f"Added item {idx} with asset_id {asset_id}")
@@ -3550,8 +3666,9 @@ def create_schedule_from_template():
                 logger.warning(f"Skipping item {idx} - no asset_id")
                 skipped_count += 1
         
-        # Recalculate start times
-        scheduler_postgres.recalculate_schedule_times(schedule_id)
+        # Don't recalculate times - preserve the times from the template
+        # scheduler_postgres.recalculate_schedule_times(schedule_id)
+        logger.info("Preserving template times - not recalculating")
             
         message = f'Schedule created with {added_count} items'
         if skipped_count > 0:

@@ -187,16 +187,15 @@ function schedulingDisplayScheduleList(schedules) {
     
     if (!scheduleDisplay) return;
     
-    let html = '<div class="scheduling-schedules-list">';
+    let html = '<div class="scheduling-schedules-list compact">';
     html += '<h3>All Schedules</h3>';
-    html += '<div class="scheduling-schedule-cards">';
+    html += '<div class="scheduling-schedule-table">';
     
     schedules.forEach(schedule => {
         const airDate = schedule.air_date ? schedule.air_date.split('T')[0] : 'Unknown';
-        const createdAt = new Date(schedule.created_date || schedule.created_at).toLocaleString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
+        const airDateObj = new Date(airDate + 'T12:00:00');
+        const dayName = airDateObj.toLocaleDateString('en-US', { weekday: 'long' });
+        const createdTime = new Date(schedule.created_date || schedule.created_at).toLocaleTimeString('en-US', {
             hour: 'numeric',
             minute: '2-digit',
             hour12: true
@@ -210,24 +209,21 @@ function schedulingDisplayScheduleList(schedules) {
         if (isMonthlySchedule) scheduleIcon = '🗓️';
         
         html += `
-            <div class="scheduling-schedule-card">
-                <div class="scheduling-schedule-card-header">
-                    <h4>${scheduleIcon} ${schedule.schedule_name || 'Daily Schedule'}</h4>
-                    <span class="scheduling-schedule-date">${airDate}</span>
+            <div class="scheduling-schedule-row">
+                <div class="scheduling-schedule-icon">${scheduleIcon}</div>
+                <div class="scheduling-schedule-info">
+                    <div class="scheduling-schedule-title">${schedule.schedule_name || 'Schedule'} for ${airDate}</div>
+                    <div class="scheduling-schedule-meta">${dayName} • ${schedule.total_items || 0} items • ${totalDurationHours.toFixed(1)}h • Created: ${createdTime}</div>
                 </div>
-                <div class="scheduling-schedule-card-content">
-                    <p><strong>Items:</strong> ${schedule.total_items || 0} | <strong>Duration:</strong> ${totalDurationHours.toFixed(1)}h</p>
-                    <p><strong>Created:</strong> ${createdAt}</p>
-                </div>
-                <div class="scheduling-schedule-card-actions">
-                    <button class="button primary small" onclick="viewScheduleDetails(${schedule.id}, '${airDate}')">
-                        <i class="fas fa-eye"></i> View
+                <div class="scheduling-schedule-actions">
+                    <button class="button primary small icon-only" onclick="viewScheduleDetails(${schedule.id}, '${airDate}')" title="View Schedule">
+                        <i class="fas fa-eye"></i>
                     </button>
-                    <button class="button secondary small" onclick="exportSchedule(${schedule.id}, '${airDate}')">
-                        <i class="fas fa-download"></i> Export
+                    <button class="button secondary small icon-only" onclick="exportSchedule(${schedule.id}, '${airDate}')" title="Export Schedule">
+                        <i class="fas fa-download"></i>
                     </button>
-                    <button class="button danger small" onclick="deleteScheduleById(${schedule.id}, '${airDate}')">
-                        <i class="fas fa-trash"></i> Delete
+                    <button class="button danger small icon-only" onclick="deleteScheduleById(${schedule.id}, '${airDate}')" title="Delete Schedule">
+                        <i class="fas fa-trash"></i>
                     </button>
                 </div>
             </div>

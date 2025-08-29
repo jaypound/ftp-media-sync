@@ -5285,27 +5285,30 @@ function displayScheduleList(schedules) {
         const totalDurationFormatted = `${totalDurationHours.toFixed(1)} hours`;
         
         html += `
-            <div class="schedule-list-item" data-schedule-id="${schedule.id}">
-                <div class="schedule-item-header">
-                    <div style="flex: 1;">
-                        <h5 style="margin: 0;">📅 ${dayName}, ${airDate}</h5>
-                        <span class="schedule-stats">${schedule.item_count || 0} items • ${totalDurationFormatted}</span>
+            <div class="schedule-list-item compact" data-schedule-id="${schedule.id}">
+                <div class="schedule-item-content">
+                    <div class="schedule-date">
+                        <span class="schedule-icon">📅</span>
+                        <strong>${dayName}, ${airDate}</strong>
                     </div>
-                    <div class="schedule-item-actions">
-                        <button class="button small primary" onclick="viewScheduleDetails(${schedule.id}, '${airDate}')">
-                            <i class="fas fa-eye"></i> View
+                    <div class="schedule-info">
+                        <span class="schedule-stat">${schedule.total_items || 0} items</span>
+                        <span class="schedule-separator">•</span>
+                        <span class="schedule-stat">${totalDurationFormatted}</span>
+                        <span class="schedule-separator">•</span>
+                        <span class="schedule-stat">Created ${createdAt}</span>
+                    </div>
+                    <div class="schedule-actions">
+                        <button class="button small primary" onclick="viewScheduleDetails(${schedule.id}, '${airDate}')" title="View Schedule">
+                            <i class="fas fa-eye"></i>
                         </button>
-                        <button class="button small warning" onclick="deleteScheduleById(${schedule.id}, '${airDate}')">
-                            <i class="fas fa-trash"></i> Delete
+                        <button class="button small secondary" onclick="exportSchedule(${schedule.id})" title="Export Schedule">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button class="button small danger" onclick="deleteScheduleById(${schedule.id}, '${airDate}')" title="Delete Schedule">
+                            <i class="fas fa-trash"></i>
                         </button>
                     </div>
-                </div>
-                <div class="schedule-item-details">
-                    <small>
-                        ${schedule.schedule_name || 'Daily Schedule'} • 
-                        Channel: ${schedule.channel || 'Comcast Channel 26'} • 
-                        Created: ${createdAt}
-                    </small>
                 </div>
             </div>
         `;
@@ -5740,9 +5743,29 @@ function displayScheduleDetails(schedule) {
             // Extract content type description
             const contentTypeLabel = getContentTypeLabel(item.content_type);
             
-            // Use content title or file name
-            const title = item.content_title || item.file_name || 'Untitled';
-            const categoryLabel = item.duration_category ? item.duration_category.replace('_', ' ').toUpperCase() : '';
+            // Check if this is a live input item
+            let title = '';
+            let categoryLabel = '';
+            let metadata = item.metadata;
+            
+            // Parse metadata if it's a string
+            if (typeof metadata === 'string') {
+                try {
+                    metadata = JSON.parse(metadata);
+                } catch (e) {
+                    metadata = null;
+                }
+            }
+            
+            if (metadata && metadata.is_live_input) {
+                // This is a live input item
+                title = metadata.title || 'Live Input';
+                categoryLabel = 'LIVE';
+            } else {
+                // Regular content item
+                title = item.content_title || item.file_name || 'Untitled';
+                categoryLabel = item.duration_category ? item.duration_category.replace('_', ' ').toUpperCase() : '';
+            }
             
             // Format encoded date
             let encodedDateDisplay = 'Unknown';
@@ -8564,7 +8587,7 @@ function fillGapsWithProperTimes() {
         
         // Check if this is a fixed-time item (like imported meetings) that must be preserved
         // Also check for "Live Input" items which are always fixed-time events
-        if (item.is_fixed_time === true || item.title === 'Live Input') {
+        if (item.is_fixed_time === true || item.is_live_input === true || item.title?.startsWith('Live Input')) {
             // This is a fixed-time item (imported meeting, live event, etc) - MUST preserve it
             existingItems.push({item: item, originalIndex: index});
             console.log('✓ Fixed-time item:', item.title || item.file_name, 'at', item.start_time);
@@ -10734,11 +10757,19 @@ async function saveTemplateAsSchedule() {
         console.log('Current template:', currentTemplate);
         console.log('Template items:', currentTemplate.items);
         
-        // Prepare schedule data - only include items with valid asset IDs
-        const validItems = currentTemplate.items.filter(item => item.content_id || item.asset_id);
+        // Prepare schedule data - include items with valid asset IDs or live inputs
+        const validItems = currentTemplate.items.filter(item => {
+            // Include regular content with asset IDs
+            if (item.content_id || item.asset_id) return true;
+            
+            // Include live inputs (they won't have asset_id but will have is_live_input flag)
+            if (item.is_live_input || item.title?.startsWith('Live Input')) return true;
+            
+            return false;
+        });
         
         if (validItems.length === 0) {
-            log('No valid items with asset IDs in template. Items must be added from Available Content.', 'error');
+            log('No valid items in template. Items must be added from Available Content or be Live Inputs.', 'error');
             return;
         }
         
@@ -12533,11 +12564,24 @@ function parseScheduleTemplate(templateContent) {
             if (currentItem) {
                 items.push(currentItem);
             }
+            const filePath = trimmedLine.substring(5);
+            let title = 'Live Input';
+            
+            // Identify SDI input sources and set appropriate titles
+            if (filePath.includes('/mnt/main/tv/inputs/1-SDI')) {
+                title = 'Live Input - Council Chambers';
+            } else if (filePath.includes('/mnt/main/tv/inputs/2-SDI')) {
+                title = 'Live Input - Committee Room 1';
+            } else if (filePath.includes('/mnt/main/tv/inputs/3-SDI')) {
+                title = 'Live Input - Committee Room 2';
+            }
+            
             currentItem = {
-                file_path: trimmedLine.substring(5),
-                title: 'Live Input',
+                file_path: filePath,
+                title: title,
                 duration_seconds: 0,
-                is_fixed_time: true  // Mark as fixed-time event that cannot be moved
+                is_fixed_time: true,  // Mark as fixed-time event that cannot be moved
+                is_live_input: true   // Additional flag to identify live inputs
             };
         } else if (currentItem && trimmedLine.startsWith('start=')) {
             currentItem.start_time = trimmedLine.substring(6);

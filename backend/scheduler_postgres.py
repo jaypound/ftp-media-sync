@@ -480,7 +480,80 @@ class PostgreSQLScheduler:
         try:
             cursor = conn.cursor()
             
-            # Get asset information
+            # Special handling for live inputs (asset_id = 0 or None)
+            if (str(asset_id) == '0' or asset_id is None) and metadata and metadata.get('is_live_input'):
+                logger.info(f"Adding live input item: {metadata.get('title', 'Live Input')}")
+                
+                # First, ensure we have a placeholder asset for live inputs
+                cursor.execute("""
+                    SELECT id FROM assets WHERE guid = '00000000-0000-0000-0000-000000000000'
+                """)
+                placeholder = cursor.fetchone()
+                
+                if not placeholder:
+                    # Create placeholder asset if it doesn't exist
+                    cursor.execute("""
+                        INSERT INTO assets (guid, content_title, content_type, duration_seconds, duration_category, created_at)
+                        VALUES ('00000000-0000-0000-0000-000000000000', 'Live Input Placeholder', 'other', 0, 'spots', %s)
+                        RETURNING id
+                    """, (datetime.now(),))
+                    placeholder = cursor.fetchone()
+                    logger.info(f"Created placeholder asset for live inputs with id: {placeholder['id']}")
+                
+                live_input_asset_id = placeholder['id']
+                logger.info(f"Using placeholder asset_id {live_input_asset_id} for live input")
+                
+                # Check if scheduled_items table has metadata column
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='scheduled_items' AND column_name='metadata'
+                """)
+                result = cursor.fetchone()
+                has_metadata_column = result is not None
+                
+                if has_metadata_column:
+                    # Insert live input with NULL asset_id to avoid foreign key constraint
+                    cursor.execute("""
+                        INSERT INTO scheduled_items (
+                            schedule_id, asset_id, instance_id, sequence_number,
+                            scheduled_start_time, scheduled_duration_seconds, metadata, created_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                    """, (
+                        schedule_id,
+                        live_input_asset_id,  # Use placeholder asset_id for live inputs
+                        None,  # No instance_id for live inputs
+                        order_index + 1,  # sequence_number is 1-based
+                        scheduled_start_time,
+                        scheduled_duration_seconds or metadata.get('duration_seconds', 3600),  # Default 1 hour
+                        json.dumps(metadata),
+                        datetime.now()
+                    ))
+                else:
+                    # Insert without metadata
+                    cursor.execute("""
+                        INSERT INTO scheduled_items (
+                            schedule_id, asset_id, instance_id, sequence_number,
+                            scheduled_start_time, scheduled_duration_seconds, created_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s
+                        )
+                    """, (
+                        schedule_id,
+                        live_input_asset_id,  # Use placeholder asset_id for live inputs
+                        None,  # No instance_id for live inputs
+                        order_index + 1,  # sequence_number is 1-based
+                        scheduled_start_time,
+                        scheduled_duration_seconds or metadata.get('duration_seconds', 3600),  # Default 1 hour
+                        datetime.now()
+                    ))
+                
+                conn.commit()
+                return True
+            
+            # Regular asset handling
             cursor.execute("""
                 SELECT 
                     a.id as asset_id,
@@ -801,7 +874,7 @@ class PostgreSQLScheduler:
             cursor.execute("""
                 SELECT 
                     s.*,
-                    COUNT(si.id) as item_count,
+                    COUNT(si.id) as total_items,
                     SUM(si.scheduled_duration_seconds) as total_duration
                 FROM schedules s
                 LEFT JOIN scheduled_items si ON s.id = si.schedule_id
@@ -866,18 +939,24 @@ class PostgreSQLScheduler:
                     SELECT 
                         si.*,
                         a.content_type,
-                        a.content_title,
+                        CASE 
+                            WHEN a.guid = '00000000-0000-0000-0000-000000000000' AND si.metadata->>'title' IS NOT NULL 
+                            THEN si.metadata->>'title'
+                            ELSE a.content_title
+                        END as content_title,
                         a.duration_category,
                         a.engagement_score,
                         a.summary,
-                        i.file_name,
-                        i.file_path,
+                        COALESCE(i.file_name, si.metadata->>'file_name') as file_name,
+                        COALESCE(i.file_path, si.metadata->>'file_path') as file_path,
                         i.encoded_date,
                         sm.last_scheduled_date,
-                        sm.total_airings
+                        sm.total_airings,
+                        si.metadata,
+                        a.guid
                     FROM scheduled_items si
-                    JOIN assets a ON si.asset_id = a.id
-                    JOIN instances i ON si.instance_id = i.id
+                    LEFT JOIN assets a ON si.asset_id = a.id
+                    LEFT JOIN instances i ON si.instance_id = i.id
                     LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                     WHERE si.schedule_id = %s
                     ORDER BY si.sequence_number
@@ -895,10 +974,11 @@ class PostgreSQLScheduler:
                         i.file_path,
                         i.encoded_date,
                         sm.last_scheduled_date,
-                        sm.total_airings
+                        sm.total_airings,
+                        a.guid
                     FROM scheduled_items si
-                    JOIN assets a ON si.asset_id = a.id
-                    JOIN instances i ON si.instance_id = i.id
+                    LEFT JOIN assets a ON si.asset_id = a.id
+                    LEFT JOIN instances i ON si.instance_id = i.id
                     LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                     WHERE si.schedule_id = %s
                     ORDER BY si.sequence_number
