@@ -38,8 +38,10 @@ function schedulingDisplayScheduleDetails(schedule) {
         // Check if this is a weekly or monthly schedule by looking at the schedule name
         const isWeeklySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('weekly');
         const isMonthlySchedule = schedule.schedule_name && schedule.schedule_name.toLowerCase().includes('monthly');
+        console.log(`Schedule type: ${schedule.schedule_name}, isWeekly: ${isWeeklySchedule}, isMonthly: ${isMonthlySchedule}`);
         let currentDay = -1;
         let previousStartHour = -1;
+        let lastDayOffset = -1;
         
         schedule.items.forEach((item, index) => {
             const startTime = item.scheduled_start_time || '00:00:00';
@@ -51,34 +53,46 @@ function schedulingDisplayScheduleDetails(schedule) {
             
             // For weekly or monthly schedules, detect day changes
             if (isWeeklySchedule || isMonthlySchedule) {
+                if (index < 3) {
+                    console.log(`Item ${index} metadata:`, item.metadata);
+                }
                 let dayNumber = 0;
+                let showDayHeader = false;
                 
-                // Detect day change: when hour goes from high (e.g., 23) to low (e.g., 0, 1, 2)
-                // or this is the first item
-                if (index === 0) {
-                    dayNumber = 0;
-                } else if (previousStartHour > 20 && startHour < 4) {
-                    // Crossed midnight (e.g., from 23:xx to 00:xx)
-                    currentDay++;
-                    dayNumber = currentDay;
-                } else if (index > 0 && currentDay === -1) {
-                    // First item might not start at midnight
-                    currentDay = 0;
-                    dayNumber = 0;
+                // Check if item has metadata with day_offset (for weekly schedules)
+                if (item.metadata && item.metadata.day_offset !== undefined) {
+                    dayNumber = item.metadata.day_offset;
+                    // Show header if this is the first item or day has changed
+                    showDayHeader = (index === 0 || dayNumber !== lastDayOffset);
+                    lastDayOffset = dayNumber;
+                    currentDay = dayNumber;
+                    console.log(`Item ${index}: has metadata.day_offset = ${dayNumber}, showDayHeader = ${showDayHeader}`);
+                } else {
+                    // Fallback: detect day change by hour crossing midnight
+                    if (index === 0) {
+                        dayNumber = 0;
+                        showDayHeader = true;
+                    } else if (previousStartHour > 20 && startHour < 4) {
+                        // Crossed midnight (e.g., from 23:xx to 00:xx)
+                        currentDay++;
+                        dayNumber = currentDay;
+                        showDayHeader = true;
+                    } else if (index > 0 && currentDay === -1) {
+                        // First item might not start at midnight
+                        currentDay = 0;
+                        dayNumber = 0;
+                        showDayHeader = true;
+                    }
                 }
                 
-                // Add day header if we've moved to a new day
-                if ((index === 0) || (previousStartHour > 20 && startHour < 4)) {
-                    if (index === 0) {
-                        currentDay = 0;
-                    }
-                    
+                // Add day header if needed
+                if (showDayHeader) {
                     // Parse air_date properly to avoid timezone issues
                     const airDateStr = schedule.air_date.split('T')[0];
                     const [year, month, day] = airDateStr.split('-').map(num => parseInt(num));
                     
                     // Calculate the date for this day
-                    const dayDate = new Date(year, month - 1, day + currentDay);
+                    const dayDate = new Date(year, month - 1, day + dayNumber);
                     
                     if (isWeeklySchedule) {
                         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

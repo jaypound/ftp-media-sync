@@ -2738,14 +2738,16 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
             day_prefix = metadata.get('day_prefix', '') if metadata else ''
             day_offset = metadata.get('day_offset', 0) if metadata else 0
             
+            # Initialize time components
+            db_hours = 0
+            db_minutes = 0
+            db_seconds = 0.0
+            
             # Parse the actual start time from the database
             item_day_index = day_offset  # Use metadata if available
-            if day_prefix:
-                # Use the day prefix from metadata
-                day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
-                item_day_index = day_map.get(day_prefix, day_offset)
-                item_day_name = day_prefix
-            elif isinstance(start_time, str):
+            
+            # First, always parse the time regardless of metadata
+            if isinstance(start_time, str):
                 # Check if this is a weekly format time with day prefix
                 if ' ' in start_time and any(day in start_time.lower() for day in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']):
                     # Extract day and time parts
@@ -2774,6 +2776,13 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
                 db_hours = start_time.hour
                 db_minutes = start_time.minute
                 db_seconds = start_time.second + start_time.microsecond / 1000000.0
+            
+            # If we have day_prefix from metadata, use it
+            if day_prefix:
+                # Use the day prefix from metadata
+                day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                item_day_index = day_map.get(day_prefix, day_offset)
+                item_day_name = day_prefix
             
             # Calculate the actual start time in seconds from the database
             # For weekly schedules, check metadata for day information
@@ -3382,11 +3391,23 @@ def create_schedule_from_template():
         if template_type == 'weekly':
             # Create a single weekly schedule
             from datetime import datetime, timedelta
-            start_date = datetime.strptime(air_date, '%Y-%m-%d')
+            provided_date = datetime.strptime(air_date, '%Y-%m-%d')
+            
+            # Find the Sunday of this week
+            days_since_sunday = provided_date.weekday()  # Monday is 0, Sunday is 6
+            if days_since_sunday == 6:  # If it's already Sunday
+                start_date = provided_date
+            else:
+                # Go back to the previous Sunday
+                start_date = provided_date - timedelta(days=(days_since_sunday + 1))
+            
+            # Use the Sunday date for the schedule
+            sunday_date_str = start_date.strftime('%Y-%m-%d')
+            logger.info(f"Adjusted weekly schedule date from {air_date} to Sunday {sunday_date_str}")
             
             # Create a single schedule for the entire week
             result = scheduler_postgres.create_empty_schedule(
-                schedule_date=air_date,
+                schedule_date=sunday_date_str,
                 schedule_name=f"{schedule_name} - Weekly"
             )
             
@@ -3561,6 +3582,28 @@ def create_schedule_from_template():
                     else:
                         logger.warning(f"Skipping item - no asset_id")
                         skipped_count += 1
+            
+            # Update total duration for the schedule
+            # Use direct SQL to update the total duration
+            conn = db_manager._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE schedules 
+                    SET total_duration_seconds = (
+                        SELECT COALESCE(SUM(scheduled_duration_seconds), 0)
+                        FROM scheduled_items
+                        WHERE schedule_id = %s
+                    )
+                    WHERE id = %s
+                """, (schedule_id, schedule_id))
+                conn.commit()
+                cursor.close()
+                logger.info(f"Updated total duration for weekly schedule {schedule_id}")
+            except Exception as e:
+                logger.error(f"Error updating total duration: {str(e)}")
+            finally:
+                db_manager._put_connection(conn)
             
             # Mark this schedule as weekly type
             scheduler_postgres.update_schedule_metadata(schedule_id, {'type': 'weekly'})

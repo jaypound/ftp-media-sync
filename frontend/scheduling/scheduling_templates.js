@@ -113,24 +113,67 @@ function schedulingGenerateTemplateHTML(template) {
     
     // Add day headers for weekly templates
     if (template.type === 'weekly') {
-        const dayGroups = schedulingGroupItemsByDay(template.items);
+        // Group items by day based on start_time prefix
+        const dayGroups = {};
+        const dayNames = {
+            'sun': 'Sunday',
+            'mon': 'Monday',
+            'tue': 'Tuesday',
+            'wed': 'Wednesday',
+            'thu': 'Thursday',
+            'fri': 'Friday',
+            'sat': 'Saturday'
+        };
+        const dayOrder = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
         
-        Object.keys(dayGroups).forEach(day => {
+        // Group items by day prefix in start_time
+        template.items.forEach((item, globalIndex) => {
+            // Extract day from start_time (e.g., "mon 01:00 pm" -> "mon")
+            let dayPrefix = 'unknown';
+            if (item.start_time) {
+                const dayMatch = item.start_time.toLowerCase().match(/^(\w{3})\s/);
+                if (dayMatch) {
+                    dayPrefix = dayMatch[1];
+                }
+            }
+            
+            if (!dayGroups[dayPrefix]) {
+                dayGroups[dayPrefix] = [];
+            }
+            dayGroups[dayPrefix].push({item: item, globalIndex: globalIndex});
+        });
+        
+        // Display items grouped by day in order
+        dayOrder.forEach(day => {
+            if (dayGroups[day] && dayGroups[day].length > 0) {
+                html += `
+                    <div class="scheduling-template-day-header">
+                        <h4>${dayNames[day]}</h4>
+                    </div>
+                `;
+                
+                dayGroups[day].forEach((itemData, index) => {
+                    html += schedulingGenerateItemHTML(itemData.item, itemData.globalIndex + 1);
+                });
+            }
+        });
+        
+        // Handle any items without recognized day prefix
+        if (dayGroups['unknown'] && dayGroups['unknown'].length > 0) {
             html += `
                 <div class="scheduling-template-day-header">
-                    <h4>Day ${parseInt(day) + 1}</h4>
+                    <h4>Unscheduled</h4>
                 </div>
             `;
-            
-            dayGroups[day].forEach((item, index) => {
-                html += schedulingGenerateItemHTML(item, index);
+            dayGroups['unknown'].forEach((itemData, index) => {
+                html += schedulingGenerateItemHTML(itemData.item, itemData.globalIndex + 1);
             });
-        });
+        }
     } else {
         // Daily template - show all items
         console.log('Processing daily template items...');
         template.items.forEach((item, index) => {
-            html += schedulingGenerateItemHTML(item, index);
+            html += schedulingGenerateItemHTML(item, index + 1);
         });
     }
     
@@ -154,16 +197,26 @@ function schedulingGenerateItemHTML(item, index) {
         }
     }
     
+    // For weekly templates, display the time without the day prefix (it's already in the header)
+    let displayTime = item.start_time || '00:00:00';
+    if (item.template_type === 'weekly' || item.has_day_prefix) {
+        // Extract just the time part from weekly format (e.g., "mon 01:00 pm" -> "01:00 pm")
+        const timeMatch = displayTime.match(/^\w{3}\s+(.+)$/);
+        if (timeMatch) {
+            displayTime = timeMatch[1];
+        }
+    }
+    
     // Format time with milliseconds if formatTimeWithMilliseconds function is available
     const startTime = typeof formatTimeWithMilliseconds === 'function' 
-        ? formatTimeWithMilliseconds(item.start_time || '00:00:00')
-        : (item.start_time || '00:00:00');
+        ? formatTimeWithMilliseconds(displayTime)
+        : displayTime;
     const duration = schedulingFormatDuration(item.duration_seconds || item.file_duration || 0);
-    const category = item.category || item.duration_category || 'No Category';
+    const category = item.category || item.duration_category || 'NO CATEGORY';
     
     return `
         <div class="scheduling-template-item">
-            <span class="scheduling-template-item-number">${index + 1}</span>
+            <span class="scheduling-template-item-number">${index}</span>
             <span class="scheduling-template-item-time">${startTime}</span>
             <span class="scheduling-template-item-title" title="${title}">${title}</span>
             <span class="scheduling-template-item-duration">${duration}</span>

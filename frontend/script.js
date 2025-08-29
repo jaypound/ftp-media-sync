@@ -5436,15 +5436,21 @@ async function deleteAllSchedules() {
 }
 
 function exportSchedule() {
-    const viewDate = document.getElementById('viewScheduleDate').value;
+    if (!currentSchedule) {
+        log('❌ No schedule loaded to export', 'error');
+        return;
+    }
     
-    if (!viewDate) {
-        log('❌ Please select a date to export', 'error');
+    // Use the actual schedule's air_date, not the view date
+    const scheduleDate = currentSchedule.air_date ? currentSchedule.air_date.split('T')[0] : '';
+    
+    if (!scheduleDate) {
+        log('❌ Schedule has no air date', 'error');
         return;
     }
     
     // Show the export modal
-    document.getElementById('exportScheduleDate').textContent = viewDate;
+    document.getElementById('exportScheduleDate').textContent = scheduleDate;
     document.getElementById('exportModal').style.display = 'block';
     
     // Load saved export settings if available
@@ -5462,9 +5468,9 @@ function exportSchedule() {
     document.getElementById('modalExportServer').value = savedServer;
     document.getElementById('modalExportPath').value = savedPath;
     
-    // Generate default filename based on date and schedule type
+    // Generate default filename based on schedule's air date and type
     // Parse date components to avoid timezone issues
-    const [year, month, day] = viewDate.split('-').map(num => parseInt(num));
+    const [year, month, day] = scheduleDate.split('-').map(num => parseInt(num));
     
     // Format as YY_MM_DD_HHMM
     const now = new Date();
@@ -5507,7 +5513,7 @@ function closeExportModal() {
 }
 
 async function confirmExport() {
-    const viewDate = document.getElementById('exportScheduleDate').textContent;
+    const exportDate = document.getElementById('exportScheduleDate').textContent;
     const exportServer = document.getElementById('modalExportServer').value;
     const exportPath = document.getElementById('modalExportPath').value;
     const exportFilename = document.getElementById('modalExportFilename').value;
@@ -5531,7 +5537,7 @@ async function confirmExport() {
     
     closeExportModal();
     
-    log(`📤 Exporting schedule for ${viewDate} to ${exportServer} server...`);
+    log(`📤 Exporting schedule for ${exportDate} to ${exportServer} server...`);
     log(`📂 Export path: ${exportPath}`);
     log(`📄 Filename: ${exportFilename}`);
     log(`📋 Format: ${exportFormat === 'castus' ? 'Castus Daily Schedule' : exportFormat === 'castus_weekly' ? 'Castus Weekly Schedule' : 'Unknown'}`);
@@ -5541,7 +5547,7 @@ async function confirmExport() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                date: viewDate,
+                date: exportDate,
                 export_server: exportServer,
                 export_path: exportPath,
                 filename: exportFilename,
@@ -10598,12 +10604,22 @@ async function createScheduleFromTemplate() {
         return;
     }
     
-    // Get today's date as default
+    // Get appropriate default date based on template type
     const today = new Date();
-    const defaultDate = today.toISOString().split('T')[0];
+    let defaultDate = today.toISOString().split('T')[0];
+    let datePromptMessage = 'Enter the air date for this schedule (YYYY-MM-DD):';
+    
+    if (template.type === 'weekly') {
+        // For weekly templates, suggest the next Sunday
+        const daysUntilSunday = (7 - today.getDay()) % 7;
+        const nextSunday = new Date(today);
+        nextSunday.setDate(today.getDate() + (daysUntilSunday || 7)); // If today is Sunday, get next Sunday
+        defaultDate = nextSunday.toISOString().split('T')[0];
+        datePromptMessage = 'Enter any date in the week (schedule will start on Sunday of that week) (YYYY-MM-DD):';
+    }
     
     // Prompt for air date
-    const airDate = prompt('Enter the air date for this schedule (YYYY-MM-DD):', defaultDate);
+    const airDate = prompt(datePromptMessage, defaultDate);
     if (!airDate) {
         return; // User cancelled
     }
@@ -12291,11 +12307,23 @@ window.closeImportWeeklyMeetingsModal = function() {
 };
 
 function getWeekNumber(date) {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    // Calculate week number with Sunday as the first day of the week
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const jan1 = new Date(d.getFullYear(), 0, 1);
+    const dayOfWeek = jan1.getDay(); // 0 = Sunday
+    const daysToFirstSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+    const firstSunday = new Date(d.getFullYear(), 0, 1 + daysToFirstSunday);
+    
+    // Calculate days since first Sunday
+    const daysSinceFirstSunday = Math.floor((d - firstSunday) / 86400000);
+    
+    // If the date is before the first Sunday, it's week 1
+    if (daysSinceFirstSunday < 0) {
+        return 1;
+    }
+    
+    // Calculate week number (add 1 because weeks are 1-indexed)
+    return Math.floor(daysSinceFirstSunday / 7) + 1;
 }
 
 // Update the week date range display
@@ -12303,16 +12331,17 @@ function updateWeekDateRange(year, weekNumber) {
     const dateRangeEl = document.getElementById('weekDateRange');
     if (!dateRangeEl) return;
     
-    // Calculate the first day of the week
+    // Calculate the first Sunday of the year
     const jan1 = new Date(year, 0, 1);
-    const daysToFirstMonday = (8 - jan1.getDay()) % 7;
-    const firstMonday = new Date(year, 0, 1 + daysToFirstMonday);
+    const dayOfWeek = jan1.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const daysToFirstSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+    const firstSunday = new Date(year, 0, 1 + daysToFirstSunday);
     
-    // Calculate the start of the requested week
-    const weekStart = new Date(firstMonday);
-    weekStart.setDate(firstMonday.getDate() + (weekNumber - 1) * 7);
+    // Calculate the start of the requested week (Sunday)
+    const weekStart = new Date(firstSunday);
+    weekStart.setDate(firstSunday.getDate() + (weekNumber - 1) * 7);
     
-    // Calculate the end of the week (6 days later)
+    // Calculate the end of the week (Saturday, 6 days later)
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekStart.getDate() + 6);
     
@@ -12346,7 +12375,10 @@ async function loadWeeklyMeetings() {
             const dayOrder = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
             
             data.meetings.forEach(meeting => {
-                const date = new Date(meeting.meeting_date);
+                // Parse date string explicitly to avoid timezone issues
+                // meeting_date is in YYYY-MM-DD format
+                const [yearStr, monthStr, dayStr] = meeting.meeting_date.split('-');
+                const date = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr));
                 const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
                 if (!meetingsByDay[dayName]) meetingsByDay[dayName] = [];
                 meetingsByDay[dayName].push(meeting);
