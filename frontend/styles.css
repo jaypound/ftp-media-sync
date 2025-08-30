@@ -2371,4 +2371,31 @@ body.dark-mode .status {
     background-color: rgba(76, 175, 80, 0.15);
 }
 
+/* Dark mode content type select dropdown */
+.dark-mode .content-type,
+.dark-mode select.content-type {
+    background-color: var(--bg-secondary, #2a2a2a);
+    color: var(--text-primary, #e0e0e0);
+    border: 1px solid var(--border-color, #444);
+}
+
+.dark-mode .content-type:hover,
+.dark-mode select.content-type:hover {
+    background-color: var(--bg-tertiary, #333);
+    border-color: var(--border-hover, #555);
+}
+
+.dark-mode .content-type:focus,
+.dark-mode select.content-type:focus {
+    outline: 2px solid var(--primary-color, #4a90e2);
+    outline-offset: -1px;
+}
+
+/* Ensure option elements are also styled in dark mode */
+.dark-mode .content-type option,
+.dark-mode select.content-type option {
+    background-color: var(--bg-secondary, #2a2a2a);
+    color: var(--text-primary, #e0e0e0);
+}
+
 /* End of styles */
