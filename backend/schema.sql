@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Create custom types for categorization
 CREATE TYPE duration_category AS ENUM ('spots', 'short', 'medium', 'long', 'id', 'short_form', 'long_form');
 CREATE TYPE shelf_life_rating AS ENUM ('low', 'medium', 'high');
-CREATE TYPE content_type AS ENUM ('an', 'bmp', 'imow', 'im', 'ia', 'lm', 'mtg', 'maf', 'pkg', 'pmo', 'psa', 'szl', 'spp', 'other');
+CREATE TYPE content_type AS ENUM ('an', 'atld', 'bmp', 'imow', 'im', 'ia', 'lm', 'mtg', 'maf', 'pkg', 'pmo', 'psa', 'szl', 'spp', 'other');
 
 -- ASSETS table: Core metadata for each content asset
 CREATE TABLE assets (

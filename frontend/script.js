@@ -4575,6 +4575,7 @@ function displayAvailableContent() {
                 <select class="content-type" onchange="updateContentType('${contentId}', this.value)" data-original="${content.content_type ? content.content_type.toUpperCase() : ''}">
                     <option value="PSA" ${content.content_type && content.content_type.toUpperCase() === 'PSA' ? 'selected' : ''}>PSA</option>
                     <option value="AN" ${content.content_type && content.content_type.toUpperCase() === 'AN' ? 'selected' : ''}>AN</option>
+                    <option value="ATLD" ${content.content_type && content.content_type.toUpperCase() === 'ATLD' ? 'selected' : ''}>ATLD</option>
                     <option value="BMP" ${content.content_type && content.content_type.toUpperCase() === 'BMP' ? 'selected' : ''}>BMP</option>
                     <option value="IMOW" ${content.content_type && content.content_type.toUpperCase() === 'IMOW' ? 'selected' : ''}>IMOW</option>
                     <option value="IM" ${content.content_type && content.content_type.toUpperCase() === 'IM' ? 'selected' : ''}>IM</option>
@@ -8026,6 +8027,7 @@ function viewContentDetails(contentId) {
                             <select id="detailsContentType" class="content-type form-control" style="margin: 0; background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">
                                 <option value="PSA" ${content.content_type && content.content_type.toUpperCase() === 'PSA' ? 'selected' : ''}>PSA</option>
                                 <option value="AN" ${content.content_type && content.content_type.toUpperCase() === 'AN' ? 'selected' : ''}>AN</option>
+                                <option value="ATLD" ${content.content_type && content.content_type.toUpperCase() === 'ATLD' ? 'selected' : ''}>ATLD</option>
                                 <option value="BMP" ${content.content_type && content.content_type.toUpperCase() === 'BMP' ? 'selected' : ''}>BMP</option>
                                 <option value="IMOW" ${content.content_type && content.content_type.toUpperCase() === 'IMOW' ? 'selected' : ''}>IMOW</option>
                                 <option value="IM" ${content.content_type && content.content_type.toUpperCase() === 'IM' ? 'selected' : ''}>IM</option>
