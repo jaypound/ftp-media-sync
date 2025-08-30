@@ -11192,6 +11192,44 @@ async function createScheduleFromTemplate() {
         return;
     }
     
+    // First, validate that all files exist on the FTP servers
+    log('Validating template files...', 'info');
+    
+    try {
+        const validateResponse = await fetch('/api/validate-template-files', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                items: template.items
+            })
+        });
+        
+        const validateResult = await validateResponse.json();
+        
+        if (validateResult.success && validateResult.missing_files && validateResult.missing_files.length > 0) {
+            // Show missing files modal
+            window.missingFilesData = {
+                missing_files: validateResult.missing_files,
+                template: template,
+                callback: () => continueCreateSchedule(template)
+            };
+            
+            showMissingFilesModal(validateResult.missing_files);
+            return;
+        }
+        
+        // If no missing files, continue with creation
+        continueCreateSchedule(template);
+        
+    } catch (error) {
+        console.error('Error validating template files:', error);
+        alert('Error validating template files. Please check your connection and try again.');
+    }
+}
+
+async function continueCreateSchedule(template) {
     // Get appropriate default date based on template type
     const today = new Date();
     let defaultDate = today.toISOString().split('T')[0];
@@ -11226,6 +11264,14 @@ async function createScheduleFromTemplate() {
     
     log(`Creating schedule from template: ${scheduleName} for ${airDate}`, 'info');
     
+    // Filter out missing files if user chose to remove them
+    let itemsToCreate = template.items;
+    if (window.missingFilesData && window.missingFilesData.removed_asset_ids) {
+        itemsToCreate = template.items.filter(item => 
+            !window.missingFilesData.removed_asset_ids.includes(item.asset_id)
+        );
+    }
+    
     try {
         const response = await fetch('/api/create-schedule-from-template', {
             method: 'POST',
@@ -11237,7 +11283,7 @@ async function createScheduleFromTemplate() {
                 schedule_name: scheduleName,
                 channel: 'Comcast Channel 26',
                 template_type: template.type || 'daily',  // Include template type
-                items: template.items
+                items: itemsToCreate
             })
         });
         
@@ -13810,3 +13856,96 @@ window.updateRegion3Selection = updateRegion3Selection;
 // window.showGenerateProjectModal = showGenerateProjectModal;
 // window.closeGenerateProjectModal = closeGenerateProjectModal;
 window.generateProjectFile = generateProjectFile;
+
+// Missing Files Modal Functions
+function showMissingFilesModal(missingFiles) {
+    const modal = document.getElementById('missingFilesModal');
+    const listEl = document.getElementById('missingFilesList');
+    
+    if (!modal || !listEl) {
+        console.error('Missing files modal elements not found');
+        return;
+    }
+    
+    // Clear existing content
+    listEl.innerHTML = '';
+    
+    // Display missing files
+    missingFiles.forEach(file => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'missing-file-item';
+        fileItem.style.cssText = 'padding: 8px; margin-bottom: 5px; background-color: rgba(255,0,0,0.1); border-radius: 4px; font-size: 14px;';
+        fileItem.innerHTML = `
+            <strong>${file.title}</strong><br>
+            <span style="color: #999; font-size: 12px;">${file.file_path}</span>
+        `;
+        listEl.appendChild(fileItem);
+    });
+    
+    // Show modal
+    modal.style.display = 'block';
+}
+
+function closeMissingFilesModal() {
+    const modal = document.getElementById('missingFilesModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    // Clear data
+    window.missingFilesData = null;
+}
+
+function proceedWithMissingFiles() {
+    closeMissingFilesModal();
+    // Continue with the original callback
+    if (window.missingFilesData && window.missingFilesData.callback) {
+        window.missingFilesData.callback();
+    }
+}
+
+async function removeMissingFiles() {
+    if (!window.missingFilesData || !window.missingFilesData.missing_files) {
+        return;
+    }
+    
+    const missingFiles = window.missingFilesData.missing_files;
+    const removedAssetIds = [];
+    
+    // Remove each missing file from the database
+    for (const file of missingFiles) {
+        if (file.asset_id) {
+            try {
+                const response = await fetch(`/api/content/${file.asset_id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    removedAssetIds.push(file.asset_id);
+                    log(`Removed missing file from database: ${file.title}`, 'info');
+                }
+            } catch (error) {
+                console.error(`Error removing file ${file.title}:`, error);
+            }
+        }
+    }
+    
+    // Store removed asset IDs for filtering
+    window.missingFilesData.removed_asset_ids = removedAssetIds;
+    
+    closeMissingFilesModal();
+    
+    // Show confirmation
+    showNotification(`Removed ${removedAssetIds.length} missing files from database`, 'success');
+    
+    // Continue with the original callback
+    if (window.missingFilesData.callback) {
+        window.missingFilesData.callback();
+    }
+}
+
+// Make functions available globally
+window.showMissingFilesModal = showMissingFilesModal;
+window.closeMissingFilesModal = closeMissingFilesModal;
+window.proceedWithMissingFiles = proceedWithMissingFiles;
+window.removeMissingFiles = removeMissingFiles;
+window.continueCreateSchedule = continueCreateSchedule;

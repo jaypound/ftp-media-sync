@@ -1222,6 +1222,36 @@
         </div>
     </div>
 
+    <!-- Missing Files Modal -->
+    <div id="missingFilesModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Missing Files Detected</h3>
+                <button class="modal-close" onclick="closeMissingFilesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="warning-text" style="color: #ff6b6b; margin-bottom: 15px;">
+                    <i class="fas fa-exclamation-circle"></i> The following files were not found on either FTP server:
+                </p>
+                <div id="missingFilesList" class="missing-files-list" style="max-height: 300px; overflow-y: auto; margin-bottom: 20px; border: 1px solid #444; border-radius: 4px; padding: 10px; background-color: rgba(0,0,0,0.2);"></div>
+                <p class="modal-question" style="font-weight: bold; margin-top: 20px;">
+                    What would you like to do with these missing files?
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeMissingFilesModal()">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button class="button warning" onclick="proceedWithMissingFiles()">
+                    <i class="fas fa-arrow-right"></i> Keep & Continue
+                </button>
+                <button class="button danger" onclick="removeMissingFiles()">
+                    <i class="fas fa-trash"></i> Remove from Database
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Load Template Modal -->
     <div id="loadTemplateModal" class="modal" style="display: none;">
         <div class="modal-content">

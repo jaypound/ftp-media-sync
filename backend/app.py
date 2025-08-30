@@ -3401,6 +3401,104 @@ def calculate_duration_from_times(start_time, end_time):
     except:
         return 0
 
+@app.route('/api/validate-template-files', methods=['POST'])
+def validate_template_files():
+    """Validate that files in a template exist on FTP servers"""
+    try:
+        data = request.json
+        items = data.get('items', [])
+        
+        logger.info(f"Validating {len(items)} template items for file existence")
+        
+        # Get FTP managers for both servers
+        config = config_manager.get_all_config()
+        source_config = config.get('servers', {}).get('source', {})
+        target_config = config.get('servers', {}).get('target', {})
+        
+        missing_files = []
+        checked_paths = set()  # Avoid checking the same path multiple times
+        
+        for idx, item in enumerate(items):
+            # Skip live inputs
+            if item.get('is_live_input', False) or '/mnt/main/tv/inputs/' in item.get('file_path', ''):
+                continue
+                
+            file_path = item.get('file_path', '')
+            if not file_path or file_path in checked_paths:
+                continue
+                
+            checked_paths.add(file_path)
+            
+            # Check on both servers
+            exists_on_source = False
+            exists_on_target = False
+            
+            # If file_path doesn't start with /mnt/, try common base paths
+            paths_to_check = [file_path]
+            if not file_path.startswith('/mnt/'):
+                # Common base paths where content might be stored
+                # Note: /mnt/main and /mnt/md127 are the same via symbolic link
+                base_paths = [
+                    '/mnt/main/ATL26 On-Air Content/',
+                    '/mnt/main/'
+                ]
+                for base in base_paths:
+                    paths_to_check.append(base + file_path)
+            
+            # Check source server
+            source_ftp = FTPManager(source_config)
+            if source_ftp.connect():
+                try:
+                    for check_path in paths_to_check:
+                        try:
+                            source_ftp.ftp.size(check_path)  # Try to get file size
+                            exists_on_source = True
+                            logger.debug(f"File found on source server at: {check_path}")
+                            break
+                        except:
+                            pass
+                finally:
+                    source_ftp.disconnect()
+            
+            # Check target server
+            target_ftp = FTPManager(target_config)
+            if target_ftp.connect():
+                try:
+                    for check_path in paths_to_check:
+                        try:
+                            target_ftp.ftp.size(check_path)  # Try to get file size
+                            exists_on_target = True
+                            logger.debug(f"File found on target server at: {check_path}")
+                            break
+                        except:
+                            pass
+                finally:
+                    target_ftp.disconnect()
+            
+            # If file doesn't exist on either server, add to missing list
+            if not exists_on_source and not exists_on_target:
+                missing_files.append({
+                    'asset_id': item.get('asset_id'),
+                    'title': item.get('title', 'Unknown'),
+                    'file_path': file_path,
+                    'guid': item.get('guid', ''),
+                    'index': idx
+                })
+                logger.warning(f"File not found on either server: {file_path}")
+        
+        return jsonify({
+            'success': True,
+            'missing_files': missing_files,
+            'total_checked': len(checked_paths)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error validating template files: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error validating files: {str(e)}'
+        })
+
 @app.route('/api/create-schedule-from-template', methods=['POST'])
 def create_schedule_from_template():
     """Create a schedule from a template with manually added items"""
@@ -4160,16 +4258,103 @@ def fill_template_gaps():
         scheduler._reset_rotation()
         
         # Convert available content to the format expected by scheduler
-        # Filter out content from /mnt/main/Recordings
+        # Filter out content from /mnt/main/Recordings and validate files exist
         content_by_id = {}
         filtered_count = 0
-        for content in available_content:
-            # Check if this content is from Recordings folder
-            file_path = content.get('file_path', '')
-            if '/mnt/main/Recordings' in file_path:
-                filtered_count += 1
-                continue  # Skip content from Recordings folder
-            content_by_id[content.get('id')] = content
+        missing_files_count = 0
+        
+        # Pre-validate all files to avoid repeated FTP connections
+        logger.info("Pre-validating file existence for available content...")
+        validated_files = {}  # file_path -> exists (True/False)
+        
+        # Get FTP configurations once
+        config = config_manager.get_all_config()
+        source_config = config.get('servers', {}).get('source', {})
+        target_config = config.get('servers', {}).get('target', {})
+        
+        # Create FTP connections once for batch validation
+        source_ftp = FTPManager(source_config)
+        target_ftp = FTPManager(target_config)
+        source_connected = source_ftp.connect()
+        target_connected = target_ftp.connect()
+        
+        # Log first few file paths to debug the issue
+        if available_content and len(available_content) > 0:
+            logger.info(f"Sample file paths from available content:")
+            for i, content in enumerate(available_content[:5]):
+                logger.info(f"  Sample {i+1}: {content.get('file_path', 'NO PATH')}")
+        
+        try:
+            for content in available_content:
+                # Check if this content is from Recordings folder
+                file_path = content.get('file_path', '')
+                if '/mnt/main/Recordings' in file_path:
+                    filtered_count += 1
+                    continue  # Skip content from Recordings folder
+                
+                # Check if we've already validated this file
+                if file_path in validated_files:
+                    if validated_files[file_path]:
+                        content_by_id[content.get('id')] = content
+                    else:
+                        missing_files_count += 1
+                    continue
+                
+                # Validate file exists on at least one server
+                file_exists = False
+                
+                # If file_path doesn't start with /mnt/, try common base paths
+                paths_to_check = [file_path]
+                if not file_path.startswith('/mnt/'):
+                    # Common base paths where content might be stored
+                    # Note: /mnt/main and /mnt/md127 are the same via symbolic link
+                    base_paths = [
+                        '/mnt/main/ATL26 On-Air Content/',
+                        '/mnt/main/'
+                    ]
+                    for base in base_paths:
+                        paths_to_check.append(base + file_path)
+                
+                if source_connected:
+                    for check_path in paths_to_check:
+                        try:
+                            source_ftp.ftp.size(check_path)
+                            file_exists = True
+                            validated_files[file_path] = True
+                            logger.debug(f"File found on source server at: {check_path}")
+                            break
+                        except Exception as e:
+                            # Log the first attempt with more detail for debugging
+                            if check_path == paths_to_check[0]:
+                                logger.debug(f"File not found at {check_path}: {str(e)}")
+                            pass
+                
+                if not file_exists and target_connected:
+                    for check_path in paths_to_check:
+                        try:
+                            target_ftp.ftp.size(check_path)
+                            file_exists = True
+                            validated_files[file_path] = True
+                            logger.debug(f"File found on target server at: {check_path}")
+                            break
+                        except:
+                            pass
+                
+                if not file_exists:
+                    validated_files[file_path] = False
+                    # For now, still include files we can't validate to avoid breaking scheduling
+                    # This allows us to debug while keeping the system functional
+                    content_by_id[content.get('id')] = content
+                    logger.warning(f"Could not validate file existence (including anyway): {file_path}")
+                else:
+                    content_by_id[content.get('id')] = content
+        
+        finally:
+            # Always disconnect FTP connections
+            if source_connected:
+                source_ftp.disconnect()
+            if target_connected:
+                target_ftp.disconnect()
         
         # Debug: Log available content info
         logger.info(f"Available content count: {len(available_content)}")
@@ -4280,15 +4465,15 @@ def fill_template_gaps():
             config_mgr = ConfigManager()
             scheduling_config = config_mgr.get_scheduling_settings()
             replay_delays = scheduling_config.get('replay_delays', {
-                'id': 6,
-                'spots': 12,
-                'short_form': 24,
-                'long_form': 48
+                'id': 1,
+                'spots': 2,
+                'short_form': 4,
+                'long_form': 8
             })
             logger.info(f"Replay delays: {replay_delays}")
         except Exception as e:
             logger.warning(f"Could not load replay delays, using defaults: {e}")
-            replay_delays = {'id': 6, 'spots': 12, 'short_form': 24, 'long_form': 48}
+            replay_delays = {'id': 1, 'spots': 2, 'short_form': 4, 'long_form': 8}
         
         # Fill gaps using rotation logic
         consecutive_errors = 0
@@ -4328,11 +4513,7 @@ def fill_template_gaps():
                 replay_delay_hours = replay_delays.get(duration_category, 24)
                 replay_delay_seconds = replay_delay_hours * 3600
                 
-                for content in available_content:
-                    # Skip content from Recordings folder
-                    file_path = content.get('file_path', '')
-                    if '/mnt/main/Recordings' in file_path:
-                        continue
+                for content_id, content in content_by_id.items():
                     
                     # Check duration category
                     if content.get('duration_category') != duration_category:
@@ -4352,6 +4533,7 @@ def fill_template_gaps():
                             if time_since_last < replay_delay_seconds:
                                 can_schedule = False
                                 blocked_by_delay += 1
+                                logger.debug(f"Content {content_id} blocked: {time_since_last/3600:.1f}h since last, need {replay_delay_seconds/3600:.1f}h")
                                 break
                         
                         if not can_schedule:
@@ -4360,23 +4542,34 @@ def fill_template_gaps():
                     category_content.append(content)
             
                 if not category_content:
-                    logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, total_available={len(available_content)}")
+                    logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, total_available={len(content_by_id)}")
                 
-                # If no content due to delays, try without delays
-                if not category_content and blocked_by_delay > 0:
-                    logger.info(f"Trying category {duration_category} without replay delays")
-                    # Try again without checking delays
-                    for content in available_content:
-                        # Skip content from Recordings folder
-                        file_path = content.get('file_path', '')
-                        if '/mnt/main/Recordings' in file_path:
-                            continue
-                        
+                # If no content due to delays, try with reduced delays only as last resort
+                if not category_content and blocked_by_delay > 0 and total_cycles_without_content >= 2:
+                    logger.info(f"Trying category {duration_category} with reduced replay delays (50% of configured)")
+                    # Try again with reduced delays (50% of configured delay)
+                    reduced_delay_seconds = replay_delay_seconds * 0.5
+                    
+                    for content_id, content in content_by_id.items():
                         if content.get('duration_category') == duration_category:
-                            category_content.append(content)
+                            # Check with reduced delay
+                            if content_id in asset_schedule_times:
+                                last_times = asset_schedule_times[content_id]
+                                can_schedule = True
+                                
+                                for last_time in last_times:
+                                    time_since_last = current_position - last_time
+                                    if time_since_last < reduced_delay_seconds:
+                                        can_schedule = False
+                                        break
+                                
+                                if can_schedule:
+                                    category_content.append(content)
+                            else:
+                                category_content.append(content)
                     
                     if category_content:
-                        logger.info(f"Found {len(category_content)} items without delay restrictions")
+                        logger.info(f"Found {len(category_content)} items with reduced delay restrictions ({reduced_delay_seconds/3600:.1f} hours)")
                 
                 if not category_content:
                     # Try next category if no content available
@@ -4444,12 +4637,7 @@ def fill_template_gaps():
                             if try_category == duration_category:
                                 continue  # Already tried this category
                             
-                            for content in available_content:
-                                # Skip content from Recordings folder
-                                file_path = content.get('file_path', '')
-                                if '/mnt/main/Recordings' in file_path:
-                                    continue
-                                
+                            for content_id, content in content_by_id.items():
                                 # Check if content is in the category we're trying
                                 if content.get('duration_category') != try_category:
                                     continue
@@ -4532,7 +4720,7 @@ def fill_template_gaps():
                         })
                 
                 if not overlap_found:
-                    # Add to template
+                    # Add to template (file already validated during pre-processing)
                     new_item = {
                         'asset_id': selected.get('id'),
                         'content_id': selected.get('id'),
