@@ -1715,6 +1715,131 @@
     <script src="meeting_schedule/meeting_schedule.js"></script>
     <script src="fill_graphics/fill_graphics.js"></script>
     
+    <!-- Delete Options Modal -->
+    <div id="deleteOptionsModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-trash-alt"></i> Delete File Options</h3>
+                <button class="modal-close" onclick="closeDeleteOptionsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="delete-file-info">
+                    <strong>File:</strong> <span id="deleteFileName"></span><br>
+                    <strong>Path:</strong> <span id="deleteFilePath"></span><br>
+                    <strong>Size:</strong> <span id="deleteFileSize"></span>
+                </p>
+                
+                <div class="delete-options">
+                    <h4>Select where to delete this file:</h4>
+                    <div class="delete-option">
+                        <label>
+                            <input type="checkbox" id="deleteFromSource" value="source">
+                            <i class="fas fa-server"></i> Delete from Source Server
+                        </label>
+                    </div>
+                    <div class="delete-option">
+                        <label>
+                            <input type="checkbox" id="deleteFromTarget" value="target" checked>
+                            <i class="fas fa-server"></i> Delete from Target Server
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="warning-message">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Warning:</strong> This action cannot be undone!
+                </div>
+                
+                <div class="dry-run-option">
+                    <label>
+                        <input type="checkbox" id="deleteOptionsDryRun" checked>
+                        <i class="fas fa-shield-alt"></i> Dry Run (simulate deletion without actually deleting)
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeDeleteOptionsModal()">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button class="button danger" onclick="confirmDeleteWithOptions()">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Delete Options Modal -->
+    <div id="contentDeleteOptionsModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-trash-alt"></i> Delete Content Options</h3>
+                <button class="modal-close" onclick="closeContentDeleteOptionsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="delete-file-info">
+                    <strong>Content:</strong> <span id="deleteContentTitle"></span><br>
+                    <strong>File Path:</strong> <span id="deleteContentPath"></span><br>
+                    <strong>Duration:</strong> <span id="deleteContentDuration"></span><br>
+                    <strong>Category:</strong> <span id="deleteContentCategory"></span>
+                </p>
+                
+                <div class="delete-options">
+                    <h4>What would you like to delete?</h4>
+                    <div class="delete-option">
+                        <label>
+                            <input type="radio" name="deleteContentOption" value="database-only" checked>
+                            <i class="fas fa-database"></i> Database Entry Only
+                            <span style="font-size: 0.9em; color: #666;">(Keep the actual file)</span>
+                        </label>
+                    </div>
+                    <div class="delete-option">
+                        <label>
+                            <input type="radio" name="deleteContentOption" value="database-and-files">
+                            <i class="fas fa-trash-alt"></i> Database Entry and Files
+                            <span style="font-size: 0.9em; color: #666;">(Delete from servers)</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div id="contentDeleteServersOptions" style="display: none; margin-top: 15px;">
+                    <h4>Select servers to delete from:</h4>
+                    <div class="delete-option">
+                        <label>
+                            <input type="checkbox" id="deleteContentFromSource" value="source">
+                            <i class="fas fa-server"></i> Delete from Source Server
+                        </label>
+                    </div>
+                    <div class="delete-option">
+                        <label>
+                            <input type="checkbox" id="deleteContentFromTarget" value="target" checked>
+                            <i class="fas fa-server"></i> Delete from Target Server
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="warning-message">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Warning:</strong> This action cannot be undone!
+                </div>
+                
+                <div class="dry-run-option">
+                    <label>
+                        <input type="checkbox" id="contentDeleteDryRun" checked>
+                        <i class="fas fa-shield-alt"></i> Dry Run (simulate deletion without actually deleting)
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeContentDeleteOptionsModal()">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button class="button danger" onclick="confirmContentDeleteWithOptions()">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Legacy script for compatibility -->
     <script src="script.js"></script>
 </body>

@@ -198,23 +198,54 @@ async function compareFiles() {
     
     // Create a map of target files for quick lookup using relative path
     const targetFileMap = new Map();
+    const targetFileByNameMap = new Map();
+    const duplicateTargetNames = new Set();
+    
     targetFiles.forEach(file => {
         const relativePath = file.path || file.name;
         targetFileMap.set(relativePath, file);
-        // Also add by name only as a fallback
-        targetFileMap.set(file.name, file);
+        
+        // Track duplicate names
+        if (targetFileByNameMap.has(file.name)) {
+            duplicateTargetNames.add(file.name);
+            console.log(`Duplicate target file name: ${file.name}`);
+            console.log(`  Path 1: ${targetFileByNameMap.get(file.name).path}`);
+            console.log(`  Path 2: ${file.path}`);
+        }
+        targetFileByNameMap.set(file.name, file);
     });
     
     // Create a map of source files for quick lookup using relative path
     const sourceFileMap = new Map();
+    const sourceFileByNameMap = new Map();
+    const duplicateSourceNames = new Set();
+    
     sourceFiles.forEach(file => {
         const relativePath = file.path || file.name;
         sourceFileMap.set(relativePath, file);
-        // Also add by name only as a fallback
-        sourceFileMap.set(file.name, file);
+        
+        // Track duplicate names
+        if (sourceFileByNameMap.has(file.name)) {
+            duplicateSourceNames.add(file.name);
+            console.log(`Duplicate source file name: ${file.name}`);
+            console.log(`  Path 1: ${sourceFileByNameMap.get(file.name).path}`);
+            console.log(`  Path 2: ${file.path}`);
+        }
+        sourceFileByNameMap.set(file.name, file);
     });
     
+    if (duplicateTargetNames.size > 0) {
+        console.log(`Found ${duplicateTargetNames.size} duplicate file names in target`);
+    }
+    if (duplicateSourceNames.size > 0) {
+        console.log(`Found ${duplicateSourceNames.size} duplicate file names in source`);
+    }
+    
     // Debug: Log sample paths from both servers
+    console.log('Source file count:', sourceFiles.length);
+    console.log('Target file count:', targetFiles.length);
+    console.log('Source map size:', sourceFileMap.size);
+    console.log('Target map size:', targetFileMap.size);
     log(`Debug: Sample source paths: ${Array.from(sourceFileMap.keys()).slice(0, 5).join(', ')}`);
     log(`Debug: Sample target paths: ${Array.from(targetFileMap.keys()).slice(0, 5).join(', ')}`);
     
@@ -243,7 +274,7 @@ async function compareFiles() {
         let targetFile = targetFileMap.get(sourceRelativePath);
         if (!targetFile && sourceFile.path !== sourceFile.name) {
             // Try matching by name only if path lookup failed
-            targetFile = targetFileMap.get(sourceFile.name);
+            targetFile = targetFileByNameMap.get(sourceFile.name);
             if (targetFile) {
                 log(`Matched ${sourceFile.name} by filename (path mismatch: source='${sourceRelativePath}' vs target='${targetFile.path || targetFile.name}')`);
             }
@@ -278,20 +309,29 @@ async function compareFiles() {
     });
     
     // Process target files to find target-only files
+    console.log(`Processing ${targetFiles.length} target files to find target-only files`);
+    let targetOnlyCount = 0;
+    
     targetFiles.forEach(targetFile => {
         const targetRelativePath = targetFile.path || targetFile.name;
         // Try to find source file by path first, then by name
         let sourceFile = sourceFileMap.get(targetRelativePath);
+        let matchedBy = sourceFile ? 'path' : null;
+        
         if (!sourceFile && targetFile.path !== targetFile.name) {
             // Try matching by name only if path lookup failed
-            sourceFile = sourceFileMap.get(targetFile.name);
+            sourceFile = sourceFileByNameMap.get(targetFile.name);
             if (sourceFile) {
+                matchedBy = 'name';
+                console.log(`Matched ${targetFile.name} by NAME ONLY - Target path: '${targetRelativePath}' vs Source path: '${sourceFile.path || sourceFile.name}'`);
                 log(`Matched ${targetFile.name} by filename for target-only check (path mismatch: target='${targetRelativePath}' vs source='${sourceFile.path || sourceFile.name}')`);
             }
         }
         
         if (!sourceFile) {
+            targetOnlyCount++;
             // File exists on target but not on source
+            console.log(`Target-only file #${targetOnlyCount}: ${targetRelativePath}`, targetFile);
             log(`Target-only file found: ${targetRelativePath} (folder: ${targetFile.folder || 'unknown'})`);
             const fileId = btoa(targetRelativePath + '_target_only').replace(/[^a-zA-Z0-9]/g, '');
             
@@ -322,6 +362,10 @@ async function compareFiles() {
     
     // Render results (default to unsynced only)
     renderComparisonResults();
+    
+    console.log(`Final targetOnlyCount: ${targetOnlyCount}`);
+    console.log(`targetOnlyFiles array length: ${targetOnlyFiles.length}`);
+    console.log('targetOnlyFiles:', targetOnlyFiles);
     
     log(`Comparison complete. Found ${availableFiles.length} files that can be synced, ${targetOnlyFiles.length} target-only files`, 'success');
     
@@ -367,6 +411,8 @@ function renderComparisonResults() {
             fileItem.className = 'file-item target-only';
             
             const isBidirectional = result.targetFile.isBidirectional;
+            const isInQueue = syncQueue.find(item => item.id === result.fileId);
+            const isInDeleteQueue = deleteQueue.find(item => item.fileId === result.fileId);
             
             fileItem.innerHTML = `
                 <div class="file-info">
@@ -375,11 +421,15 @@ function renderComparisonResults() {
                     <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                 </div>
                 <div class="file-actions">
-                    <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
-                        <i class="fas fa-arrow-left"></i> Copy to Source
+                    <button class="button add-to-sync-btn ${isInQueue ? 'added' : ''}" 
+                            onclick="addToSyncQueue('${result.fileId}', this)"
+                            ${isInQueue ? 'disabled' : ''}>
+                        ${isInQueue ? '<i class="fas fa-check"></i> Added to Sync' : '<i class="fas fa-arrow-left"></i> Copy to Source'}
                     </button>
-                    <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
-                        <i class="fas fa-trash"></i> Delete
+                    <button class="delete-btn ${isInDeleteQueue ? 'added' : ''}" 
+                            onclick="addToDeleteQueue('${result.fileId}')"
+                            ${isInDeleteQueue ? 'disabled' : ''}>
+                        <i class="fas fa-trash"></i> ${isInDeleteQueue ? 'Marked for Deletion' : 'Delete'}
                     </button>
                 </div>
             `;
@@ -400,8 +450,19 @@ function renderComparisonResults() {
         targetSection.innerHTML = '<h4><i class="fas fa-folder-plus"></i> Target-Only Files</h4>';
         
         // Add files that need syncing to source section
-        const resultsToShow = showAllFiles ? allComparisonResults : allComparisonResults.filter(result => result.status !== 'identical');
+        const resultsToShow = showAllFiles ? allComparisonResults : allComparisonResults.filter(result => 
+            result.status !== 'identical' || result.justSynced
+        );
         let hasSourceDifferences = false;
+        
+        console.log('Rendering comparison results:', {
+            totalResults: allComparisonResults.length,
+            resultsToShow: resultsToShow.length,
+            syncQueue: syncQueue.length,
+            availableFiles: availableFiles.length,
+            justSyncedCount: allComparisonResults.filter(r => r.justSynced).length,
+            identicalCount: allComparisonResults.filter(r => r.status === 'identical').length
+        });
         
         resultsToShow.forEach(result => {
             const fileItem = document.createElement('div');
@@ -411,33 +472,57 @@ function renderComparisonResults() {
                 hasSourceDifferences = true;
                 // File missing on target
                 fileItem.classList.add('missing');
+                const isInQueue = syncQueue.find(item => item.id === result.fileId);
                 fileItem.innerHTML = `
                     <div class="file-info">
                         <div class="file-name">${result.sourceFile.name}</div>
                         <div class="file-path">${result.relativePath !== result.sourceFile.name ? result.relativePath : ''}</div>
                         <div class="file-size">${formatFileSize(result.sourceFile.size)} - Missing on target</div>
                     </div>
-                    <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">Add to Sync</button>
+                    <div class="file-actions">
+                        <button class="button add-to-sync-btn ${isInQueue ? 'added' : ''}" 
+                                onclick="addToSyncQueue('${result.fileId}', this)"
+                                ${isInQueue ? 'disabled' : ''}>
+                            ${isInQueue ? '<i class="fas fa-check"></i> Added to Sync' : 'Add to Sync'}
+                        </button>
+                        <button class="delete-btn" 
+                                onclick="addToDeleteQueue('${result.fileId}')">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
                 `;
             } else if (result.status === 'different') {
                 hasSourceDifferences = true;
                 // File size different
                 fileItem.classList.add('different');
+                const isInQueue = syncQueue.find(item => item.id === result.fileId);
                 fileItem.innerHTML = `
                     <div class="file-info">
                         <div class="file-name">${result.sourceFile.name}</div>
                         <div class="file-path">${result.relativePath !== result.sourceFile.name ? result.relativePath : ''}</div>
                         <div class="file-size">Source: ${formatFileSize(result.sourceFile.size)} | Target: ${formatFileSize(result.targetFile.size)}</div>
                     </div>
-                    <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">Add to Sync</button>
+                    <div class="file-actions">
+                        <button class="button add-to-sync-btn ${isInQueue ? 'added' : ''}" 
+                                onclick="addToSyncQueue('${result.fileId}', this)"
+                                ${isInQueue ? 'disabled' : ''}>
+                            ${isInQueue ? '<i class="fas fa-check"></i> Added to Sync' : 'Add to Sync'}
+                        </button>
+                        <button class="delete-btn" 
+                                onclick="addToDeleteQueue('${result.fileId}')">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
                 `;
             } else {
-                // File identical
+                // File identical or just synced
+                const syncedText = result.justSynced ? 'Just Synced' : 'Identical';
+                fileItem.classList.add('synced');
                 fileItem.innerHTML = `
                     <div class="file-info">
                         <div class="file-name">${result.sourceFile.name}</div>
                         <div class="file-path">${result.relativePath !== result.sourceFile.name ? result.relativePath : ''}</div>
-                        <div class="file-size">${formatFileSize(result.sourceFile.size)} - Identical</div>
+                        <div class="file-size">${formatFileSize(result.sourceFile.size)} - ${syncedText}</div>
                     </div>
                     <span style="color: #28a745;">✅ Synced</span>
                 `;
@@ -461,6 +546,8 @@ function renderComparisonResults() {
                 fileItem.className = 'file-item target-only';
                 
                 const isBidirectional = result.targetFile.isBidirectional;
+                const isInQueue = syncQueue.find(item => item.id === result.fileId);
+                const isInDeleteQueue = deleteQueue.find(item => item.fileId === result.fileId);
                 
                 fileItem.innerHTML = `
                     <div class="file-info">
@@ -469,11 +556,15 @@ function renderComparisonResults() {
                         <div class="file-size">${formatFileSize(result.targetFile.size)} - Only on target</div>
                     </div>
                     <div class="file-actions">
-                        <button class="button add-to-sync-btn" onclick="addToSyncQueue('${result.fileId}', this)">
-                            <i class="fas fa-arrow-left"></i> Copy to Source
+                        <button class="button add-to-sync-btn ${isInQueue ? 'added' : ''}" 
+                                onclick="addToSyncQueue('${result.fileId}', this)"
+                                ${isInQueue ? 'disabled' : ''}>
+                            ${isInQueue ? '<i class="fas fa-check"></i> Added to Sync' : '<i class="fas fa-arrow-left"></i> Copy to Source'}
                         </button>
-                        <button class="delete-btn" onclick="addToDeleteQueue('${result.fileId}')">
-                            <i class="fas fa-trash"></i> Delete
+                        <button class="delete-btn ${isInDeleteQueue ? 'added' : ''}" 
+                                onclick="addToDeleteQueue('${result.fileId}')"
+                                ${isInDeleteQueue ? 'disabled' : ''}>
+                            <i class="fas fa-trash"></i> ${isInDeleteQueue ? 'Marked for Deletion' : 'Delete'}
                         </button>
                     </div>
                 `;
@@ -1049,14 +1140,8 @@ function clearSyncQueue() {
     // Clear sync queue
     syncQueue = [];
     
-    // Re-enable all buttons
-    const buttons = document.querySelectorAll('.add-to-sync-btn.added');
-    buttons.forEach(button => {
-        button.textContent = 'Add to Sync';
-        button.className = 'button add-to-sync-btn';
-        button.disabled = false;
-        button.innerHTML = 'Add to Sync';
-    });
+    // Don't reset buttons here - let renderComparisonResults handle the UI update
+    // This preserves the synced state of files
     
     log('Cleared sync queue');
     updateSyncButtonState();
@@ -1095,17 +1180,62 @@ async function processResultsWithProgress(results) {
             const fileId = item.id;
             const fileName = item.file;
             
+            // Debug logging
+            console.log('Sync success - updating UI for:', {
+                fileId: fileId,
+                fileName: fileName,
+                direction: item.direction
+            });
+            
             // Remove from available files
+            const beforeCount = availableFiles.length;
             availableFiles = availableFiles.filter(f => f.id !== fileId);
+            console.log(`Available files: ${beforeCount} -> ${availableFiles.length}`);
             
             // Update comparison results to mark as synced
+            let updatedCount = 0;
             allComparisonResults = allComparisonResults.map(result => {
                 if (result.fileId === fileId || result.relativePath === fileName || result.sourceFile?.name === fileName) {
+                    console.log('Marking comparison result as synced:', {
+                        before: result.status,
+                        fileId: result.fileId,
+                        fileName: result.sourceFile?.name
+                    });
                     result.status = 'identical'; // Mark as synced
                     result.justSynced = true; // Add flag for UI indication
+                    updatedCount++;
                 }
                 return result;
             });
+            console.log(`Updated ${updatedCount} comparison results to synced status`);
+            
+            // Update the UI immediately for this specific file
+            console.log('Calling updateFileItemUI for:', fileId, fileName);
+            updateFileItemUI(fileId, fileName, 'synced');
+            
+            // Also try to update by finding the correct result
+            const resultToUpdate = allComparisonResults.find(r => 
+                r.fileId === fileId || 
+                r.relativePath === fileName || 
+                r.sourceFile?.name === fileName
+            );
+            console.log('Found result to update:', resultToUpdate);
+            
+            // For source-to-target syncs, add the file to targetFiles array
+            if (item.direction === 'source_to_target' || !item.direction) {
+                // Find the source file details
+                const sourceFile = sourceFiles.find(f => f.name === fileName || f.path === item.file);
+                if (sourceFile) {
+                    // Add to target files if not already there
+                    if (!targetFiles.find(f => f.name === fileName)) {
+                        targetFiles.push({
+                            name: sourceFile.name,
+                            size: sourceFile.size,
+                            path: sourceFile.path
+                        });
+                    }
+                }
+            }
             
             // Remove from target-only list if it was a target-to-source sync
             if (item.direction === 'target_to_source') {
@@ -1703,12 +1833,35 @@ async function startSync() {
                 log(`Debug: Check /tmp/ directory on your server for downloaded files`, 'info');
             }
             
-            // Clear the sync queue after successful sync
+            // Clear the sync queue and update UI after successful sync
             if (!dryRun && syncStats.errors === 0) {
+                // First update the data, then clear queue and render
+                console.log('Sync complete - updating UI');
+                console.log('Available files before:', availableFiles.length);
+                console.log('All comparison results:', allComparisonResults.length);
+                console.log('Synced files (justSynced=true):', allComparisonResults.filter(r => r.justSynced).length);
+                
                 clearSyncQueue();
                 // Update the comparison display to reflect removed files
                 updateComparisonSummary();
-                renderComparisonResults();
+                
+                // Force a re-render to show synced status
+                setTimeout(() => {
+                    console.log('Rendering comparison results with synced items');
+                    renderComparisonResults();
+                    // Update dashboard stats to reflect new file counts
+                    updateDashboardStats();
+                    // Update the file counts in the scanned files display
+                    updateScannedFileCounts();
+                    // Update the server file counts based on synced files
+                    updateServerFileCounts();
+                }, 100);
+                
+                // Show notification of successful sync
+                showNotification('Sync Complete', `Successfully synced ${syncStats.processed} files`, 'success');
+            } else if (dryRun && syncStats.errors === 0) {
+                // For dry run, show what would have been done
+                showNotification('Dry Run Complete', `Would have synced ${syncStats.processed} files`, 'info');
             }
         } else {
             log(`Sync failed: ${result.message || 'Unknown error'}`, 'error');
@@ -1731,8 +1884,10 @@ async function startSync() {
     }, 2000);
     
     isSyncing = false;
-    document.getElementById('syncButton').disabled = false;
     document.getElementById('stopButton').disabled = true;
+    
+    // Update sync button state based on whether there are items in the queue
+    updateSyncButtonState();
 }
 
 // Panel Management
@@ -3015,35 +3170,121 @@ async function clearAllAnalyses() {
 }
 
 // Delete Queue Management Functions
+let currentDeleteFile = null; // Store the current file being deleted
+
 function addToDeleteQueue(fileId) {
     console.log('addToDeleteQueue called with fileId:', fileId);
     
     // Find the file in targetOnlyFiles
     const targetOnlyFile = targetOnlyFiles.find(item => item.fileId === fileId);
     if (!targetOnlyFile) {
-        log(`File with ID ${fileId} not found in target-only files`, 'error');
+        // Try to find in all comparison results (for files that exist on both servers)
+        const comparisonResult = allComparisonResults.find(item => item.fileId === fileId);
+        if (!comparisonResult) {
+            log(`File with ID ${fileId} not found`, 'error');
+            return;
+        }
+        // Show delete options modal for files that exist on both servers
+        showDeleteOptionsModal(comparisonResult);
         return;
     }
+    
+    // For target-only files, show delete options modal
+    showDeleteOptionsModal(targetOnlyFile);
+}
+
+function showDeleteOptionsModal(fileInfo) {
+    currentDeleteFile = fileInfo;
+    
+    // Populate modal with file info
+    const fileName = fileInfo.targetFile?.name || fileInfo.sourceFile?.name || 'Unknown';
+    const filePath = fileInfo.relativePath || fileInfo.targetFile?.path || fileInfo.sourceFile?.path || '';
+    const fileSize = fileInfo.targetFile?.size || fileInfo.sourceFile?.size || 0;
+    
+    document.getElementById('deleteFileName').textContent = fileName;
+    document.getElementById('deleteFilePath').textContent = filePath;
+    document.getElementById('deleteFileSize').textContent = formatFileSize(fileSize);
+    
+    // Set checkbox states based on where the file exists
+    const sourceCheckbox = document.getElementById('deleteFromSource');
+    const targetCheckbox = document.getElementById('deleteFromTarget');
+    
+    // Enable/disable checkboxes based on file existence
+    if (fileInfo.sourceFile) {
+        sourceCheckbox.disabled = false;
+        sourceCheckbox.parentElement.style.opacity = '1';
+    } else {
+        sourceCheckbox.disabled = true;
+        sourceCheckbox.checked = false;
+        sourceCheckbox.parentElement.style.opacity = '0.5';
+    }
+    
+    if (fileInfo.targetFile) {
+        targetCheckbox.disabled = false;
+        targetCheckbox.parentElement.style.opacity = '1';
+        targetCheckbox.checked = true; // Default to target
+    } else {
+        targetCheckbox.disabled = true;
+        targetCheckbox.checked = false;
+        targetCheckbox.parentElement.style.opacity = '0.5';
+    }
+    
+    // Show modal
+    document.getElementById('deleteOptionsModal').style.display = 'block';
+}
+
+function closeDeleteOptionsModal() {
+    document.getElementById('deleteOptionsModal').style.display = 'none';
+    currentDeleteFile = null;
+}
+
+async function confirmDeleteWithOptions() {
+    if (!currentDeleteFile) return;
+    
+    const deleteFromSource = document.getElementById('deleteFromSource').checked;
+    const deleteFromTarget = document.getElementById('deleteFromTarget').checked;
+    const dryRun = document.getElementById('deleteOptionsDryRun').checked;
+    
+    if (!deleteFromSource && !deleteFromTarget) {
+        window.showNotification('Please select at least one server to delete from', 'warning');
+        return;
+    }
+    
+    const servers = [];
+    if (deleteFromSource) servers.push('source');
+    if (deleteFromTarget) servers.push('target');
+    
+    closeDeleteOptionsModal();
+    
+    // Add to delete queue with server info
+    const queueItem = {
+        ...currentDeleteFile,
+        deleteServers: servers,
+        dryRun: dryRun
+    };
     
     // Check if already in delete queue
-    const alreadyInQueue = deleteQueue.find(item => item.fileId === fileId);
+    const alreadyInQueue = deleteQueue.find(item => item.fileId === currentDeleteFile.fileId);
     if (alreadyInQueue) {
-        log(`${targetOnlyFile.targetFile.name} is already in delete queue`, 'warning');
-        return;
+        // Update existing entry
+        alreadyInQueue.deleteServers = servers;
+        alreadyInQueue.dryRun = dryRun;
+    } else {
+        // Add new entry
+        deleteQueue.push(queueItem);
     }
     
-    // Add to delete queue
-    deleteQueue.push(targetOnlyFile);
-    
     // Update button state
-    const button = document.querySelector(`button[onclick="addToDeleteQueue('${fileId}')"]`);
+    const button = document.querySelector(`button[onclick="addToDeleteQueue('${currentDeleteFile.fileId}')"]`);
     if (button) {
-        button.innerHTML = '<i class="fas fa-check"></i> Added for Deletion';
+        const serverText = servers.length === 2 ? 'both' : servers[0];
+        button.innerHTML = `<i class="fas fa-check"></i> Delete from ${serverText}`;
         button.classList.add('added');
         button.disabled = true;
     }
     
-    log(`📋 Added ${targetOnlyFile.targetFile.name} to delete queue (${deleteQueue.length} files queued for deletion)`);
+    const serverText = servers.join(' & ');
+    log(`📋 Added ${currentDeleteFile.targetFile?.name || currentDeleteFile.sourceFile?.name} to delete queue (delete from ${serverText})`);
     updateDeleteButtonState();
     updateBulkDeleteButtonStates();
 }
@@ -3099,67 +3340,129 @@ async function deleteFiles() {
         return;
     }
     
-    const dryRun = document.getElementById('dryRunDelete') ? document.getElementById('dryRunDelete').checked : true;
+    // Group files by server and dry run status
+    const deleteOperations = {};
     
-    log(`Starting deletion of ${deleteQueue.length} files${dryRun ? ' (DRY RUN)' : ''}...`);
-    
-    try {
-        // Prepare files for deletion
-        const filesToDelete = deleteQueue.map(item => ({
-            name: item.targetFile.name,
-            path: item.relativePath,
-            size: item.targetFile.size
-        }));
+    deleteQueue.forEach(item => {
+        const servers = item.deleteServers || ['target'];
+        const dryRun = item.dryRun !== undefined ? item.dryRun : 
+            (document.getElementById('dryRunDelete') ? document.getElementById('dryRunDelete').checked : true);
         
-        const response = await fetch('/api/delete-files', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                files: filesToDelete,
-                server_type: 'target',
-                dry_run: dryRun
-            })
-        });
-        
-        
-        
-        if (result.success) {
-            log(`Delete operation completed: ${result.success_count} successful, ${result.failure_count} failed${dryRun ? ' (DRY RUN)' : ''}`);
-            
-            // Log individual results
-            result.results.forEach(fileResult => {
-                if (fileResult.success) {
-                    log(`✅ ${fileResult.message}`);
-                } else {
-                    log(`❌ ${fileResult.message}`, 'error');
-                }
-            });
-            
-            if (!dryRun && result.success_count > 0) {
-                // Remove successfully deleted files from the delete queue and UI
-                const successfulDeletes = result.results.filter(r => r.success).map(r => r.file_name);
-                
-                // Update delete queue
-                deleteQueue = deleteQueue.filter(item => !successfulDeletes.includes(item.targetFile.name));
-                
-                // Remove from target-only files
-                targetOnlyFiles = targetOnlyFiles.filter(item => !successfulDeletes.includes(item.targetFile.name));
-                
-                // Re-render comparison results to update UI
-                renderComparisonResults();
-                updateComparisonSummary();
-                updateDeleteButtonState();
-                updateBulkDeleteButtonStates();
-                
-                log(`Removed ${successfulDeletes.length} deleted files from UI`);
+        servers.forEach(server => {
+            const key = `${server}_${dryRun}`;
+            if (!deleteOperations[key]) {
+                deleteOperations[key] = {
+                    server: server,
+                    dryRun: dryRun,
+                    files: []
+                };
             }
             
-        } else {
-            log(`Delete operation failed: ${result.message}`, 'error');
-        }
+            // Prepare file info based on which server we're deleting from
+            const fileInfo = {
+                name: item.targetFile?.name || item.sourceFile?.name,
+                path: item.relativePath,
+                size: item.targetFile?.size || item.sourceFile?.size || 0,
+                fileId: item.fileId
+            };
+            
+            deleteOperations[key].files.push(fileInfo);
+        });
+    });
+    
+    log(`Starting deletion across ${Object.keys(deleteOperations).length} server operation(s)...`);
+    
+    let totalSuccess = 0;
+    let totalFailure = 0;
+    const allResults = [];
+    
+    // Execute delete operations
+    for (const [key, operation] of Object.entries(deleteOperations)) {
+        const { server, dryRun, files } = operation;
         
-    } catch (error) {
-        log(`Delete request failed: ${error.message}`, 'error');
+        log(`Deleting ${files.length} files from ${server} server${dryRun ? ' (DRY RUN)' : ''}...`);
+        
+        try {
+            const response = await fetch('/api/delete-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    files: files,
+                    server_type: server,
+                    dry_run: dryRun
+                })
+            });
+            
+            const result = await response.json();
+            allResults.push(...(result.results || []));
+            
+            if (result.success) {
+                totalSuccess += result.success_count || 0;
+                totalFailure += result.failure_count || 0;
+                
+                log(`Delete operation on ${server} completed: ${result.success_count} successful, ${result.failure_count} failed${dryRun ? ' (DRY RUN)' : ''}`);
+                
+                // Log individual results
+                result.results.forEach(fileResult => {
+                    if (fileResult.success) {
+                        log(`✅ [${server}] ${fileResult.message}`);
+                    } else {
+                        log(`❌ [${server}] ${fileResult.message}`, 'error');
+                    }
+                });
+            } else {
+                log(`Delete operation on ${server} failed: ${result.message}`, 'error');
+                totalFailure += files.length;
+            }
+        } catch (error) {
+            log(`Delete request to ${server} failed: ${error.message}`, 'error');
+            totalFailure += operation.files.length;
+        }
+    }
+    
+    // Process results after all operations complete
+    log(`All delete operations completed: ${totalSuccess} successful, ${totalFailure} failed`);
+    
+    // Remove successfully deleted files from UI
+    const successfulDeletes = new Set();
+    allResults.forEach(result => {
+        if (result.success && !result.dry_run) {
+            successfulDeletes.add(result.file_name);
+        }
+    });
+    
+    if (successfulDeletes.size > 0) {
+        // Update delete queue
+        deleteQueue = deleteQueue.filter(item => {
+            const fileName = item.targetFile?.name || item.sourceFile?.name;
+            return !successfulDeletes.has(fileName);
+        });
+        
+        // Update file lists based on which servers files were deleted from
+        allResults.forEach(result => {
+            if (result.success && !result.dry_run) {
+                const server = result.server || 'target';
+                const fileName = result.file_name;
+                
+                if (server === 'source' || server === 'both') {
+                    sourceFiles = sourceFiles.filter(f => f.name !== fileName);
+                }
+                if (server === 'target' || server === 'both') {
+                    targetFiles = targetFiles.filter(f => f.name !== fileName);
+                    targetOnlyFiles = targetOnlyFiles.filter(item => item.targetFile.name !== fileName);
+                }
+            }
+        });
+        
+        // Re-render UI
+        displayScannedFiles();
+        renderComparisonResults();
+        updateComparisonSummary();
+        updateDeleteButtonState();
+        updateBulkDeleteButtonStates();
+        updateDashboardStats();
+        
+        log(`Removed ${successfulDeletes.size} deleted files from UI`);
     }
 }
 
@@ -4138,15 +4441,19 @@ async function updateContentType(contentId, newType) {
             })
         });
         
+        if (!response.ok) {
+            throw new Error(`Failed to update content type: ${response.statusText}`);
+        }
         
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Content Type Updated', `Successfully updated content type to ${newType}`, 'success');
             
             // Update the content in availableContent array
-            const content = availableContent.find(c => c.id == contentId || c._id == contentId);
+            const content = availableContent.find(c => c._id == contentId || c.id == contentId);
             if (content) {
-                content.content_type = newType;
+                content.content_type = newType.toLowerCase();
             }
             
             // Update the dropdown's data-original attribute
@@ -4259,8 +4566,8 @@ function displayAvailableContent() {
             }
         }
         
-        // Use PostgreSQL id as the content identifier
-        const contentId = content.id || content._id || content.guid || 'unknown';
+        // Use MongoDB _id as the content identifier (prioritize _id over id)
+        const contentId = content._id || content.id || content.guid || 'unknown';
         
         html += `
             <div class="content-item" data-content-id="${contentId}">
@@ -4305,7 +4612,7 @@ function displayAvailableContent() {
                     <button class="button small secondary" onclick="viewContentDetails('${contentId}')" title="View Details">
                         <i class="fas fa-info"></i>
                     </button>
-                    <button class="button small danger" onclick="deleteContentFromDatabase('${contentId}')" title="Delete from Database">
+                    <button class="button small danger" onclick="showContentDeleteOptionsModal('${contentId}')" title="Delete Options">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -6959,7 +7266,7 @@ async function addToSchedule(contentId) {
 // Rename/Fix Content Functions
 function showRenameDialog(contentId) {
     const content = availableContent.find(c => 
-        (c.id || c._id || c.guid) == contentId
+        (c._id || c.id || c.guid) == contentId
     );
     
     if (!content) {
@@ -7383,12 +7690,233 @@ function getShelfLifeInfo(content) {
     return `${shelfLifeCategory} (${shelfLifeDays} days from encode date)`;
 }
 
-async function deleteContentFromDatabase(contentId) {
+// Track the current content being deleted
+let currentDeleteContent = null;
+
+// Show content delete options modal
+function showContentDeleteOptionsModal(contentId) {
+    console.log('showContentDeleteOptionsModal called with contentId:', contentId);
+    console.log('Available content items:', availableContent.length);
+    
+    // Find the content item
     const content = availableContent.find(c => {
-        const itemId = c.id || c._id || c.guid;
+        const itemId = c._id || c.id || c.guid;
+        return itemId == contentId || itemId === contentId || String(itemId) === String(contentId);
+    });
+    
+    console.log('Found content:', content);
+    
+    if (!content) {
+        window.showNotification('Content not found', 'error');
+        return;
+    }
+    
+    currentDeleteContent = content;
+    console.log('currentDeleteContent set to:', currentDeleteContent);
+    
+    // Populate modal with content info
+    document.getElementById('deleteContentTitle').textContent = content.content_title || content.title || content.file_name || 'Untitled';
+    document.getElementById('deleteContentPath').textContent = content.file_path || content.filePath || 'N/A';
+    document.getElementById('deleteContentDuration').textContent = formatDuration(content.file_duration || content.duration || content.duration_seconds || 0);
+    document.getElementById('deleteContentCategory').textContent = content.duration_category || content.category || 'N/A';
+    
+    // Reset options
+    document.querySelector('input[name="deleteContentOption"][value="database-only"]').checked = true;
+    document.getElementById('contentDeleteServersOptions').style.display = 'none';
+    document.getElementById('deleteContentFromSource').checked = false;
+    document.getElementById('deleteContentFromTarget').checked = true;
+    document.getElementById('contentDeleteDryRun').checked = true;
+    
+    // Add event listener for radio button changes
+    const radioButtons = document.querySelectorAll('input[name="deleteContentOption"]');
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', function() {
+            const serversOptions = document.getElementById('contentDeleteServersOptions');
+            if (this.value === 'database-and-files') {
+                serversOptions.style.display = 'block';
+            } else {
+                serversOptions.style.display = 'none';
+            }
+        });
+    });
+    
+    // Show modal
+    document.getElementById('contentDeleteOptionsModal').style.display = 'block';
+}
+
+// Close content delete options modal
+function closeContentDeleteOptionsModal() {
+    document.getElementById('contentDeleteOptionsModal').style.display = 'none';
+    currentDeleteContent = null;
+}
+
+// Confirm content deletion with options
+async function confirmContentDeleteWithOptions() {
+    console.log('confirmContentDeleteWithOptions called');
+    console.log('currentDeleteContent:', currentDeleteContent);
+    
+    if (!currentDeleteContent) {
+        console.error('No currentDeleteContent set!');
+        window.showNotification('No content selected', 'error');
+        return;
+    }
+    
+    const deleteOption = document.querySelector('input[name="deleteContentOption"]:checked').value;
+    const dryRun = document.getElementById('contentDeleteDryRun').checked;
+    
+    console.log('Delete option selected:', deleteOption);
+    console.log('Dry run:', dryRun);
+    
+    if (deleteOption === 'database-only') {
+        // Original database-only deletion
+        const contentToDelete = currentDeleteContent;
+        const contentId = contentToDelete._id || contentToDelete.id || contentToDelete.guid;
+        console.log('Database-only deletion for ID:', contentId);
+        closeContentDeleteOptionsModal();
+        await deleteContentFromDatabase(contentId);
+    } else {
+        // Database and files deletion
+        const deleteFromSource = document.getElementById('deleteContentFromSource').checked;
+        const deleteFromTarget = document.getElementById('deleteContentFromTarget').checked;
+        
+        if (!deleteFromSource && !deleteFromTarget) {
+            window.showNotification('Please select at least one server to delete from', 'warning');
+            return;
+        }
+        
+        const servers = [];
+        if (deleteFromSource) servers.push('source');
+        if (deleteFromTarget) servers.push('target');
+        
+        const contentToDelete = currentDeleteContent;
+        closeContentDeleteOptionsModal();
+        
+        // Call the enhanced delete endpoint
+        await deleteContentWithFiles(contentToDelete, servers, dryRun);
+    }
+}
+
+// Enhanced delete function that deletes both database and files
+async function deleteContentWithFiles(content, servers, dryRun) {
+    if (!content) {
+        window.showNotification('No content selected', 'error');
+        return;
+    }
+    
+    const contentId = content._id || content.id || content.guid;
+    const filePath = content.file_path || content.filePath || content.path;
+    
+    console.log('Content object:', content);
+    console.log('File path to delete:', filePath);
+    
+    if (!confirm(`This will delete "${content.title || content.content_title}" from the database and the actual file from ${servers.join(' and ')} server(s). This action cannot be undone! Are you sure?`)) {
+        return;
+    }
+    
+    try {
+        // First delete from database
+        console.log('Deleting content with ID:', contentId);
+        const dbResponse = await fetch(`/api/content/${contentId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        console.log('Delete response status:', dbResponse.status);
+        
+        if (!dbResponse.ok) {
+            const errorText = await dbResponse.text();
+            console.error('Delete failed. Response:', errorText);
+            throw new Error(`Failed to delete from database: ${dbResponse.statusText} - ${errorText}`);
+        }
+        
+        const dbResult = await dbResponse.json();
+        console.log('Delete result:', dbResult);
+        
+        if (dbResult.success) {
+            // Database deletion successful, now delete files
+            if (filePath) {
+                const fileResponse = await fetch('/api/delete-files', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: [{
+                            path: filePath,
+                            servers: servers
+                        }],
+                        dry_run: dryRun
+                    })
+                });
+                
+                if (!fileResponse.ok) {
+                    throw new Error(`Failed to delete files: ${fileResponse.statusText}`);
+                }
+                
+                const fileResult = await fileResponse.json();
+                
+                if (fileResult.results && fileResult.results.length > 0) {
+                    const successCount = fileResult.results.filter(r => r.status === 'success').length;
+                    const failCount = fileResult.results.filter(r => r.status === 'error').length;
+                    
+                    let message = `Database entry deleted. `;
+                    if (dryRun) {
+                        message += `Dry run: Would attempt to delete from ${servers.length} server(s)`;
+                    } else {
+                        if (successCount > 0) {
+                            message += `Files deleted from ${successCount} server(s)`;
+                        } else if (failCount > 0) {
+                            message += `File deletion failed: File not found on ${failCount} server(s)`;
+                        }
+                    }
+                    
+                    // Add details about specific errors
+                    if (failCount > 0 && !dryRun) {
+                        const failedResults = fileResult.results.filter(r => r.status === 'error');
+                        if (failedResults.length > 0 && failedResults[0].message) {
+                            console.log('File deletion errors:', failedResults);
+                        }
+                    }
+                    
+                    window.showNotification(message, failCount > 0 ? 'warning' : 'success');
+                } else {
+                    window.showNotification('Database entry deleted, but no file operations performed', 'warning');
+                }
+            } else {
+                window.showNotification('Database entry deleted (no file path associated)', 'success');
+            }
+            
+            // Remove from local array and refresh display
+            const index = availableContent.findIndex(c => {
+                const itemId = c._id || c.id || c.guid;
+                return itemId == contentId || itemId === contentId || String(itemId) === String(contentId);
+            });
+            if (index > -1) {
+                availableContent.splice(index, 1);
+            }
+            displayAvailableContent();
+            
+        } else {
+            window.showNotification('Failed to delete from database', 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error deleting content:', error);
+        window.showNotification(`Error: ${error.message}`, 'error');
+    }
+}
+
+async function deleteContentFromDatabase(contentId) {
+    console.log('deleteContentFromDatabase called with ID:', contentId);
+    const content = availableContent.find(c => {
+        const itemId = c._id || c.id || c.guid;
         return itemId == contentId || itemId === contentId || 
                String(itemId) === String(contentId);
     });
+    
+    console.log('Found content for deletion:', content);
     
     if (!content) {
         alert('Content not found');
@@ -7402,6 +7930,7 @@ async function deleteContentFromDatabase(contentId) {
     }
     
     try {
+        console.log('Sending DELETE request for content ID:', contentId);
         const response = await fetch(`/api/content/${contentId}`, {
             method: 'DELETE',
             headers: {
@@ -7409,17 +7938,28 @@ async function deleteContentFromDatabase(contentId) {
             }
         });
         
+        console.log('Delete response status:', response.status);
         
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Delete failed:', errorText);
+            throw new Error(`Failed to delete content: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        console.log('Delete result:', result);
         
         if (result.success) {
             // Remove from local array
             const index = availableContent.findIndex(c => {
-                const itemId = c.id || c._id || c.guid;
+                const itemId = c._id || c.id || c.guid;
                 return itemId == contentId || itemId === contentId || 
                        String(itemId) === String(contentId);
             });
+            console.log('Found item at index:', index);
             if (index > -1) {
                 availableContent.splice(index, 1);
+                console.log('Removed item from array. New length:', availableContent.length);
             }
             
             // Refresh display
@@ -7440,7 +7980,7 @@ async function deleteContentFromDatabase(contentId) {
 function viewContentDetails(contentId) {
     // Find the content item - convert contentId to match the type
     const content = availableContent.find(c => {
-        const itemId = c.id || c._id || c.guid;
+        const itemId = c._id || c.id || c.guid;
         // Compare both as strings and as numbers to handle type mismatches
         return itemId == contentId || itemId === contentId || 
                String(itemId) === String(contentId);
@@ -7482,7 +8022,27 @@ function viewContentDetails(contentId) {
                         <span style="word-break: break-all;">${content.file_path}</span>
                         
                         <strong>Content Type:</strong>
-                        <span>${getContentTypeLabel(content.content_type)} (${content.content_type})</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <select id="detailsContentType" class="content-type form-control" style="margin: 0; background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">
+                                <option value="PSA" ${content.content_type && content.content_type.toUpperCase() === 'PSA' ? 'selected' : ''}>PSA</option>
+                                <option value="AN" ${content.content_type && content.content_type.toUpperCase() === 'AN' ? 'selected' : ''}>AN</option>
+                                <option value="BMP" ${content.content_type && content.content_type.toUpperCase() === 'BMP' ? 'selected' : ''}>BMP</option>
+                                <option value="IMOW" ${content.content_type && content.content_type.toUpperCase() === 'IMOW' ? 'selected' : ''}>IMOW</option>
+                                <option value="IM" ${content.content_type && content.content_type.toUpperCase() === 'IM' ? 'selected' : ''}>IM</option>
+                                <option value="IA" ${content.content_type && content.content_type.toUpperCase() === 'IA' ? 'selected' : ''}>IA</option>
+                                <option value="LM" ${content.content_type && content.content_type.toUpperCase() === 'LM' ? 'selected' : ''}>LM</option>
+                                <option value="MTG" ${content.content_type && content.content_type.toUpperCase() === 'MTG' ? 'selected' : ''}>MTG</option>
+                                <option value="MAF" ${content.content_type && content.content_type.toUpperCase() === 'MAF' ? 'selected' : ''}>MAF</option>
+                                <option value="PKG" ${content.content_type && content.content_type.toUpperCase() === 'PKG' ? 'selected' : ''}>PKG</option>
+                                <option value="PMO" ${content.content_type && content.content_type.toUpperCase() === 'PMO' ? 'selected' : ''}>PMO</option>
+                                <option value="SZL" ${content.content_type && content.content_type.toUpperCase() === 'SZL' ? 'selected' : ''}>SZL</option>
+                                <option value="SPP" ${content.content_type && content.content_type.toUpperCase() === 'SPP' ? 'selected' : ''}>SPP</option>
+                                <option value="OTHER" ${content.content_type && content.content_type.toUpperCase() === 'OTHER' ? 'selected' : ''}>OTHER</option>
+                            </select>
+                            <button class="button small primary" onclick="updateContentTypeFromDetails('${contentId}')">
+                                <i class="fas fa-save"></i> Update
+                            </button>
+                        </div>
                         
                         <strong>Duration:</strong>
                         <span>${durationTimecode} (${durationCategory})</span>
@@ -7535,6 +8095,32 @@ function closeContentDetailsModal() {
     if (modal) {
         modal.remove();
     }
+}
+
+// Update content type from details modal
+async function updateContentTypeFromDetails(contentId) {
+    const newType = document.getElementById('detailsContentType').value;
+    
+    // Find the content item
+    const content = availableContent.find(c => {
+        const itemId = c._id || c.id || c.guid;
+        return itemId == contentId || itemId === contentId || String(itemId) === String(contentId);
+    });
+    
+    if (!content) {
+        window.showNotification('Content not found', 'error');
+        return;
+    }
+    
+    // Call the existing updateContentType function
+    await updateContentType(contentId, newType);
+    
+    // Update the modal to reflect the change
+    content.content_type = newType.toLowerCase();
+    
+    // Close and reopen the modal to refresh the display
+    closeContentDetailsModal();
+    viewContentDetails(contentId);
 }
 
 function addToTemplateFromDetails(contentId) {
@@ -10717,6 +11303,20 @@ function addToTemplate(assetId) {
     
     console.log('Adding to template, assetId:', assetId);
     
+    // Check if item already exists in template to prevent duplicates
+    if (currentTemplate.items && currentTemplate.items.length > 0) {
+        const existingItem = currentTemplate.items.find(item => 
+            item.asset_id == assetId || 
+            item.content_id == assetId ||
+            (item.guid && item.guid === assetId)
+        );
+        
+        if (existingItem) {
+            window.showNotification('This item is already in the template', 'warning');
+            return;
+        }
+    }
+    
     // Find the content item by id (PostgreSQL), _id (MongoDB), or guid
     const contentItem = availableContent.find(item => 
         item.id == assetId || item._id === assetId || item.guid === assetId
@@ -13033,6 +13633,129 @@ function deselectAllRegion1Graphics() {
     });
 }
 */
+
+// Function to update scanned file counts after sync
+function updateScannedFileCounts() {
+    const sourceFileCount = document.getElementById('sourceFileCount');
+    const targetFileCount = document.getElementById('targetFileCount');
+    
+    if (sourceFileCount) {
+        sourceFileCount.textContent = `${sourceFiles.length} files found`;
+        sourceFileCount.className = sourceFiles.length > 0 ? 'file-count has-files' : 'file-count';
+    }
+    
+    if (targetFileCount) {
+        targetFileCount.textContent = `${targetFiles.length} files found`;
+        targetFileCount.className = targetFiles.length > 0 ? 'file-count has-files' : 'file-count';
+    }
+}
+
+// Function to update server file counts based on synced files
+function updateServerFileCounts() {
+    console.log('Updating server file counts after sync');
+    
+    // Count how many files were synced to target
+    const syncedToTargetCount = allComparisonResults.filter(r => r.justSynced).length;
+    
+    if (syncedToTargetCount > 0) {
+        // Get synced files info from allComparisonResults
+        const syncedFiles = allComparisonResults.filter(r => r.justSynced);
+        
+        // Add synced files to targetFiles array
+        syncedFiles.forEach(syncedFile => {
+            const fileToAdd = {
+                name: syncedFile.sourceFile?.name || syncedFile.relativePath,
+                size: syncedFile.sourceFile?.size || 0,
+                path: syncedFile.sourceFile?.path || syncedFile.relativePath,
+                relativePath: syncedFile.relativePath,
+                type: syncedFile.sourceFile?.type || 'file'
+            };
+            
+            // Check if file doesn't already exist in targetFiles
+            const exists = targetFiles.some(f => f.name === fileToAdd.name);
+            if (!exists) {
+                targetFiles.push(fileToAdd);
+                console.log(`Added ${fileToAdd.name} to targetFiles`);
+            }
+        });
+        
+        console.log(`Updated targetFiles count: ${targetFiles.length}`);
+        
+        // Update the file count displays
+        updateScannedFileCounts();
+        
+        // Update the displayed file lists
+        displayScannedFiles();
+    }
+}
+
+// Function to update file item UI after successful sync
+function updateFileItemUI(fileId, fileName, status) {
+    // Find all file items that might match this file
+    const fileItems = document.querySelectorAll('.file-item');
+    console.log(`updateFileItemUI: Found ${fileItems.length} file items to check`);
+    
+    let foundMatch = false;
+    
+    fileItems.forEach(item => {
+        // Check if this item matches by looking for the fileId in onclick handlers or data attributes
+        const buttons = item.querySelectorAll('button');
+        let isMatch = false;
+        
+        buttons.forEach(button => {
+            const onclick = button.getAttribute('onclick');
+            if (onclick && onclick.includes(fileId)) {
+                console.log('Found match by button onclick:', onclick);
+                isMatch = true;
+            }
+        });
+        
+        // Also check by file name in the file-name element
+        const fileNameElement = item.querySelector('.file-name');
+        if (fileNameElement && fileNameElement.textContent === fileName) {
+            console.log('Found match by file name:', fileNameElement.textContent);
+            isMatch = true;
+        }
+        
+        if (isMatch && status === 'synced') {
+            foundMatch = true;
+            console.log('Updating matched file item');
+            // Add synced class for visual feedback
+            item.classList.add('synced');
+            
+            // Update the file info to show synced status
+            const fileInfoDiv = item.querySelector('.file-info');
+            if (fileInfoDiv) {
+                // Add a synced indicator if not already present
+                if (!item.querySelector('.sync-status')) {
+                    const syncStatus = document.createElement('div');
+                    syncStatus.className = 'sync-status';
+                    syncStatus.innerHTML = '<i class="fas fa-check-circle"></i> Synced';
+                    fileInfoDiv.appendChild(syncStatus);
+                }
+                
+                // Update the file-size text to show synced status
+                const fileSizeDiv = item.querySelector('.file-size');
+                if (fileSizeDiv && !fileSizeDiv.textContent.includes('Synced')) {
+                    fileSizeDiv.innerHTML = fileSizeDiv.textContent + ' - <span style="color: #4caf50;">✓ Synced</span>';
+                }
+            }
+            
+            // Disable and update the sync button
+            const syncButton = item.querySelector('.add-to-sync-btn');
+            if (syncButton) {
+                syncButton.disabled = true;
+                syncButton.innerHTML = '<i class="fas fa-check"></i> Synced';
+                syncButton.classList.add('synced');
+                syncButton.classList.remove('added');
+            }
+        }
+    });
+    
+    if (!foundMatch) {
+        console.log('WARNING: No matching file item found for:', fileId, fileName);
+    }
+}
 
 // Make Fill Graphics functions available globally
 window.loadRegion1Graphics = loadRegion1Graphics;

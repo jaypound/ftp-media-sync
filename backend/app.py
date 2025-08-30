@@ -558,7 +558,7 @@ def get_analysis_status():
 
 @app.route('/api/delete-files', methods=['POST'])
 def delete_files():
-    """Delete selected files from target server"""
+    """Delete selected files from specified server (source or target)"""
     logger.info("=== DELETE FILES REQUEST ===")
     try:
         data = request.json
@@ -568,11 +568,18 @@ def delete_files():
         
         logger.info(f"Deleting {len(files)} files from {server_type} server (dry_run: {dry_run})")
         
+        # Validate server type
+        if server_type not in ['source', 'target']:
+            return jsonify({
+                'success': False,
+                'message': f'Invalid server type: {server_type}. Must be "source" or "target"'
+            })
+        
         # Check if server is connected
         if server_type not in ftp_managers:
             return jsonify({
                 'success': False, 
-                'message': f'{server_type} server not connected'
+                'message': f'{server_type.capitalize()} server not connected'
             })
         
         # Get the FTP manager
@@ -595,7 +602,8 @@ def delete_files():
                     'message': f'Would delete: {file_name}',
                     'file_name': file_name,
                     'file_path': file_path,
-                    'dry_run': True
+                    'dry_run': True,
+                    'server': server_type
                 })
                 success_count += 1
             else:
@@ -607,7 +615,8 @@ def delete_files():
                         'success': True,
                         'message': f'Successfully deleted: {file_name}',
                         'file_name': file_name,
-                        'file_path': file_path
+                        'file_path': file_path,
+                        'server': server_type
                     })
                     success_count += 1
                 else:
@@ -615,7 +624,8 @@ def delete_files():
                         'success': False,
                         'message': f'Failed to delete: {file_name}',
                         'file_name': file_name,
-                        'file_path': file_path
+                        'file_path': file_path,
+                        'server': server_type
                     })
                     failure_count += 1
         
@@ -1101,11 +1111,21 @@ def update_content_type():
         try:
             cursor = conn.cursor()
             
-            cursor.execute("""
-                UPDATE assets 
-                SET content_type = %s, updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (new_content_type.lower(), content_id))
+            # Check if content_id looks like MongoDB ObjectId (24 char hex string)
+            if len(str(content_id)) == 24 and all(c in '0123456789abcdefABCDEF' for c in str(content_id)):
+                # Use mongo_id column for MongoDB ObjectIds
+                cursor.execute("""
+                    UPDATE assets 
+                    SET content_type = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE mongo_id = %s
+                """, (new_content_type.lower(), content_id))
+            else:
+                # Use regular id column for integer IDs
+                cursor.execute("""
+                    UPDATE assets 
+                    SET content_type = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (new_content_type.lower(), content_id))
             
             conn.commit()
             cursor.close()
@@ -1165,12 +1185,23 @@ def delete_content_entry(content_id):
             cursor = conn.cursor()
             
             # First get the asset info for logging
-            cursor.execute("""
-                SELECT i.file_name, i.file_path, a.content_title 
-                FROM assets a
-                LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
-                WHERE a.id = %s
-            """, (content_id,))
+            # Check if content_id looks like MongoDB ObjectId (24 char hex string)
+            if len(content_id) == 24 and all(c in '0123456789abcdefABCDEF' for c in content_id):
+                # Use mongo_id column for MongoDB ObjectIds
+                cursor.execute("""
+                    SELECT i.file_name, i.file_path, a.content_title, a.id 
+                    FROM assets a
+                    LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                    WHERE a.mongo_id = %s
+                """, (content_id,))
+            else:
+                # Use regular id column for integer IDs
+                cursor.execute("""
+                    SELECT i.file_name, i.file_path, a.content_title, a.id 
+                    FROM assets a
+                    LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                    WHERE a.id = %s
+                """, (content_id,))
             
             asset_info = cursor.fetchone()
             if not asset_info:
@@ -1184,10 +1215,12 @@ def delete_content_entry(content_id):
                 file_name = asset_info.get('file_name') or 'Unknown'
                 file_path = asset_info.get('file_path') or 'Unknown'
                 content_title = asset_info.get('content_title') or file_name
+                actual_asset_id = asset_info.get('id')
             else:
                 file_name = asset_info[0] or 'Unknown'
                 file_path = asset_info[1] or 'Unknown'
                 content_title = asset_info[2] or file_name
+                actual_asset_id = asset_info[3]
             
             logger.info(f"Deleting database entries for: {file_name} (path: {file_path})")
             
@@ -1195,7 +1228,7 @@ def delete_content_entry(content_id):
             cursor.execute("""
                 DELETE FROM instances 
                 WHERE asset_id = %s
-            """, (content_id,))
+            """, (actual_asset_id,))
             
             instances_deleted = cursor.rowcount
             logger.info(f"Deleted {instances_deleted} instance(s)")
@@ -1204,7 +1237,7 @@ def delete_content_entry(content_id):
             cursor.execute("""
                 DELETE FROM assets 
                 WHERE id = %s
-            """, (content_id,))
+            """, (actual_asset_id,))
             
             assets_deleted = cursor.rowcount
             
@@ -1212,7 +1245,7 @@ def delete_content_entry(content_id):
             conn.commit()
             cursor.close()
             
-            logger.info(f"Successfully deleted asset ID {content_id} from database")
+            logger.info(f"Successfully deleted asset ID {actual_asset_id} (mongo_id: {content_id}) from database")
             
             return jsonify({
                 'success': True,
