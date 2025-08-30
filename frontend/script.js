@@ -12633,7 +12633,28 @@ window.editMeeting = function(meetingId) {
     document.getElementById('meetingId').value = meetingId;
     document.getElementById('meetingName').value = meeting.meeting_name;
     document.getElementById('meetingDate').value = meeting.meeting_date;
-    document.getElementById('meetingTime').value = meeting.start_time;
+    
+    // Convert 12-hour format to 24-hour format for time input
+    let timeValue = meeting.start_time || '';
+    if (timeValue) {
+        timeValue = timeValue.trim();
+        const timeMatch = timeValue.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (timeMatch) {
+            let hours = parseInt(timeMatch[1]);
+            const minutes = timeMatch[2];
+            const meridiem = timeMatch[3].toUpperCase();
+            
+            if (meridiem === 'PM' && hours !== 12) {
+                hours += 12;
+            } else if (meridiem === 'AM' && hours === 12) {
+                hours = 0;
+            }
+            
+            timeValue = `${hours.toString().padStart(2, '0')}:${minutes}`;
+        }
+    }
+    document.getElementById('meetingTime').value = timeValue;
+    
     document.getElementById('meetingDuration').value = meeting.duration_hours;
     document.getElementById('meetingRoom').value = meeting.room || '';
     document.getElementById('meetingBroadcast').checked = meeting.atl26_broadcast;
@@ -12648,10 +12669,29 @@ window.closeMeetingModal = function() {
 
 // Save meeting
 window.saveMeeting = async function() {
+    // Convert 24-hour time to 12-hour format with AM/PM
+    let timeValue = document.getElementById('meetingTime').value;
+    if (timeValue) {
+        const [hours24, minutes] = timeValue.split(':');
+        let hours = parseInt(hours24);
+        let meridiem = 'AM';
+        
+        if (hours >= 12) {
+            meridiem = 'PM';
+            if (hours > 12) {
+                hours -= 12;
+            }
+        } else if (hours === 0) {
+            hours = 12;
+        }
+        
+        timeValue = `${hours}:${minutes} ${meridiem}`;
+    }
+    
     const formData = {
         meeting_name: document.getElementById('meetingName').value,
         meeting_date: document.getElementById('meetingDate').value,
-        start_time: document.getElementById('meetingTime').value,
+        start_time: timeValue,
         duration_hours: parseFloat(document.getElementById('meetingDuration').value),
         room: document.getElementById('meetingRoom').value || null,
         atl26_broadcast: document.getElementById('meetingBroadcast').checked

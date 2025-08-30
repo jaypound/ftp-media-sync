@@ -158,13 +158,69 @@ function meetingScheduleOpenAddModal() {
 // Edit meeting
 async function meetingScheduleEditMeeting(meetingId) {
     const meeting = meetingScheduleState.meetings.find(m => m.id === meetingId);
-    if (!meeting) return;
+    if (!meeting) {
+        console.error('Meeting not found with ID:', meetingId);
+        return;
+    }
+    
+    console.log('Editing meeting:', meeting);
     
     // Populate form
     document.getElementById('meetingId').value = meeting.id;
     document.getElementById('meetingName').value = meeting.meeting_name;
     document.getElementById('meetingDate').value = meeting.meeting_date.split('T')[0];
-    document.getElementById('meetingTime').value = meeting.start_time;
+    
+    // Format time for HTML time input (expects 24-hour HH:MM format)
+    let timeValue = meeting.start_time || '';
+    console.log('Meeting edit - Original time from database:', meeting.start_time);
+    
+    if (timeValue) {
+        // First, trim any whitespace
+        timeValue = timeValue.trim();
+        
+        // Convert 12-hour format (H:MM AM/PM or HH:MM AM/PM) to 24-hour format (HH:MM)
+        const timeMatch = timeValue.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (timeMatch) {
+            let hours = parseInt(timeMatch[1]);
+            const minutes = timeMatch[2];
+            const meridiem = timeMatch[3].toUpperCase();
+            
+            console.log(`Parsed time components - hours: ${hours}, minutes: ${minutes}, meridiem: ${meridiem}`);
+            
+            // Convert to 24-hour format
+            if (meridiem === 'PM' && hours !== 12) {
+                hours += 12;
+            } else if (meridiem === 'AM' && hours === 12) {
+                hours = 0;
+            }
+            
+            // Format as HH:MM
+            timeValue = `${hours.toString().padStart(2, '0')}:${minutes}`;
+            console.log('Converted to 24-hour format:', timeValue);
+        }
+        // If time includes seconds in 24-hour format, remove them
+        else if (timeValue.match(/^\d{2}:\d{2}:\d{2}$/)) {
+            timeValue = timeValue.substring(0, 5); // Get only HH:MM
+        }
+        // If time has milliseconds or timezone, extract just the time
+        else if (timeValue.includes('T')) {
+            const timePart = timeValue.split('T')[1];
+            timeValue = timePart.substring(0, 5);
+        }
+        else {
+            console.warn('Time format not recognized:', timeValue);
+        }
+    }
+    
+    console.log('Final formatted time for input:', timeValue);
+    const timeInput = document.getElementById('meetingTime');
+    if (timeInput) {
+        timeInput.value = timeValue;
+        console.log('Time input value set to:', timeInput.value);
+    } else {
+        console.error('Time input element not found!');
+    }
+    
     document.getElementById('meetingDuration').value = meeting.duration_hours;
     document.getElementById('meetingRoom').value = meeting.room || '';
     document.getElementById('meetingBroadcast').checked = meeting.broadcast_on_atl26;
@@ -181,10 +237,30 @@ async function meetingScheduleEditMeeting(meetingId) {
 // Save meeting
 async function meetingScheduleSaveMeeting() {
     const meetingId = document.getElementById('meetingId').value;
+    
+    // Convert 24-hour time to 12-hour format with AM/PM
+    let timeValue = document.getElementById('meetingTime').value;
+    if (timeValue) {
+        const [hours24, minutes] = timeValue.split(':');
+        let hours = parseInt(hours24);
+        let meridiem = 'AM';
+        
+        if (hours >= 12) {
+            meridiem = 'PM';
+            if (hours > 12) {
+                hours -= 12;
+            }
+        } else if (hours === 0) {
+            hours = 12;
+        }
+        
+        timeValue = `${hours}:${minutes} ${meridiem}`;
+    }
+    
     const formData = {
         meeting_name: document.getElementById('meetingName').value,
         meeting_date: document.getElementById('meetingDate').value,
-        start_time: document.getElementById('meetingTime').value,
+        start_time: timeValue,
         duration_hours: parseFloat(document.getElementById('meetingDuration').value),
         room: document.getElementById('meetingRoom').value,
         broadcast_on_atl26: document.getElementById('meetingBroadcast').checked
