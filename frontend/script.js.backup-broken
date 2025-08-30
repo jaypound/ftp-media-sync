@@ -13770,3 +13770,57 @@ window.updateRegion3Selection = updateRegion3Selection;
 // window.showGenerateProjectModal = showGenerateProjectModal;
 // window.closeGenerateProjectModal = closeGenerateProjectModal;
 window.generateProjectFile = generateProjectFile;
+// These are now handled by the fill_graphics module
+// window.selectAllRegion1Graphics = selectAllRegion1Graphics;
+// window.deselectAllRegion1Graphics = deselectAllRegion1Graphics;
+// Content type filter for scanned files
+function filterScannedFilesByContentType() {
+    const filterValue = document.getElementById("scannedFilesContentTypeFilter").value;
+    const sourceFilesList = document.getElementById("sourceFilesList");
+    const targetFilesList = document.getElementById("targetFilesList");
+    
+    filterFileListByContentType(sourceFilesList, filterValue);
+    filterFileListByContentType(targetFilesList, filterValue);
+}
+
+// Content type filter for comparison results
+function filterComparisonByContentType() {
+    const filterValue = document.getElementById("comparisonContentTypeFilter").value;
+    const fileList = document.getElementById("fileList");
+    
+    filterFileListByContentType(fileList, filterValue);
+}
+
+// Helper function to filter file lists by content type
+function filterFileListByContentType(container, contentType) {
+    if (\!container) return;
+    
+    const fileItems = container.querySelectorAll(".file-item");
+    fileItems.forEach(item => {
+        const fileName = item.querySelector(".file-name")?.textContent || "";
+        
+        if (\!contentType) {
+            // Show all files if no filter selected
+            item.style.display = "";
+        } else {
+            // Check if filename contains the content type pattern
+            const pattern = `_${contentType}_`;
+            if (fileName.includes(pattern)) {
+                item.style.display = "";
+            } else {
+                item.style.display = "none";
+            }
+        }
+    });
+}
+
+// Show content type filter when scanned files are displayed
+const originalToggleScannedFiles = window.toggleScannedFiles;
+window.toggleScannedFiles = function() {
+    originalToggleScannedFiles();
+    const detailsContainer = document.getElementById("scannedFilesDetails");
+    const contentTypeFilter = document.getElementById("scannedFilesContentTypeFilter");
+    if (detailsContainer && contentTypeFilter) {
+        contentTypeFilter.style.display = detailsContainer.style.display === "none" ? "none" : "inline-block";
+    }
+};

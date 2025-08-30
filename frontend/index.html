@@ -976,6 +976,24 @@
                 <button class="button secondary small" id="toggleUnanalyzedOnlyBtn" onclick="toggleUnanalyzedOnly()" style="display: none; margin-left: 0.5rem;">
                     <i class="fas fa-filter"></i> Show Unanalyzed Only
                 </button>
+                <select id="scannedFilesContentTypeFilter" class="form-control" style="display: none; margin-left: 0.5rem; width: auto; max-width: 200px;" onchange="filterScannedFilesByContentType()">
+                    <option value="">All Content Types</option>
+                    <option value="AN">AN - Atlanta Now</option>
+                    <option value="ATLD">ATLD - ATL Direct</option>
+                    <option value="BMP">BMP - Bumps</option>
+                    <option value="IMOW">IMOW</option>
+                    <option value="IM">IM - Inclusion Months</option>
+                    <option value="IA">IA - Inside Atlanta</option>
+                    <option value="LM">LM - Legislative Minute</option>
+                    <option value="MTG">MTG - Meetings</option>
+                    <option value="MAF">MAF - Moving Atlanta Forward</option>
+                    <option value="PKG">PKG - Packages</option>
+                    <option value="PMO">PMO - Promos</option>
+                    <option value="PSA">PSA - PSAs</option>
+                    <option value="SZL">SZL - Sizzles</option>
+                    <option value="SPP">SPP - Special Projects</option>
+                    <option value="OTHER">OTHER</option>
+                </select>
             </div>
             <div class="dashboard-scanned-files-container scanned-files-container" id="scannedFilesDetails" style="display: none;">
                 <div class="dashboard-scanned-files-section scanned-files-section">
@@ -991,6 +1009,42 @@
             </div>
         </div>
 
+        <!-- File Comparison Results -->
+        <div class="card" id="comparisonCard" style="display: none;">
+            <div class="card-header">
+                <h3><i class="fas fa-balance-scale"></i> File Comparison Results</h3>
+                <div class="comparison-summary" id="comparisonSummary">
+                    <span id="comparisonSummaryText">No comparison results yet</span>
+                </div>
+                <div class="comparison-buttons">
+                    <button class="button secondary small" id="toggleComparisonBtn" onclick="toggleComparisonView()">
+                        <i class="fas fa-eye"></i> Show All Files
+                    </button>
+                    <button class="button secondary small" id="toggleTargetOnlyBtn" onclick="toggleTargetOnlyView()">
+                        <i class="fas fa-eye"></i> Show Target-Only Files
+                    </button>
+                    <select id="comparisonContentTypeFilter" class="form-control" style="margin-left: 0.5rem; width: auto; max-width: 200px;" onchange="filterComparisonByContentType()">
+                        <option value="">All Content Types</option>
+                        <option value="AN">AN - Atlanta Now</option>
+                        <option value="ATLD">ATLD - ATL Direct</option>
+                        <option value="BMP">BMP - Bumps</option>
+                        <option value="IMOW">IMOW</option>
+                        <option value="IM">IM - Inclusion Months</option>
+                        <option value="IA">IA - Inside Atlanta</option>
+                        <option value="LM">LM - Legislative Minute</option>
+                        <option value="MTG">MTG - Meetings</option>
+                        <option value="MAF">MAF - Moving Atlanta Forward</option>
+                        <option value="PKG">PKG - Packages</option>
+                        <option value="PMO">PMO - Promos</option>
+                        <option value="PSA">PSA - PSAs</option>
+                        <option value="SZL">SZL - Sizzles</option>
+                        <option value="SPP">SPP - Special Projects</option>
+                        <option value="OTHER">OTHER</option>
+                    </select>
+                </div>
+            </div>
+            <div id="fileList" class="dashboard-comparison-container file-list"></div>
+        </div>
 
         <!-- Meeting Trimmer Panel -->
         <div class="card" id="meetingTrimmerCard">
@@ -1016,25 +1070,6 @@
                     <p style="text-align: center; color: #666;">Click "Refresh List" to load recordings</p>
                 </div>
             </div>
-        </div>
-
-        <!-- File Comparison Results -->
-        <div class="card" id="comparisonCard" style="display: none;">
-            <div class="card-header">
-                <h3><i class="fas fa-balance-scale"></i> File Comparison Results</h3>
-                <div class="comparison-summary" id="comparisonSummary">
-                    <span id="comparisonSummaryText">No comparison results yet</span>
-                </div>
-                <div class="comparison-buttons">
-                    <button class="button secondary small" id="toggleComparisonBtn" onclick="toggleComparisonView()">
-                        <i class="fas fa-eye"></i> Show All Files
-                    </button>
-                    <button class="button secondary small" id="toggleTargetOnlyBtn" onclick="toggleTargetOnlyView()">
-                        <i class="fas fa-eye"></i> Show Target-Only Files
-                    </button>
-                </div>
-            </div>
-            <div id="fileList" class="dashboard-comparison-container file-list"></div>
         </div>
 
         <!-- File Analysis Results -->
@@ -1843,5 +1878,7 @@
 
     <!-- Legacy script for compatibility -->
     <script src="script.js"></script>
+    <!-- Content type filters -->
+    <script src="content_type_filters.js"></script>
 </body>
 </html>
