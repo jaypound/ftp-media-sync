@@ -13,6 +13,11 @@ class FileScanner:
         if filters is None:
             filters = {}
         
+        # Check if trying to scan Recordings directory
+        if 'Recordings' in path or 'recordings' in path:
+            logger.warning(f"Skipping scan of Recordings directory: {path}")
+            return []
+        
         # Store the base path for relative path calculation
         base_path = path.rstrip('/')
         files = []
@@ -55,6 +60,11 @@ class FileScanner:
     def _scan_directory_recursive(self, current_path, base_path, filters):
         """Recursively scan a subdirectory"""
         files = []
+        
+        # Skip Recordings directories
+        if 'Recordings' in current_path or 'recordings' in current_path:
+            logger.info(f"Skipping Recordings directory in recursive scan: {current_path}")
+            return []
         
         logger.debug(f"Recursive scan: {current_path} (base: {base_path})")
         
@@ -161,6 +171,14 @@ class FileScanner:
             
             logger.debug(f"Getting subdirectories for {path}, found {len(file_list)} entries")
             
+            # Directories to exclude from scanning
+            excluded_dirs = ['Recordings', 'recordings']
+            
+            # Also exclude SDI directories if we're in the main directory
+            if path == '/mnt/main' or path == '/mnt/md127':
+                excluded_dirs.extend(['1-SDI in', '2-SDI in', '3-SDI in'])
+                logger.info(f"In main directory, also excluding SDI directories")
+            
             for line in file_list:
                 parts = line.split()
                 if len(parts) >= 9:
@@ -169,6 +187,10 @@ class FileScanner:
                     
                     # Directory starts with 'd'
                     if permissions.startswith('d') and name not in ['.', '..']:
+                        # Skip excluded directories
+                        if name in excluded_dirs:
+                            logger.info(f"Excluding directory from scan: {name}")
+                            continue
                         subdirs.append(name)
                         logger.debug(f"Found subdirectory: {name}")
             

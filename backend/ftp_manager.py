@@ -42,10 +42,23 @@ class FTPManager:
         # Original path
         alternatives.append(("Original", full_remote_path))
         
+        # Check if this might be a recording file
+        if ('3-SDI in' in full_remote_path or '2-SDI in' in full_remote_path or 
+            '1-SDI in' in full_remote_path) and 'ATL26 On-Air Content' in full_remote_path:
+            # Try Recordings path
+            recordings_path = full_remote_path.replace('/mnt/main/ATL26 On-Air Content/', '/mnt/main/Recordings/')
+            alternatives.append(("Recordings directory", recordings_path))
+        
         # Handle symbolic link: /mnt/main -> /mnt/md127
         if full_remote_path.startswith('/mnt/main/'):
             md127_path = full_remote_path.replace('/mnt/main/', '/mnt/md127/', 1)
             alternatives.append(("Symlink resolved", md127_path))
+            
+            # Also add Recordings path with md127
+            if ('3-SDI in' in full_remote_path or '2-SDI in' in full_remote_path or 
+                '1-SDI in' in full_remote_path) and 'ATL26 On-Air Content' in full_remote_path:
+                recordings_md127_path = full_remote_path.replace('/mnt/main/ATL26 On-Air Content/', '/mnt/md127/Recordings/')
+                alternatives.append(("Recordings directory (md127)", recordings_md127_path))
             
             # Apply quoted folder transformations to symlink resolved path
             quoted_md127_path = md127_path
@@ -759,17 +772,18 @@ class FTPManager:
             base_path = self.config.get('path', '/')
             
             if remote_path.startswith('/'):
-                # Already an absolute path
+                # Already an absolute path - use as is
                 full_remote_path = remote_path
+                logger.info(f"Using absolute path for deletion: {full_remote_path}")
             else:
                 # Relative path - combine with base path
                 if base_path.endswith('/'):
                     full_remote_path = base_path + remote_path
                 else:
                     full_remote_path = base_path + '/' + remote_path
-            
-            # Clean up any double slashes
-            full_remote_path = full_remote_path.replace('//', '/')
+                # Clean up any double slashes
+                full_remote_path = full_remote_path.replace('//', '/')
+                logger.info(f"Using relative path with base: {full_remote_path}")
             
             logger.info(f"Deleting file from FTP path: {full_remote_path}")
             logger.info(f"Base path: {base_path}, Remote path: {remote_path}")
@@ -838,6 +852,29 @@ class FTPManager:
                     # Try to list the directory to verify access
                     self.ftp.cwd(current_dir)
                     logger.info(f"Can access directory: {current_dir}")
+                    
+                    # List files in directory to see what's actually there
+                    file_list = []
+                    self.ftp.retrlines('LIST', file_list.append)
+                    target_filename = os.path.basename(full_remote_path)
+                    logger.info(f"Looking for file: {target_filename}")
+                    
+                    # Check if file exists with different case or encoding
+                    found_similar = []
+                    for line in file_list:
+                        if target_filename.lower() in line.lower():
+                            found_similar.append(line)
+                    
+                    if found_similar:
+                        logger.info(f"Found similar files in directory:")
+                        for f in found_similar:
+                            logger.info(f"  {f}")
+                    else:
+                        logger.info(f"No files matching '{target_filename}' found in directory")
+                        logger.info(f"First 5 files in directory:")
+                        for f in file_list[:5]:
+                            logger.info(f"  {f}")
+                    
                     # Return to original directory
                     self.ftp.cwd(base_path)
                 except Exception as perm_e:

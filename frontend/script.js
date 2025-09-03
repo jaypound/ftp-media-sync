@@ -3254,17 +3254,22 @@ async function confirmDeleteWithOptions() {
     if (deleteFromSource) servers.push('source');
     if (deleteFromTarget) servers.push('target');
     
+    // Store fileId before closing modal
+    const fileId = currentDeleteFile.fileId;
+    const fileDetails = { ...currentDeleteFile };
+    
     closeDeleteOptionsModal();
     
     // Add to delete queue with server info
     const queueItem = {
-        ...currentDeleteFile,
+        ...fileDetails,
         deleteServers: servers,
         dryRun: dryRun
     };
     
     // Check if already in delete queue
-    const alreadyInQueue = deleteQueue.find(item => item.fileId === currentDeleteFile.fileId);
+    const alreadyInQueue = fileId ? 
+        deleteQueue.find(item => item.fileId === fileId) : null;
     if (alreadyInQueue) {
         // Update existing entry
         alreadyInQueue.deleteServers = servers;
@@ -3275,16 +3280,18 @@ async function confirmDeleteWithOptions() {
     }
     
     // Update button state
-    const button = document.querySelector(`button[onclick="addToDeleteQueue('${currentDeleteFile.fileId}')"]`);
-    if (button) {
-        const serverText = servers.length === 2 ? 'both' : servers[0];
-        button.innerHTML = `<i class="fas fa-check"></i> Delete from ${serverText}`;
-        button.classList.add('added');
-        button.disabled = true;
+    if (fileId) {
+        const button = document.querySelector(`button[onclick="addToDeleteQueue('${fileId}')"]`);
+        if (button) {
+            const serverText = servers.length === 2 ? 'both' : servers[0];
+            button.innerHTML = `<i class="fas fa-check"></i> Delete from ${serverText}`;
+            button.classList.add('added');
+            button.disabled = true;
+        }
     }
     
     const serverText = servers.join(' & ');
-    log(`📋 Added ${currentDeleteFile.targetFile?.name || currentDeleteFile.sourceFile?.name} to delete queue (delete from ${serverText})`);
+    log(`📋 Added ${fileDetails.targetFile?.name || fileDetails.sourceFile?.name} to delete queue (delete from ${serverText})`);
     updateDeleteButtonState();
     updateBulkDeleteButtonStates();
 }
@@ -3361,7 +3368,9 @@ async function deleteFiles() {
             // Prepare file info based on which server we're deleting from
             const fileInfo = {
                 name: item.targetFile?.name || item.sourceFile?.name,
-                path: item.relativePath,
+                path: (server === 'target' && item.targetFile?.full_path) || 
+                      (server === 'source' && item.sourceFile?.full_path) || 
+                      item.relativePath,
                 size: item.targetFile?.size || item.sourceFile?.size || 0,
                 fileId: item.fileId
             };

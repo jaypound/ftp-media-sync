@@ -4583,7 +4583,9 @@ def fill_template_gaps():
                             logger.error(f"Aborting fill gaps: cycled through all categories {total_cycles_without_content} times without finding content")
                             break
                     
-                    # Don't reset rotation - just continue to the next category
+                    # Advance rotation to try next category
+                    scheduler._advance_rotation()
+                    # Continue to the next category
                     continue
             
                 # Sort by engagement score and shelf life (like scheduler does)
