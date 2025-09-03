@@ -4495,6 +4495,11 @@ def fill_template_gaps():
             gap_end = gap['end']
             gap_duration = gap_end - gap_start
             
+            # Skip very small gaps (less than 10 seconds)
+            if gap_duration < 10:
+                logger.info(f"Skipping gap of {gap_duration:.1f} seconds (too small to fill)")
+                continue
+            
             logger.info(f"Filling gap from {gap_start/3600:.1f}h to {gap_end/3600:.1f}h (duration: {gap_duration/3600:.1f}h)")
             logger.info(f"  Exact gap values: start={gap_start}s ({gap_start/3600:.6f}h), end={gap_end}s ({gap_end/3600:.6f}h)")
             
@@ -4504,6 +4509,13 @@ def fill_template_gaps():
                 # Get next duration category from rotation
                 duration_category = scheduler._get_next_duration_category()
                 
+                # Check if we should skip long-form content after 10 PM
+                current_hour = (current_position % 86400) / 3600
+                if current_hour >= 22 and duration_category == 'long_form':
+                    logger.info(f"Skipping long-form content after 10 PM (current hour: {current_hour:.1f})")
+                    scheduler._advance_rotation()
+                    continue
+                
                 # Filter available content by category and replay delays
                 category_content = []
                 wrong_category = 0
@@ -4511,6 +4523,18 @@ def fill_template_gaps():
                 
                 # Get replay delay for this category (in hours)
                 replay_delay_hours = replay_delays.get(duration_category, 24)
+                
+                # Progressive delay reduction after 10 PM
+                current_hour = (current_position % 86400) / 3600
+                if current_hour >= 22:  # After 10 PM
+                    if current_hour >= 23.5:  # After 11:30 PM
+                        replay_delay_hours = replay_delay_hours / 4  # 25% of normal
+                    elif current_hour >= 23:  # After 11 PM
+                        replay_delay_hours = replay_delay_hours / 2  # 50% of normal
+                    else:  # 10 PM - 11 PM
+                        replay_delay_hours = replay_delay_hours * 0.75  # 75% of normal
+                    logger.debug(f"Reduced replay delay for {duration_category} to {replay_delay_hours:.1f} hours at {current_hour:.1f}h")
+                
                 replay_delay_seconds = replay_delay_hours * 3600
                 
                 for content_id, content in content_by_id.items():
@@ -4594,8 +4618,17 @@ def fill_template_gaps():
                       (20 if x.get('shelf_life_score') == 'high' else 10 if x.get('shelf_life_score') == 'medium' else 0))
                 ))
                 
-                # Select the best content
-                selected = category_content[0]
+                # For ID content, add variety by selecting from top candidates randomly
+                if duration_category == 'id' and len(category_content) > 1:
+                    # Take top 40% of available IDs (at least 3) to add variety
+                    import random
+                    top_count = max(3, int(len(category_content) * 0.4))
+                    top_candidates = category_content[:top_count]
+                    selected = random.choice(top_candidates)
+                    logger.debug(f"Selected ID from top {top_count} candidates for variety")
+                else:
+                    # Select the best content for other categories
+                    selected = category_content[0]
                 # Check for duration_seconds or file_duration
                 duration = float(selected.get('duration_seconds', selected.get('file_duration', 0)))
                 consecutive_errors = 0  # Reset consecutive error counter
@@ -4627,12 +4660,23 @@ def fill_template_gaps():
                         
                         # Define category priority for small gaps (prefer shorter content)
                         gap_minutes = remaining / 60
-                        if gap_minutes < 2:
-                            category_priority = ['id', 'spots', 'short_form', 'long_form']
-                        elif gap_minutes < 20:
-                            category_priority = ['spots', 'short_form', 'id', 'long_form']
+                        current_hour = (current_position % 86400) / 3600
+                        
+                        # Exclude long-form after 10 PM
+                        if current_hour >= 22:
+                            if gap_minutes < 2:
+                                category_priority = ['id', 'spots', 'short_form']
+                            elif gap_minutes < 20:
+                                category_priority = ['spots', 'short_form', 'id']
+                            else:
+                                category_priority = ['short_form', 'spots', 'id']
                         else:
-                            category_priority = ['short_form', 'spots', 'long_form', 'id']
+                            if gap_minutes < 2:
+                                category_priority = ['id', 'spots', 'short_form', 'long_form']
+                            elif gap_minutes < 20:
+                                category_priority = ['spots', 'short_form', 'id', 'long_form']
+                            else:
+                                category_priority = ['short_form', 'spots', 'long_form', 'id']
                         
                         # Try each category in priority order
                         for try_category in category_priority:
@@ -4654,6 +4698,18 @@ def fill_template_gaps():
                                     if content_id in asset_schedule_times:
                                         last_times = asset_schedule_times[content_id]
                                         replay_delay_hours = replay_delays.get(try_category, 24)
+                                        
+                                        # Progressive delay reduction after 10 PM
+                                        current_hour = (current_position % 86400) / 3600
+                                        if current_hour >= 22:  # After 10 PM
+                                            if current_hour >= 23.5:  # After 11:30 PM
+                                                replay_delay_hours = replay_delay_hours / 4  # 25% of normal
+                                            elif current_hour >= 23:  # After 11 PM
+                                                replay_delay_hours = replay_delay_hours / 2  # 50% of normal
+                                            else:  # 10 PM - 11 PM
+                                                replay_delay_hours = replay_delay_hours * 0.75  # 75% of normal
+                                            logger.debug(f"Reduced replay delay for {try_category} to {replay_delay_hours:.1f} hours at {current_hour:.1f}h")
+                                        
                                         replay_delay_seconds = replay_delay_hours * 3600
                                         
                                         for last_time in last_times:
@@ -4673,8 +4729,191 @@ def fill_template_gaps():
                             logger.info(f"Found {best_fit.get('duration_category')} content '{best_fit.get('content_title', best_fit.get('file_name'))}' ({duration/60:.1f} min) that fits gap")
                         else:
                             logger.warning(f"No content from any category fits remaining gap of {remaining/60:.1f} minutes")
-                            # Move to next gap
-                            break
+                            # Log gap details for debugging
+                            if schedule_type == 'weekly':
+                                # For weekly schedules, show which day this gap is on
+                                day_index = int(gap_end / 86400)
+                                days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                                day_name = days[day_index % 7]
+                                gap_end_time = gap_end % 86400
+                                gap_end_hours = gap_end_time / 3600
+                                logger.info(f"Gap details ({day_name}): ends at {gap_end_hours:.2f}h ({int(gap_end_hours)}:{int((gap_end_hours % 1) * 60):02d}), position={current_position/3600:.2f}h")
+                            else:
+                                gap_end_time = gap_end % 86400
+                                gap_end_hours = gap_end_time / 3600
+                                logger.info(f"Gap details: ends at {gap_end_hours:.2f}h ({int(gap_end_hours)}:{int((gap_end_hours % 1) * 60):02d}), position={current_position/3600:.2f}h")
+                            
+                            # Check if this is an end-of-day gap (within 2 hours of midnight)
+                            # For daily schedules, gap_end should be close to 86400 (24 hours)
+                            # For weekly schedules, check if we're near the end of any day
+                            is_end_of_day = False
+                            end_of_day_threshold = 7200  # 2 hours before midnight
+                            
+                            if schedule_type == 'daily':
+                                # Check if gap ends near midnight (24 hours = 86400 seconds)
+                                is_end_of_day = gap_end >= 86400 - end_of_day_threshold  # Within 2 hours of midnight
+                            else:
+                                # For weekly schedules, check if gap ends near any midnight
+                                # Days are 0-6, so check if we're near any day boundary
+                                seconds_in_week = gap_end % (7 * 86400)
+                                seconds_in_day = seconds_in_week % 86400
+                                is_end_of_day = seconds_in_day >= 86400 - end_of_day_threshold  # Within 2 hours of midnight
+                            
+                            # Check if gap is too small to fill (less than 10 seconds)
+                            if remaining < 10:
+                                logger.info(f"Gap of {remaining:.1f} seconds is too small to fill. Moving to next gap.")
+                                break
+                            
+                            if is_end_of_day:
+                                # For end-of-day gaps, be more aggressive about filling
+                                # Accept larger gaps the closer we are to midnight
+                                time_to_midnight = 86400 - (gap_end % 86400)
+                                
+                                # Be more aggressive - target 10 minutes or less for end-of-day gaps
+                                target_end_gap = 600  # 10 minutes target
+                                
+                                # Only accept gaps if they're at or below our target
+                                if remaining <= target_end_gap:
+                                    logger.info(f"End-of-day gap detected ({remaining/60:.1f} min remaining, {time_to_midnight/60:.1f} min to midnight). Accepting unfilled time.")
+                                    break
+                                    
+                                # Prevent infinite loops - if we've tried too many times, accept the gap
+                                if consecutive_errors >= 10:
+                                    logger.warning(f"End-of-day gap: tried {consecutive_errors} times without success. Accepting gap of {remaining/60:.1f} minutes to prevent infinite loop.")
+                                    break
+                                
+                                # Try shorter content categories first for end-of-day gaps
+                                logger.info(f"End-of-day gap of {remaining/60:.1f} min. Trying shorter content categories...")
+                                
+                                # Try categories in order of shortest to longest for end-of-day
+                                end_of_day_order = ['id', 'spots', 'short_form']  # Skip long_form for end-of-day
+                                found_shorter_content = False
+                                
+                                for try_category in end_of_day_order:
+                                    category_content = [c for c in available_content_by_category.get(try_category, [])]
+                                    if category_content:
+                                        # Sort by duration (shortest first) for end-of-day
+                                        category_content.sort(key=lambda x: x.get('duration_seconds', 0))
+                                        
+                                        # For ID content, shuffle to add variety
+                                        if try_category == 'id' and len(category_content) > 1:
+                                            import random
+                                            # Group by similar durations (within 1 second)
+                                            duration_groups = {}
+                                            for c in category_content:
+                                                dur = int(c.get('duration_seconds', 0))
+                                                if dur not in duration_groups:
+                                                    duration_groups[dur] = []
+                                                duration_groups[dur].append(c)
+                                            
+                                            # Rebuild list with shuffled groups
+                                            category_content = []
+                                            for dur in sorted(duration_groups.keys()):
+                                                group = duration_groups[dur]
+                                                random.shuffle(group)
+                                                category_content.extend(group)
+                                            
+                                            for content in category_content:
+                                                content_duration = content.get('duration_seconds', 0)
+                                                if content_duration <= remaining and content_duration > 0:
+                                                    # Check replay delays with progressive reduction for end-of-day
+                                                    can_schedule = True
+                                                    content_id = content.get('id')
+                                                    if content_id in asset_schedule_times:
+                                                        replay_delay_hours = replay_delays.get(try_category, 1)
+                                                        
+                                                        # Progressive delay reduction after 10 PM
+                                                        current_hour = (current_position % 86400) / 3600
+                                                        if current_hour >= 22:  # After 10 PM
+                                                            if current_hour >= 23.5:  # After 11:30 PM
+                                                                replay_delay_hours = replay_delay_hours / 4  # 25% of normal
+                                                            elif current_hour >= 23:  # After 11 PM
+                                                                replay_delay_hours = replay_delay_hours / 2  # 50% of normal
+                                                            else:  # 10 PM - 11 PM
+                                                                replay_delay_hours = replay_delay_hours * 0.75  # 75% of normal
+                                                            logger.debug(f"Reduced replay delay for {try_category} to {replay_delay_hours:.1f} hours at {current_hour:.1f}h")
+                                                        
+                                                        replay_delay_seconds = replay_delay_hours * 3600
+                                                        for last_time in asset_schedule_times[content_id]:
+                                                            if current_position - last_time < replay_delay_seconds:
+                                                                can_schedule = False
+                                                                break
+                                                    
+                                                    if can_schedule:
+                                                        selected = content
+                                                        duration = content_duration
+                                                        found_shorter_content = True
+                                                        logger.info(f"Found shorter {try_category} content for end-of-day: '{content.get('content_title', content.get('file_name'))}' ({duration/60:.1f} min)")
+                                                        break
+                                            
+                                            if found_shorter_content:
+                                                break
+                                    
+                                    if not found_shorter_content:
+                                        # Try one more time with even more relaxed replay delays for end-of-day gaps
+                                        # Be aggressive to meet our 10-minute target
+                                        if remaining > 600:  # More than 10 minutes remaining
+                                            logger.info(f"End-of-day gap ({remaining/60:.1f} min) exceeds 10-minute target. Trying with minimal replay delays...")
+                                            
+                                            for try_category in end_of_day_order:
+                                                category_content = [c for c in available_content_by_category.get(try_category, [])]
+                                                if category_content:
+                                                    # Sort by duration for end-of-day
+                                                    category_content.sort(key=lambda x: x.get('duration_seconds', 0))
+                                                    
+                                                    for content in category_content:
+                                                        content_duration = content.get('duration_seconds', 0)
+                                                        if content_duration <= remaining and content_duration > 0:
+                                                            # For large end-of-day gaps, use minimal delays (10% of normal)
+                                                            can_schedule = True
+                                                            content_id = content.get('id')
+                                                            if content_id in asset_schedule_times:
+                                                                replay_delay_hours = replay_delays.get(try_category, 1) * 0.1
+                                                                replay_delay_seconds = replay_delay_hours * 3600
+                                                                
+                                                                for last_time in asset_schedule_times[content_id]:
+                                                                    if current_position - last_time < replay_delay_seconds:
+                                                                        can_schedule = False
+                                                                        break
+                                                            
+                                                            if can_schedule:
+                                                                selected = content
+                                                                duration = content_duration
+                                                                found_shorter_content = True
+                                                                logger.info(f"Found {try_category} content with minimal delays: '{content.get('content_title', content.get('file_name'))}' ({duration/60:.1f} min)")
+                                                                break
+                                                    
+                                                    if found_shorter_content:
+                                                        break
+                                        
+                                        if not found_shorter_content:
+                                            logger.warning(f"No shorter content fits end-of-day gap of {remaining/60:.1f} minutes even with minimal delays. Accepting unfilled time.")
+                                            # Increment error counter to prevent infinite loops
+                                            consecutive_errors += 1
+                                            break
+                            else:
+                                # Not end-of-day, normal rotation logic
+                                
+                                # Check if gap is small enough to accept
+                                minimum_fillable_gap = 30  # 30 seconds minimum
+                                if remaining < minimum_fillable_gap:
+                                    logger.info(f"Gap of {remaining:.1f} seconds is below minimum fillable threshold. Accepting unfilled gap.")
+                                    break
+                                
+                                # For gaps less than 1 minute, accept them after trying once
+                                if remaining < 60 and consecutive_errors > 0:
+                                    logger.info(f"Small gap of {remaining:.1f} seconds. Accepting after {consecutive_errors} attempts.")
+                                    break
+                                
+                                logger.info(f"Gap of {remaining/60:.1f} min is too large to leave unfilled. Advancing rotation.")
+                                scheduler._advance_rotation()
+                                consecutive_errors += 1
+                                
+                                if consecutive_errors >= len(scheduler.duration_rotation) * 2:
+                                    logger.warning(f"Tried all rotations twice. Accepting gap of {remaining/60:.1f} minutes.")
+                                    break
+                                
+                                continue
             
                 # Check for overlap with original items before adding
                 new_item_start = current_position
