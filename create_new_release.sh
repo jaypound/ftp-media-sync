@@ -4,7 +4,7 @@ export BASE="/opt/$APP_NAME"
 
 # update version
 
-export TAG="v1.1"
+export TAG="v1.2"
 
 export REL="$BASE/releases/$(date +%Y%m%d_%H%M%S)_$TAG"
 
@@ -22,4 +22,8 @@ python3 -m venv "$REL/venv"
 
 source "$REL/venv/bin/activate"
 
-pip install -r "$REL/requirements.txt"
+pip install -r "$REL/backend/requirements.txt"
+
+ln -sfn $REL /opt/ftp-media-sync/current
+
+brew services restart caddy

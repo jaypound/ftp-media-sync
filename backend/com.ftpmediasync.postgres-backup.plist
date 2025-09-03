@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ftpmediasync.postgres-backup</string>
+    
+    <key>Program</key>
+    <string>/Users/jaypound/git/ftp-media-sync/backend/backup_postgres.sh</string>
+    
+    <!-- Run daily at 2:00 AM -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    
+    <!-- Environment variables if needed -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Postgres.app/Contents/Versions/latest/bin</string>
+        <key>HOME</key>
+        <string>/Users/jaypound</string>
+    </dict>
+    
+    <!-- Log output -->
+    <key>StandardOutPath</key>
+    <string>/Users/jaypound/postgres_backups/ftp-media-sync/logs/launchd-stdout.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/Users/jaypound/postgres_backups/ftp-media-sync/logs/launchd-stderr.log</string>
+    
+    <!-- Run even if computer is asleep -->
+    <key>RunAtLoad</key>
+    <false/>
+    
+    <!-- Keep alive only during backup -->
+    <key>KeepAlive</key>
+    <false/>
+    
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/Users/jaypound/git/ftp-media-sync/backend</string>
+</dict>
+</plist>
