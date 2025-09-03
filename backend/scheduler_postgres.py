@@ -278,7 +278,7 @@ class PostgreSQLScheduler:
             # Create schedule record
             schedule_id = self._create_schedule_record(
                 schedule_date=schedule_dt.date(),
-                schedule_name=schedule_name or f"Daily Schedule - {schedule_date}"
+                schedule_name=schedule_name or f"Daily Schedule for {schedule_date}"
             )
             
             # Track all scheduled items with their air times to enforce delay logic
@@ -706,7 +706,7 @@ class PostgreSQLScheduler:
             # Create schedule record
             schedule_id = self._create_schedule_record(
                 schedule_date=schedule_dt.date(),
-                schedule_name=schedule_name or f"Daily Schedule - {schedule_date}"
+                schedule_name=schedule_name or f"Daily Schedule for {schedule_date}"
             )
             
             if not schedule_id:
@@ -1389,9 +1389,12 @@ class PostgreSQLScheduler:
                 }
             
             # Create schedule record
+            # Calculate end date (Saturday)
+            end_date_obj = start_date_obj + timedelta(days=6)
+            
             schedule_id = self._create_schedule_record(
                 schedule_date=start_date_obj.date(),
-                schedule_name=schedule_name or f"Weekly Schedule - {start_date_obj.strftime('%Y-%m-%d')}"
+                schedule_name=schedule_name or f"Weekly Schedule: {start_date_obj.strftime('%Y-%m-%d')} - {end_date_obj.strftime('%Y-%m-%d')}"
             )
             
             if not schedule_id:
@@ -1618,7 +1621,7 @@ class PostgreSQLScheduler:
                 }
             
             # Create schedule record
-            schedule_name = f"Monthly Schedule - {start_date.strftime('%B %Y')}"
+            schedule_name = f"Monthly Schedule for {start_date.strftime('%B %Y')}"
             schedule_id = self._create_schedule_record(
                 schedule_date=start_date.date(),
                 schedule_name=schedule_name
@@ -1808,12 +1811,9 @@ class PostgreSQLScheduler:
                 """, (json.dumps(metadata), schedule_id))
             else:
                 # If no metadata column, we'll store the type in the name for now
-                if 'type' in metadata and metadata['type'] == 'weekly':
-                    cursor.execute("""
-                        UPDATE schedules 
-                        SET schedule_name = schedule_name || ' [WEEKLY]'
-                        WHERE id = %s AND schedule_name NOT LIKE '%[WEEKLY]%'
-                    """, (schedule_id,))
+                # Skip appending [WEEKLY] to the schedule name
+                # The schedule name already indicates it's weekly
+                pass
             
             conn.commit()
             cursor.close()

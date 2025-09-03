@@ -11266,7 +11266,31 @@ async function continueCreateSchedule(template) {
         return;
     }
     
-    const scheduleName = prompt('Enter a name for this schedule:', `Schedule for ${airDate}`);
+    // Generate default name based on template type
+    let defaultScheduleName;
+    if (template.type === 'weekly') {
+        // Calculate the Sunday and Saturday for the week
+        // Use UTC to avoid timezone issues
+        const selectedDate = new Date(airDate + 'T00:00:00Z');
+        const dayOfWeek = selectedDate.getUTCDay();
+        const sunday = new Date(selectedDate);
+        
+        // If it's not already Sunday (day 0), go back to Sunday
+        if (dayOfWeek !== 0) {
+            sunday.setUTCDate(selectedDate.getUTCDate() - dayOfWeek);
+        }
+        
+        const saturday = new Date(sunday);
+        saturday.setUTCDate(sunday.getUTCDate() + 6);
+        
+        const sundayStr = sunday.toISOString().split('T')[0];
+        const saturdayStr = saturday.toISOString().split('T')[0];
+        defaultScheduleName = `Weekly Schedule: ${sundayStr} - ${saturdayStr}`;
+    } else {
+        defaultScheduleName = `Daily Schedule for ${airDate}`;
+    }
+    
+    const scheduleName = prompt('Enter a name for this schedule:', defaultScheduleName);
     if (!scheduleName) {
         return; // User cancelled
     }

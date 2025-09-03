@@ -3525,12 +3525,12 @@ def create_schedule_from_template():
             provided_date = datetime.strptime(air_date, '%Y-%m-%d')
             
             # Find the Sunday of this week
-            days_since_sunday = provided_date.weekday()  # Monday is 0, Sunday is 6
-            if days_since_sunday == 6:  # If it's already Sunday
-                start_date = provided_date
-            else:
-                # Go back to the previous Sunday
-                start_date = provided_date - timedelta(days=(days_since_sunday + 1))
+            # weekday() returns: Monday=0, Sunday=6
+            # We want: Sunday=0
+            days_since_sunday = (provided_date.weekday() + 1) % 7
+            
+            # If it's already Sunday, use it; otherwise go back to Sunday
+            start_date = provided_date - timedelta(days=days_since_sunday)
             
             # Use the Sunday date for the schedule
             sunday_date_str = start_date.strftime('%Y-%m-%d')
@@ -3539,7 +3539,7 @@ def create_schedule_from_template():
             # Create a single schedule for the entire week
             result = scheduler_postgres.create_empty_schedule(
                 schedule_date=sunday_date_str,
-                schedule_name=f"{schedule_name} - Weekly"
+                schedule_name=schedule_name
             )
             
             if not result['success']:
