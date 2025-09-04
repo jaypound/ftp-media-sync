@@ -4210,10 +4210,14 @@ def fill_template_gaps():
                 'start': start_seconds,
                 'end': end_seconds,
                 'start_time': item['start_time'],
-                'duration': duration
+                'duration': duration,
+                'is_gap': item.get('is_gap', False)
             })
             
-            logger.info(f"Original item {idx}: {title} at '{item['start_time']}' from {start_seconds/3600:.2f}h to {end_seconds/3600:.2f}h")
+            if item.get('is_gap', False):
+                logger.info(f"Original GAP item {idx}: {title} at '{item['start_time']}' from {start_seconds/3600:.2f}h to {end_seconds/3600:.2f}h")
+            else:
+                logger.info(f"Original item {idx}: {title} at '{item['start_time']}' from {start_seconds/3600:.2f}h to {end_seconds/3600:.2f}h")
             logger.info(f"  Duration: {duration}s ({duration/3600:.6f}h), exact end: {end_seconds}s")
         
         logger.info(f"Found {len(original_items)} original items to preserve")
