@@ -12745,6 +12745,14 @@ window.copyToDestination = async function(targetServer) {
         statusDiv.className = 'alert alert-info';
         document.getElementById('trimAnalysisStatusText').textContent = `Copying to ${targetServer}...`;
         
+        // Show notification that copying has started
+        showNotification(
+            'File Copy Started',
+            `Copying trimmed file to ${targetServer}...`,
+            'info',
+            10000 // Show for 10 seconds since copying might take time
+        );
+        
         const response = await fetch('/api/copy-trimmed-recording', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -12762,16 +12770,40 @@ window.copyToDestination = async function(targetServer) {
         if (data.status === 'success') {
             statusDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check"></i> <span id="trimAnalysisStatusText">Successfully copied to: ' + data.destination_path + '</span></div>';
             
+            // Show success notification
+            showNotification(
+                'Copy Complete',
+                `Successfully copied to ${targetServer}: ${finalFilename}`,
+                'success',
+                5000
+            );
+            
             // Refresh the recordings list but keep modal open
             refreshRecordingsList();
         } else {
             statusDiv.innerHTML = '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Failed to copy: ' + data.message + '</span></div>';
+            
+            // Show error notification
+            showNotification(
+                'Copy Failed',
+                `Failed to copy to ${targetServer}: ${data.message}`,
+                'error',
+                5000
+            );
         }
     } catch (error) {
         console.error('Error copying to destination:', error);
         const statusDiv = document.getElementById('trimAnalysisStatus');
         statusDiv.style.display = 'block';
         statusDiv.innerHTML = '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Error copying to destination</span></div>';
+        
+        // Show error notification
+        showNotification(
+            'Copy Error',
+            `Error copying to ${targetServer}: ${error.message}`,
+            'error',
+            5000
+        );
     }
 };
 
