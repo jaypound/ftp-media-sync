@@ -5830,8 +5830,9 @@ def copy_trimmed_recording():
             # This should not happen for castus1/castus2
             return jsonify({'status': 'error', 'message': f'FTP connection not available for {server}'}), 500
         
-        # Clean up temp file
-        if source_path.startswith('/tmp/'):
+        # Clean up temp file only if explicitly requested
+        delete_temp = data.get('delete_temp', True)
+        if source_path.startswith('/tmp/') and delete_temp:
             os.remove(source_path)
             logger.info(f"Removed temporary file: {source_path}")
         

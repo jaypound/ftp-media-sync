@@ -12676,8 +12676,7 @@ window.trimFile = async function() {
             
             // Show view trimmed button and enable final step buttons
             document.getElementById('viewTrimmedGroup').style.display = 'block';
-            document.getElementById('copyCastus1Btn').disabled = false;
-            document.getElementById('copyCastus2Btn').disabled = false;
+            document.getElementById('copyCastusBtn').disabled = false;
             document.getElementById('deleteTrimmedBtn').disabled = false;
             
             showNotification('File trimmed successfully', 'success');
@@ -12707,7 +12706,196 @@ window.viewTrimmedFile = async function() {
     }
 };
 
-// Copy to destination
+// New function to copy to both Castus servers
+window.copyToBothCastusServers = async function() {
+    if (!selectedFile || !selectedFile.trimmedPath) return;
+    
+    try {
+        // Get the filename from the input field
+        const finalFilename = document.getElementById('trimAnalysisNewFilename').value;
+        
+        if (!finalFilename) {
+            showNotification('Please enter a filename', 'error');
+            return;
+        }
+        
+        // Show initial progress
+        const statusDiv = document.getElementById('trimAnalysisStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-info';
+        document.getElementById('trimAnalysisStatusText').textContent = 'Starting copy to both Castus servers...';
+        
+        // Show initial notification
+        showNotification(
+            'Copy Started',
+            'Copying trimmed file to both Castus servers...',
+            'info',
+            15000
+        );
+        
+        // Track results
+        const results = {
+            castus1: { success: false, message: '' },
+            castus2: { success: false, message: '' }
+        };
+        
+        // Copy to Castus1 (don't delete temp file yet)
+        try {
+            results.castus1 = await copyToSingleServer('castus1', finalFilename, false, false);
+            if (results.castus1.success) {
+                showNotification(
+                    'Castus1 Copy Complete',
+                    `Successfully copied to Castus1: ${finalFilename}`,
+                    'success',
+                    5000
+                );
+            }
+        } catch (error) {
+            results.castus1.message = error.message;
+        }
+        
+        // Copy to Castus2 (delete temp file after this copy)
+        try {
+            results.castus2 = await copyToSingleServer('castus2', finalFilename, false, true);
+            if (results.castus2.success) {
+                showNotification(
+                    'Castus2 Copy Complete',
+                    `Successfully copied to Castus2: ${finalFilename}`,
+                    'success',
+                    5000
+                );
+            }
+        } catch (error) {
+            results.castus2.message = error.message;
+        }
+        
+        // Update status based on results
+        const bothSuccess = results.castus1.success && results.castus2.success;
+        const partialSuccess = results.castus1.success || results.castus2.success;
+        
+        if (bothSuccess) {
+            statusDiv.className = 'alert alert-success';
+            statusDiv.innerHTML = `<i class="fas fa-check"></i> <span id="trimAnalysisStatusText">Successfully copied to both Castus servers</span>`;
+            
+            showNotification(
+                'Copy Complete',
+                `Successfully copied ${finalFilename} to both Castus servers`,
+                'success',
+                5000
+            );
+        } else if (partialSuccess) {
+            let successServer = results.castus1.success ? 'Castus1' : 'Castus2';
+            let failedServer = results.castus1.success ? 'Castus2' : 'Castus1';
+            let failedMessage = results.castus1.success ? results.castus2.message : results.castus1.message;
+            
+            statusDiv.className = 'alert alert-warning';
+            statusDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <span id="trimAnalysisStatusText">Copied to ${successServer} only. Failed on ${failedServer}: ${failedMessage}</span>`;
+            
+            showNotification(
+                'Partial Success',
+                `Copied to ${successServer} but failed on ${failedServer}`,
+                'warning',
+                7000
+            );
+        } else {
+            statusDiv.className = 'alert alert-error';
+            statusDiv.innerHTML = `<i class="fas fa-times"></i> <span id="trimAnalysisStatusText">Failed to copy to both servers</span>`;
+            
+            showNotification(
+                'Copy Failed',
+                'Failed to copy to both Castus servers',
+                'error',
+                5000
+            );
+        }
+        
+        // Always refresh the recordings list
+        refreshRecordingsList();
+        
+    } catch (error) {
+        console.error('Error in copyToBothCastusServers:', error);
+        const statusDiv = document.getElementById('trimAnalysisStatus');
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-error';
+        statusDiv.innerHTML = `<i class="fas fa-times"></i> <span id="trimAnalysisStatusText">Unexpected error: ${error.message}</span>`;
+        
+        showNotification(
+            'Error',
+            `Unexpected error: ${error.message}`,
+            'error',
+            5000
+        );
+    }
+};
+
+// Helper function to copy to a single server
+async function copyToSingleServer(targetServer, finalFilename, showNotifications = true, deleteTemp = true) {
+    try {
+        // First check if file exists on target server
+        const checkResponse = await fetch('/api/check-file-exists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: finalFilename,
+                dest_folder: trimSettings.dest_path,
+                server: targetServer
+            })
+        });
+        
+        const checkData = await checkResponse.json();
+        
+        if (checkData.exists) {
+            if (!confirm(`File "${finalFilename}" already exists on ${targetServer}. Do you want to overwrite it?`)) {
+                return { success: false, message: 'User cancelled overwrite' };
+            }
+        }
+        
+        // Show progress notification if enabled
+        if (showNotifications) {
+            showNotification(
+                'Copying',
+                `Copying to ${targetServer}...`,
+                'info',
+                10000
+            );
+        }
+        
+        const response = await fetch('/api/copy-trimmed-recording', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_path: selectedFile.trimmedPath,
+                filename: finalFilename,
+                dest_folder: trimSettings.dest_path,
+                server: targetServer,
+                keep_original: trimSettings.keep_original,
+                delete_temp: deleteTemp
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            if (showNotifications) {
+                showNotification(
+                    'Copy Complete',
+                    `Successfully copied to ${targetServer}`,
+                    'success',
+                    5000
+                );
+            }
+            return { success: true, message: data.destination_path };
+        } else {
+            return { success: false, message: data.message || 'Unknown error' };
+        }
+        
+    } catch (error) {
+        console.error(`Error copying to ${targetServer}:`, error);
+        return { success: false, message: error.message };
+    }
+}
+
+// Keep the old function for backward compatibility but have it use the new one
 window.copyToDestination = async function(targetServer) {
     if (!selectedFile || !selectedFile.trimmedPath) return;
     
@@ -12761,7 +12949,8 @@ window.copyToDestination = async function(targetServer) {
                 filename: finalFilename,
                 dest_folder: trimSettings.dest_path,
                 server: targetServer,
-                keep_original: trimSettings.keep_original
+                keep_original: trimSettings.keep_original,
+                delete_temp: deleteTemp
             })
         });
         
@@ -12829,8 +13018,7 @@ window.deleteTrimmedFile = async function() {
         
         // Hide view trimmed button and disable buttons that require trimmed file
         document.getElementById('viewTrimmedGroup').style.display = 'none';
-        document.getElementById('copyCastus1Btn').disabled = true;
-        document.getElementById('copyCastus2Btn').disabled = true;
+        document.getElementById('copyCastusBtn').disabled = true;
         document.getElementById('deleteTrimmedBtn').disabled = true;
         
         statusDiv.className = 'alert alert-success';
@@ -13067,8 +13255,7 @@ async function executeTrim() {
             
             // Show view trimmed button and enable final step buttons
             document.getElementById('viewTrimmedGroup').style.display = 'block';
-            document.getElementById('copyCastus1Btn').disabled = false;
-            document.getElementById('copyCastus2Btn').disabled = false;
+            document.getElementById('copyCastusBtn').disabled = false;
             document.getElementById('deleteTrimmedBtn').disabled = false;
             
             statusDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check"></i> <span id="trimAnalysisStatusText">File trimmed successfully! You can now view it or copy to destination.</span></div>';
