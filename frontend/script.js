@@ -3189,6 +3189,53 @@ async function clearAllAnalyses() {
     }
 }
 
+// Database Backup Function
+async function createDatabaseBackup() {
+    const statusDiv = document.getElementById('backupStatus');
+    const statusText = document.getElementById('backupStatusText');
+    
+    // Show status
+    statusDiv.style.display = 'block';
+    statusText.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating database backup...';
+    statusText.style.color = 'var(--primary-color)';
+    
+    try {
+        const response = await fetch('/api/create-backup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            let message = `<i class="fas fa-check-circle"></i> Backup created successfully: ${data.backup_file}`;
+            if (data.locations) {
+                message = `<i class="fas fa-check-circle"></i> ${data.message || 'Backup created successfully'}`;
+            }
+            statusText.innerHTML = message;
+            statusText.style.color = 'var(--success-color)';
+            log(`Database backup created: ${data.backup_file}`, 'success');
+            
+            // Hide status after 7 seconds (longer for more info)
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 7000);
+        } else {
+            statusText.innerHTML = `<i class="fas fa-times-circle"></i> Backup failed: ${data.error || 'Unknown error'}`;
+            statusText.style.color = 'var(--danger-color)';
+            log(`Database backup failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        statusText.innerHTML = `<i class="fas fa-times-circle"></i> Backup failed: ${error.message}`;
+        statusText.style.color = 'var(--danger-color)';
+        log(`Database backup error: ${error}`, 'error');
+        console.error('Backup error:', error);
+    }
+}
+
 // Delete Queue Management Functions
 let currentDeleteFile = null; // Store the current file being deleted
 

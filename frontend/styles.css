@@ -1672,6 +1672,11 @@ body.dark-mode .status {
     gap: 0.5rem;
 }
 
+.admin-buttons .button {
+    width: 100%;
+    justify-content: center;
+}
+
 .admin-card p {
     margin: 0.5rem 0;
     color: var(--text-color);

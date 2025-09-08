@@ -493,6 +493,19 @@
                     </div>
                     <p><small><strong>Warning:</strong> This will permanently delete all analysis results from the database. This action cannot be undone.</small></p>
                 </div>
+                
+                <div class="admin-card">
+                    <h3><i class="fas fa-download"></i> Database Backups</h3>
+                    <div class="admin-buttons">
+                        <button class="button primary" onclick="createDatabaseBackup()">
+                            <i class="fas fa-save"></i> Create Backup
+                        </button>
+                    </div>
+                    <p><small>Create a backup of the database including all analysis data, schedules, and metadata.</small></p>
+                    <div id="backupStatus" style="margin-top: 10px; display: none;">
+                        <small id="backupStatusText"></small>
+                    </div>
+                </div>
             </div>
         </div>
 

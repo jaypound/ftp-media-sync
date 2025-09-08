@@ -675,6 +675,110 @@ def clear_all_analyses():
             'deleted_count': 0
         })
 
+@app.route('/api/create-backup', methods=['POST'])
+def create_database_backup():
+    """Create a backup of the database using the existing backup script"""
+    logger.info("=== CREATE DATABASE BACKUP REQUEST ===")
+    try:
+        import subprocess
+        import os
+        from datetime import datetime
+        
+        # Check if using PostgreSQL
+        use_postgres = os.getenv('USE_POSTGRESQL', 'false').lower() == 'true'
+        
+        if use_postgres:
+            # Use the existing backup_postgres.sh script
+            script_path = os.path.join(os.path.dirname(__file__), 'backup_postgres.sh')
+            
+            if not os.path.exists(script_path):
+                error_msg = f"Backup script not found at {script_path}"
+                logger.error(error_msg)
+                return jsonify({
+                    'success': False,
+                    'error': error_msg
+                })
+            
+            # Make sure script is executable
+            os.chmod(script_path, 0o755)
+            
+            # Run the backup script
+            logger.info(f"Running backup script: {script_path}")
+            result = subprocess.run(['bash', script_path], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                # Parse output to find backup filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                backup_file = f"ftp_media_sync_backup_{timestamp}.sql.gz"
+                
+                # Extract backup locations from output
+                output_lines = result.stdout.split('\n')
+                backup_info = {
+                    'local': f"~/postgres_backups/ftp-media-sync/daily/{backup_file}",
+                    'castus1': '/mnt/md127/Backups/postgres',
+                    'castus2': '/mnt/md127/Backups/postgres'
+                }
+                
+                logger.info(f"PostgreSQL backup successful")
+                logger.info(f"Backup output:\n{result.stdout}")
+                
+                return jsonify({
+                    'success': True,
+                    'backup_file': backup_file,
+                    'locations': backup_info,
+                    'message': 'Backup created in 3 locations: local, castus1, and castus2'
+                })
+            else:
+                error_msg = f"Backup script failed: {result.stderr}"
+                logger.error(error_msg)
+                logger.error(f"Script output: {result.stdout}")
+                return jsonify({
+                    'success': False,
+                    'error': error_msg
+                })
+                
+        else:
+            # MongoDB backup - keep existing implementation
+            backup_dir = os.path.join(os.path.dirname(__file__), 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_file = f"mongodb_backup_{timestamp}"
+            backup_path = os.path.join(backup_dir, backup_file)
+            
+            # Get MongoDB connection details
+            mongo_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+            db_name = os.getenv('MONGODB_DATABASE', 'castus')
+            
+            # Run mongodump
+            cmd = ['mongodump', '--uri', mongo_uri, '--db', db_name, '--out', backup_path]
+            logger.info(f"Running MongoDB backup to {backup_path}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                logger.info(f"MongoDB backup successful: {backup_file}")
+                return jsonify({
+                    'success': True,
+                    'backup_file': backup_file,
+                    'backup_path': backup_path
+                })
+            else:
+                error_msg = f"MongoDB backup failed: {result.stderr}"
+                logger.error(error_msg)
+                return jsonify({
+                    'success': False,
+                    'error': error_msg
+                })
+                
+    except Exception as e:
+        error_msg = f"Database backup error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        })
+
 @app.route('/api/analyze-files', methods=['POST'])
 def analyze_files():
     """Start analysis of selected files"""
