@@ -149,6 +149,46 @@ class DatabaseManager:
             logger.error(f"Error upserting analysis: {str(e)}")
             return False
     
+    def update_analysis_fields(self, file_path: str, update_data: dict):
+        """Update specific fields in an analysis record"""
+        if self.collection is None:
+            return False
+        
+        try:
+            # Convert dot notation keys to nested structure
+            update_doc = {}
+            for key, value in update_data.items():
+                if '.' in key:
+                    # Handle nested fields like "scheduling.content_expiry_date"
+                    parts = key.split('.')
+                    current = update_doc
+                    for part in parts[:-1]:
+                        if part not in current:
+                            current[part] = {}
+                        current = current[part]
+                    current[parts[-1]] = value
+                else:
+                    update_doc[key] = value
+            
+            # Add update timestamp
+            update_doc["updated_at"] = datetime.utcnow()
+            
+            result = self.collection.update_one(
+                {"file_path": file_path},
+                {"$set": update_doc}
+            )
+            
+            if result.modified_count > 0:
+                logger.info(f"Updated analysis fields for {file_path}")
+                return True
+            else:
+                logger.warning(f"No analysis found to update for {file_path}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error updating analysis fields: {str(e)}")
+            return False
+    
     def get_all_analyses(self, limit=1000):
         """Get all analysis results"""
         if self.collection is None:

@@ -533,6 +533,88 @@ class PostgreSQLDatabaseManager:
             conn.autocommit = True
             self._put_connection(conn)
     
+    def update_analysis_fields(self, file_path: str, update_data: dict) -> bool:
+        """Update specific fields in an analysis record"""
+        if not self.connected:
+            return False
+        
+        conn = self._get_connection()
+        conn.autocommit = False
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Find the asset by file path
+            cursor.execute("""
+                SELECT a.id 
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id
+                WHERE i.file_path = %s AND i.is_primary = TRUE
+            """, (file_path,))
+            
+            result = cursor.fetchone()
+            if not result:
+                logger.warning(f"No analysis found to update for {file_path}")
+                cursor.close()
+                return False
+            
+            asset_id = result[0]
+            
+            # Build update query for scheduling metadata
+            if any(key.startswith('scheduling.') for key in update_data.keys()):
+                # Extract scheduling fields
+                scheduling_updates = {}
+                for key, value in update_data.items():
+                    if key.startswith('scheduling.'):
+                        field_name = key.replace('scheduling.', '')
+                        scheduling_updates[field_name] = value
+                
+                # Update scheduling metadata
+                if scheduling_updates:
+                    update_fields = []
+                    update_values = []
+                    
+                    for field, value in scheduling_updates.items():
+                        update_fields.append(f"{field} = %s")
+                        update_values.append(value)
+                    
+                    update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                    update_query = f"""
+                        UPDATE scheduling_metadata
+                        SET {', '.join(update_fields)}
+                        WHERE asset_id = %s
+                    """
+                    update_values.append(asset_id)
+                    
+                    cursor.execute(update_query, update_values)
+                    
+                    if cursor.rowcount == 0:
+                        # If no scheduling metadata exists, create it
+                        cursor.execute("""
+                            INSERT INTO scheduling_metadata (
+                                asset_id, content_expiry_date, castus_metadata_synced, 
+                                castus_metadata_synced_at, created_at, updated_at
+                            ) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """, (
+                            asset_id, 
+                            scheduling_updates.get('content_expiry_date'),
+                            scheduling_updates.get('castus_metadata_synced', False),
+                            scheduling_updates.get('castus_metadata_synced_at')
+                        ))
+            
+            cursor.close()
+            conn.commit()
+            logger.info(f"Updated analysis fields for {file_path}")
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error updating analysis fields: {str(e)}")
+            return False
+        finally:
+            conn.autocommit = True
+            self._put_connection(conn)
+    
     def get_all_analyses(self, limit: int = 1000) -> List[Dict[str, Any]]:
         """Get all analysis results"""
         if not self.connected:

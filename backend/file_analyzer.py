@@ -7,6 +7,7 @@ from audio_processor import audio_processor
 from ai_analyzer import ai_analyzer
 from database import db_manager
 import uuid
+from castus_metadata import CastusMetadataHandler
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,34 @@ class FileAnalyzer:
                 success = db_manager.upsert_analysis(analysis_data)
                 if success:
                     logger.info(f"Successfully analyzed and saved: {file_name}")
+                    
+                    # Step 8: Extract Castus metadata (non-blocking, best effort)
+                    try:
+                        logger.info(f"Attempting to extract Castus metadata for: {file_name}")
+                        
+                        # Create metadata handler with FTP manager
+                        metadata_handler = CastusMetadataHandler(ftp_manager)
+                        
+                        # Extract content window close date
+                        expiration_date = metadata_handler.get_content_window_close(file_path)
+                        
+                        if expiration_date:
+                            logger.info(f"Successfully extracted Castus metadata for {file_name}: expires {expiration_date}")
+                            # Update the analysis with the Castus expiration date
+                            update_data = {
+                                "scheduling.content_expiry_date": expiration_date,
+                                "scheduling.castus_metadata_synced": True,
+                                "scheduling.castus_metadata_synced_at": datetime.utcnow()
+                            }
+                            db_manager.update_analysis_fields(file_path, update_data)
+                            logger.info(f"Updated analysis with Castus expiration date for: {file_name}")
+                        else:
+                            logger.info(f"No Castus metadata found for: {file_name}")
+                            
+                    except Exception as e:
+                        # Log but don't fail the analysis if metadata extraction fails
+                        logger.warning(f"Failed to extract Castus metadata for {file_name}: {str(e)}")
+                    
                     # Get the saved analysis back from database (this will have ObjectId converted)
                     saved_analysis = db_manager.get_analysis_by_path(file_path)
                     return {
