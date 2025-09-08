@@ -2398,4 +2398,33 @@ body.dark-mode .status {
     color: var(--text-primary, #e0e0e0);
 }
 
+/* Search container for scanned files */
+.search-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.search-container input {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: var(--radius-sm);
+}
+
+.search-container .button.small {
+    padding: 0.375rem 0.5rem;
+    min-width: auto;
+}
+
+/* Dark mode support for search container */
+.dark-mode .search-container input {
+    background-color: var(--card-background);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+.dark-mode .search-container input:focus {
+    border-color: var(--primary-color);
+}
+
 /* End of styles */

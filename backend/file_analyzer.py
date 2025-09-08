@@ -147,33 +147,6 @@ class FileAnalyzer:
                 # Step 5: Calculate duration category and add scheduling metadata
                 duration_category = self.get_duration_category(audio_result['duration'])
                 
-                # Step 5.5: Try to get expiration date from Castus metadata
-                logger.info(f"Attempting to sync Castus metadata for: {file_name}")
-                castus_expiration = None
-                try:
-                    # Import here to avoid circular imports
-                    from castus_metadata import CastusMetadataHandler
-                    
-                    # Use existing FTP connection
-                    handler = CastusMetadataHandler(ftp_manager)
-                    
-                    # Use full path or construct it
-                    metadata_path = file_path
-                    if not file_path.startswith('/'):
-                        metadata_path = f"/mnt/md127/ATL26 On-Air Content/{file_path}"
-                    
-                    logger.info(f"Checking Castus metadata at path: {metadata_path}")
-                    castus_expiration = handler.get_content_window_close(metadata_path)
-                    
-                    if castus_expiration:
-                        logger.info(f"Found Castus expiration date: {castus_expiration}")
-                    else:
-                        logger.info("No Castus expiration metadata found")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to get Castus metadata: {str(e)}")
-                    # Continue without Castus metadata - it's optional
-                
                 # Step 6: Compile final analysis
                 analysis_data = {
                     "file_name": file_name,
@@ -201,8 +174,7 @@ class FileAnalyzer:
                     # Scheduling metadata fields
                     "scheduling": {
                         "available_for_scheduling": True,
-                        "content_expiry_date": castus_expiration or self.calculate_expiry_date(duration_category, ai_result.get('shelf_life_score', 'medium') if ai_result else 'medium'),
-                        "metadata_synced_at": datetime.utcnow() if castus_expiration else None,
+                        "content_expiry_date": self.calculate_expiry_date(duration_category, ai_result.get('shelf_life_score', 'medium') if ai_result else 'medium'),
                         "last_scheduled_date": None,
                         "total_airings": 0,
                         "created_for_scheduling": datetime.utcnow(),
@@ -228,12 +200,6 @@ class FileAnalyzer:
                         "optimal_timeslots": self.get_optimal_timeslots(filename_metadata.get('content_type', ''), duration_category)
                     }
                 }
-                
-                # Log expiration date information
-                if castus_expiration:
-                    logger.info(f"Using Castus expiration date: {castus_expiration}")
-                else:
-                    logger.info(f"Using calculated expiration date: {analysis_data['scheduling']['content_expiry_date']}")
                 
                 # Step 7: Save to database
                 success = db_manager.upsert_analysis(analysis_data)

@@ -997,6 +997,12 @@
                     <option value="SPP">SPP - Special Projects</option>
                     <option value="OTHER">OTHER</option>
                 </select>
+                <div class="search-container" id="scannedFilesSearchContainer" style="display: none; margin-left: 0.5rem; align-items: center;">
+                    <input type="text" id="scannedFilesSearchInput" class="form-control" placeholder="Search files..." onkeyup="searchScannedFiles()" style="width: 200px;">
+                    <button class="button secondary small" onclick="clearScannedFilesSearch()" title="Clear search" style="margin-left: 0.5rem;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
             </div>
             <div class="dashboard-scanned-files-container scanned-files-container" id="scannedFilesDetails" style="display: none;">
                 <div class="dashboard-scanned-files-section scanned-files-section">

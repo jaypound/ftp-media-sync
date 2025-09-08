@@ -595,6 +595,12 @@ function displayScannedFiles() {
     // Show the scanned files card
     scannedFilesCard.style.display = 'block';
     
+    // Show search container immediately when card is shown
+    const searchContainer = document.getElementById('scannedFilesSearchContainer');
+    if (searchContainer) {
+        searchContainer.style.display = 'inline-flex';
+    }
+    
     // Show summary and update it
     summaryDiv.style.display = 'block';
     updateScannedFilesSummary();
@@ -610,9 +616,11 @@ function displayScannedFiles() {
         `${sourceFiles.length} files found`;
     
     sourceFileCount.textContent = sourceCountText;
+    sourceFileCount.setAttribute('data-original-text', sourceCountText);
     sourceFileCount.className = filteredSourceFiles.length > 0 ? 'file-count has-files' : 'file-count';
     
     targetFileCount.textContent = `${targetFiles.length} files found`;
+    targetFileCount.setAttribute('data-original-text', `${targetFiles.length} files found`);
     targetFileCount.className = targetFiles.length > 0 ? 'file-count has-files' : 'file-count';
     
     // Display source files
@@ -2021,17 +2029,29 @@ function toggleScannedFiles() {
     const summaryDiv = document.getElementById('scannedFilesSummary');
     const toggleBtn = document.getElementById('toggleScannedFilesBtn');
     const filterBtn = document.getElementById('toggleUnanalyzedOnlyBtn');
+    const contentTypeFilter = document.getElementById('scannedFilesContentTypeFilter');
     
     if (detailsDiv.style.display === 'none') {
         detailsDiv.style.display = 'grid';
         summaryDiv.style.display = 'none';
         toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Details';
         filterBtn.style.display = 'inline-block'; // Show filter button when details are shown
+        
+        // Show content type filter when details are shown
+        if (contentTypeFilter) {
+            contentTypeFilter.style.display = 'inline-block';
+        }
     } else {
         detailsDiv.style.display = 'none';
         summaryDiv.style.display = 'block';
         toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show Details';
         filterBtn.style.display = 'none'; // Hide filter button when details are hidden
+        
+        // Hide content type filter when details are hidden
+        if (contentTypeFilter) {
+            contentTypeFilter.style.display = 'none';
+        }
+        // Note: Search container stays visible
     }
 }
 
