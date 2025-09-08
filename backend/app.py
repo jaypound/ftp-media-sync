@@ -7586,6 +7586,233 @@ def get_content_expiration_stats():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/sync-castus-expiration', methods=['POST'])
+def sync_castus_expiration():
+    """Sync expiration date from Castus metadata for a content item"""
+    logger.info("=== SYNC CASTUS EXPIRATION REQUEST ===")
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        file_path = data.get('file_path')
+        server = data.get('server', 'source')  # default to source server
+        
+        if not all([asset_id, file_path]):
+            return jsonify({
+                'success': False,
+                'message': 'Missing required fields: asset_id and file_path'
+            }), 400
+        
+        logger.info(f"Syncing expiration for asset {asset_id} from {server} server")
+        logger.info(f"File path: {file_path}")
+        
+        # Import here to avoid circular imports
+        from castus_metadata import CastusMetadataHandler
+        
+        # Get FTP configuration and connect
+        config = config_manager.get_server_config(server)
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': f'Server configuration not found: {server}'
+            }), 400
+        
+        ftp = FTPManager(config)
+        if not ftp.connect():
+            return jsonify({
+                'success': False,
+                'message': f'Failed to connect to {server} server'
+            }), 500
+        
+        try:
+            # Create metadata handler and get expiration
+            handler = CastusMetadataHandler(ftp)
+            expiration_date = handler.get_content_window_close(file_path)
+            
+            if not expiration_date:
+                logger.warning(f"No expiration date found in metadata for: {file_path}")
+                return jsonify({
+                    'success': False,
+                    'message': 'No expiration date found in Castus metadata'
+                }), 404
+            
+            # Update database
+            conn = db_manager._get_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Check if metadata record exists
+                    cursor.execute("""
+                        SELECT id FROM scheduling_metadata 
+                        WHERE asset_id = %s
+                    """, (asset_id,))
+                    
+                    if cursor.fetchone():
+                        # Update existing record
+                        cursor.execute("""
+                            UPDATE scheduling_metadata 
+                            SET content_expiry_date = %s,
+                                metadata_synced_at = CURRENT_TIMESTAMP
+                            WHERE asset_id = %s
+                        """, (expiration_date, asset_id))
+                    else:
+                        # Create new record
+                        cursor.execute("""
+                            INSERT INTO scheduling_metadata (asset_id, content_expiry_date, metadata_synced_at)
+                            VALUES (%s, %s, CURRENT_TIMESTAMP)
+                        """, (asset_id, expiration_date))
+                    
+                conn.commit()
+                
+                logger.info(f"Successfully updated expiration date for asset {asset_id} to {expiration_date}")
+                
+                return jsonify({
+                    'success': True,
+                    'expiration_date': expiration_date.isoformat(),
+                    'message': f'Successfully synced expiration date: {expiration_date.strftime("%Y-%m-%d %H:%M:%S")}'
+                })
+                
+            finally:
+                db_manager._put_connection(conn)
+                
+        finally:
+            ftp.disconnect()
+            
+    except Exception as e:
+        error_msg = f"Sync Castus expiration error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg}), 500
+
+@app.route('/api/sync-all-castus-expirations', methods=['POST'])
+def sync_all_castus_expirations():
+    """Sync expiration dates from Castus metadata for all content"""
+    logger.info("=== SYNC ALL CASTUS EXPIRATIONS REQUEST ===")
+    try:
+        data = request.json
+        server = data.get('server', 'source')  # default to source server
+        limit = data.get('limit', None)  # optional limit for testing
+        
+        # Import here to avoid circular imports
+        from castus_metadata import CastusMetadataHandler
+        
+        # Get all content items that need syncing
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                query = """
+                    SELECT a.id, a.file_path, a.file_name
+                    FROM assets a
+                    LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                    WHERE a.analysis_completed = true
+                    AND (sm.metadata_synced_at IS NULL OR sm.metadata_synced_at < CURRENT_TIMESTAMP - INTERVAL '7 days')
+                    ORDER BY a.id
+                """
+                if limit:
+                    query += f" LIMIT {int(limit)}"
+                
+                cursor.execute(query)
+                assets = cursor.fetchall()
+        finally:
+            db_manager._put_connection(conn)
+        
+        logger.info(f"Found {len(assets)} assets to sync")
+        
+        if not assets:
+            return jsonify({
+                'success': True,
+                'message': 'No assets need syncing',
+                'stats': {'total': 0, 'synced': 0, 'failed': 0}
+            })
+        
+        # Connect to FTP server
+        config = config_manager.get_server_config(server)
+        if not config:
+            return jsonify({
+                'success': False,
+                'message': f'Server configuration not found: {server}'
+            }), 400
+        
+        ftp = FTPManager(config)
+        if not ftp.connect():
+            return jsonify({
+                'success': False,
+                'message': f'Failed to connect to {server} server'
+            }), 500
+        
+        # Process each asset
+        handler = CastusMetadataHandler(ftp)
+        synced = 0
+        failed = 0
+        errors = []
+        
+        try:
+            for asset in assets:
+                try:
+                    asset_id = asset['id']
+                    file_path = asset['file_path']
+                    
+                    # Get expiration date from metadata
+                    expiration_date = handler.get_content_window_close(file_path)
+                    
+                    if expiration_date:
+                        # Update database
+                        conn = db_manager._get_connection()
+                        try:
+                            with conn.cursor() as cursor:
+                                # Check if metadata record exists
+                                cursor.execute("""
+                                    SELECT id FROM scheduling_metadata 
+                                    WHERE asset_id = %s
+                                """, (asset_id,))
+                                
+                                if cursor.fetchone():
+                                    # Update existing record
+                                    cursor.execute("""
+                                        UPDATE scheduling_metadata 
+                                        SET content_expiry_date = %s,
+                                            metadata_synced_at = CURRENT_TIMESTAMP
+                                        WHERE asset_id = %s
+                                    """, (expiration_date, asset_id))
+                                else:
+                                    # Create new record
+                                    cursor.execute("""
+                                        INSERT INTO scheduling_metadata (asset_id, content_expiry_date, metadata_synced_at)
+                                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                                    """, (asset_id, expiration_date))
+                                
+                            conn.commit()
+                            synced += 1
+                            logger.debug(f"Synced asset {asset_id}: {expiration_date}")
+                        finally:
+                            db_manager._put_connection(conn)
+                    else:
+                        failed += 1
+                        errors.append(f"No metadata found for {asset['file_name']}")
+                        
+                except Exception as e:
+                    failed += 1
+                    error_msg = f"Failed to sync {asset.get('file_name', 'unknown')}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                
+        finally:
+            ftp.disconnect()
+        
+        # Return results
+        return jsonify({
+            'success': True,
+            'message': f'Sync completed: {synced} synced, {failed} failed',
+            'stats': {
+                'total': len(assets),
+                'synced': synced,
+                'failed': failed
+            },
+            'errors': errors[:10] if errors else []  # Return first 10 errors
+        })
+        
+    except Exception as e:
+        error_msg = f"Sync all Castus expirations error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg}), 500
+
 
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")

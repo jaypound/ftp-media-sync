@@ -1,0 +1,99 @@
+🚀 CASTUS METADATA EXPIRATION CHECK - DRY RUN
+📅 Date: 2025-09-05 17:05:13
+📄 Output file: expiration_dry_run_20250905_170513.txt
+
+📊 Fetching sample content from database...
+✅ Found 16 assets for dry run
+   - Never synced: 15
+   - Previously synced: 1
+
+====================================================================================================
+DRY RUN - CHECKING 16 SAMPLE ASSETS
+====================================================================================================
+
+1/16: 240711_BMP_ Buildings_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   Current DB expiry: 2025-09-06
+   ❌ No Castus metadata found
+
+2/16: 240823_BMP_ Capital Dome AI_NIGHT_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+3/16: 240711_BMP_Centennial Park_AI_NIGHT.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+4/16: 240823_BMP_Downtown Aerial_NIGHT_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+5/16: 240711_BMP_East Atlanta_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+6/16: 240711_BMP_Fox Theatre_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+7/16: 240711_BMP_Inman Park_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+8/16: 240711_BMP_Mercedes Benz_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+9/16: 240830_BMP_Mercedes Benz_NIGHT_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+10/16: 240711_BMP_Midtown_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+11/16: 240711_BMP_Old Fourth Ward 1_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+12/16: 240711_BMP_Old Fourth Ward 2_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+13/16: 240711_BMP_Skyline_AI_NIGHT_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+14/16: 240711_BMP_State Farm_DAY_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+15/16: 240828_BMP_West End_AI_NIGHT_ATL26.mp4
+   Type: bmp | Status: Never synced
+   ❌ No Castus metadata found
+
+16/16: 250827_AN_Mayors Cup Golf Tournament_v3.mp4
+   Type: an | Status: Previously synced
+   Current DB expiry: 2025-09-21
+   ✅ Castus expiration: 2025-09-21 04:00:00
+   📅 Days until expiration: 15
+
+
+====================================================================================================
+DRY RUN SUMMARY
+====================================================================================================
+
+Sample size: 16 assets
+✅ Has Castus metadata: 1
+📄 No metadata found: 15
+⚠️  Expiry dates changed: 0
+❌ Errors: 0
+
+⏰ EXPIRING WITHIN 30 DAYS (1 files):
+   - 250827_AN_Mayors Cup Golf Tournament_v3.mp4: 15 days
+
+Metadata availability: 6.2%
+
+📝 This was a DRY RUN - no database changes were made
+
+✅ Dry run complete at 2025-09-05 17:05:13
