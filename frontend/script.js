@@ -4603,6 +4603,9 @@ function displayAvailableContent() {
                 <span class="content-score">${engagementScore}%</span>
                 <span class="content-expiration ${expirationClass}">${expirationDisplay}</span>
                 <div class="content-actions">
+                    <button class="button small info" onclick="syncContentExpiration('${contentId}')" title="Sync Expiration from Castus">
+                        <i class="fas fa-sync"></i>
+                    </button>
                     <button class="button small primary" onclick="schedulingEditExpiration('${contentId}', '${content.scheduling?.content_expiry_date || ''}')" title="Edit Expiration Date">
                         <i class="fas fa-calendar-alt"></i>
                     </button>`;
@@ -7984,6 +7987,75 @@ async function deleteContentFromDatabase(contentId) {
         console.error('Error deleting content:', error);
         alert(`Error deleting database entry: ${error.message}`);
         log(`❌ Error deleting content: ${error.message}`, 'error');
+    }
+}
+
+// Sync content expiration from Castus metadata
+async function syncContentExpiration(contentId) {
+    console.log('syncContentExpiration called for:', contentId);
+    
+    // Find the content item
+    const content = availableContent.find(c => {
+        const itemId = c._id || c.id || c.guid;
+        return itemId == contentId || itemId === contentId || String(itemId) === String(contentId);
+    });
+    
+    if (!content) {
+        showNotification('Content not found', 'error');
+        return;
+    }
+    
+    // Show loading notification
+    showNotification('Syncing expiration metadata...', 'info', 10000);
+    
+    try {
+        const response = await fetch('/api/sync-castus-expiration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                asset_id: content.id || content._id,
+                file_path: content.file_path || `${content.file_name}`,
+                server: 'source'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification(
+                'Expiration Synced',
+                `Successfully synced expiration: ${result.message}`,
+                'success',
+                5000
+            );
+            
+            // Update the content item with new expiration
+            if (!content.scheduling) {
+                content.scheduling = {};
+            }
+            content.scheduling.content_expiry_date = result.expiration_date;
+            content.scheduling.metadata_synced_at = new Date().toISOString();
+            
+            // Refresh the display
+            displayAvailableContent();
+            
+        } else {
+            showNotification(
+                'Sync Failed',
+                result.message || 'Failed to sync expiration metadata',
+                'error'
+            );
+        }
+        
+    } catch (error) {
+        console.error('Error syncing expiration:', error);
+        showNotification(
+            'Error',
+            `Failed to sync: ${error.message}`,
+            'error'
+        );
     }
 }
 

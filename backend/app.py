@@ -7626,7 +7626,10 @@ def sync_castus_expiration():
         
         try:
             # Create metadata handler and get expiration
+            logger.info("Creating CastusMetadataHandler...")
             handler = CastusMetadataHandler(ftp)
+            
+            logger.info(f"Attempting to get content window close for: {file_path}")
             expiration_date = handler.get_content_window_close(file_path)
             
             if not expiration_date:
@@ -7635,6 +7638,8 @@ def sync_castus_expiration():
                     'success': False,
                     'message': 'No expiration date found in Castus metadata'
                 }), 404
+            
+            logger.info(f"Found expiration date: {expiration_date}")
             
             # Update database
             conn = db_manager._get_connection()
@@ -7648,22 +7653,26 @@ def sync_castus_expiration():
                     
                     if cursor.fetchone():
                         # Update existing record
+                        logger.info(f"Updating existing scheduling_metadata record for asset {asset_id}")
                         cursor.execute("""
                             UPDATE scheduling_metadata 
                             SET content_expiry_date = %s,
                                 metadata_synced_at = CURRENT_TIMESTAMP
                             WHERE asset_id = %s
                         """, (expiration_date, asset_id))
+                        logger.info(f"Updated {cursor.rowcount} rows")
                     else:
                         # Create new record
+                        logger.info(f"Creating new scheduling_metadata record for asset {asset_id}")
                         cursor.execute("""
                             INSERT INTO scheduling_metadata (asset_id, content_expiry_date, metadata_synced_at)
                             VALUES (%s, %s, CURRENT_TIMESTAMP)
                         """, (asset_id, expiration_date))
+                        logger.info("Insert completed")
                     
                 conn.commit()
                 
-                logger.info(f"Successfully updated expiration date for asset {asset_id} to {expiration_date}")
+                logger.info(f"Database commit successful - expiration date for asset {asset_id} set to {expiration_date}")
                 
                 return jsonify({
                     'success': True,
