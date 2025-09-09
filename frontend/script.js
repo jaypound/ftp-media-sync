@@ -5855,15 +5855,13 @@ function exportSchedule() {
     document.getElementById('modalExportServer').value = savedServer;
     document.getElementById('modalExportPath').value = savedPath;
     
-    // Generate default filename based on schedule's air date and type
-    // Parse date components to avoid timezone issues
-    const [year, month, day] = scheduleDate.split('-').map(num => parseInt(num));
-    
-    // Format as YY_MM_DD_HHMM
+    // Generate default filename based on current date/time (when export is happening)
     const now = new Date();
-    const yy = year.toString().slice(-2);
-    const mm = month.toString().padStart(2, '0');
-    const dd = day.toString().padStart(2, '0');
+    
+    // Format as YY_MM_DD_HHMM using today's date and time
+    const yy = now.getFullYear().toString().slice(-2);
+    const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+    const dd = now.getDate().toString().padStart(2, '0');
     const hh = now.getHours().toString().padStart(2, '0');
     const min = now.getMinutes().toString().padStart(2, '0');
     const dateStr = `${yy}_${mm}_${dd}_${hh}${min}`;
@@ -8794,6 +8792,36 @@ async function fillScheduleGaps() {
         if (confirm(`Current template duration: ${formatDuration(totalDuration)}\nGap to fill: ${gapHours}h ${gapMinutes}m\n\nFill the gaps with available content?`)) {
             log(`fillScheduleGaps: User confirmed - filling ${gapHours}h ${gapMinutes}m of schedule gaps`, 'info');
             
+            // Get schedule date - skip prompt if template is from meetings import
+            let scheduleDate = currentTemplate.schedule_date;
+            if (!scheduleDate || !currentTemplate.from_meetings) {
+                // Only prompt if template wasn't created from meetings or has no date
+                const defaultDate = new Date();
+                if (currentTemplate.type === 'weekly') {
+                    // For weekly schedules, default to next Sunday
+                    const daysUntilSunday = (7 - defaultDate.getDay()) % 7;
+                    if (daysUntilSunday > 0) {
+                        defaultDate.setDate(defaultDate.getDate() + daysUntilSunday);
+                    }
+                }
+                scheduleDate = prompt('Enter the schedule start date (YYYY-MM-DD):', defaultDate.toISOString().split('T')[0]);
+                
+                if (!scheduleDate) {
+                    log('fillScheduleGaps: User cancelled date prompt', 'info');
+                    return;
+                }
+                
+                // Store the schedule date in the template
+                currentTemplate.schedule_date = scheduleDate;
+                if (window.currentTemplate) {
+                    window.currentTemplate.schedule_date = scheduleDate;
+                }
+            } else {
+                log(`fillScheduleGaps: Using meeting import date: ${scheduleDate}`, 'info');
+            }
+            
+            log(`fillScheduleGaps: Using schedule date: ${scheduleDate}`, 'info');
+            
             try {
                 // Call backend to fill gaps using proper rotation logic
                 log('fillScheduleGaps: Calling backend to fill gaps with rotation logic', 'info');
@@ -8986,13 +9014,17 @@ async function fillScheduleGaps() {
                 });
                 console.log('=== END MANUAL SPLIT ===');
                 
+                // Use the schedule date we collected earlier
+                // scheduleDate is already set from the prompt above
+                
                 const response = await fetch('/api/fill-template-gaps', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         template: cleanTemplate,
                         available_content: availableContent,
-                        gaps: manuallySplitGaps  // Use manually split gaps
+                        gaps: manuallySplitGaps,  // Use manually split gaps
+                        schedule_date: scheduleDate
                     })
                 });
                 
@@ -10831,19 +10863,17 @@ function exportTemplate(index) {
     currentExportTemplate = template;
     document.getElementById('exportTemplateName').textContent = template.filename || template.name || 'Untitled Template';
     
-    // Set default filename based on template type and name
-    const date = new Date();
-    const dateStr = date.toISOString().split('T')[0].replace(/-/g, '');
-    const templateType = template.type || 'daily';
-    let defaultFilename = '';
+    // Set default filename with current date/time in YY_MM_DD_HHMM format
+    const now = new Date();
+    const yy = now.getFullYear().toString().slice(-2);
+    const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+    const dd = now.getDate().toString().padStart(2, '0');
+    const hh = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const dateStr = `${yy}_${mm}_${dd}_${hh}${min}`;
     
-    if (templateType === 'daily') {
-        defaultFilename = `daily_${dateStr}.sch`;
-    } else if (templateType === 'weekly') {
-        defaultFilename = `weekly_${dateStr}.sch`;
-    } else if (templateType === 'monthly') {
-        defaultFilename = `monthly_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}.sch`;
-    }
+    const templateType = template.type || 'daily';
+    const defaultFilename = `${dateStr}_${templateType}.sch`;
     
     document.getElementById('templateExportFilename').value = defaultFilename;
     document.getElementById('templateExportFormat').value = `castus_${templateType}`;
@@ -11574,22 +11604,17 @@ function exportCurrentTemplate() {
     // Set the export modal for the current template
     document.getElementById('exportTemplateName').textContent = currentTemplate.filename || currentTemplate.name || 'Current Template';
     
-    // Set default filename based on template type and today's date
-    const date = new Date();
-    const templateType = currentTemplate.type || 'daily';
-    let defaultFilename = '';
+    // Set default filename with current date/time in YY_MM_DD_HHMM format
+    const now = new Date();
+    const yy = now.getFullYear().toString().slice(-2);
+    const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+    const dd = now.getDate().toString().padStart(2, '0');
+    const hh = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const dateStr = `${yy}_${mm}_${dd}_${hh}${min}`;
     
-    if (templateType === 'daily') {
-        const dateStr = date.toISOString().split('T')[0];
-        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-        defaultFilename = `${dayName}_${dateStr.replace(/-/g, '')}.sch`;
-    } else if (templateType === 'weekly') {
-        const dateStr = date.toISOString().split('T')[0].replace(/-/g, '');
-        defaultFilename = `weekly_${dateStr}.sch`;
-    } else if (templateType === 'monthly') {
-        const monthYear = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
-        defaultFilename = `monthly_${monthYear}.sch`;
-    }
+    const templateType = currentTemplate.type || 'daily';
+    const defaultFilename = `${dateStr}_${templateType}.sch`;
     
     document.getElementById('templateExportFilename').value = defaultFilename;
     document.getElementById('templateExportFormat').value = `castus_${templateType}`;
@@ -12003,6 +12028,15 @@ async function continueCreateSchedule(template) {
     }
     
     log(`Creating schedule from template: ${scheduleName} for ${airDate}`, 'info');
+    
+    // Store the schedule date in the template for fill gaps functionality
+    template.schedule_date = airDate;
+    if (window.currentTemplate) {
+        window.currentTemplate.schedule_date = airDate;
+    }
+    if (window.schedulingTemplateState && window.schedulingTemplateState.currentTemplate) {
+        window.schedulingTemplateState.currentTemplate.schedule_date = airDate;
+    }
     
     // Filter out missing files if user chose to remove them
     let itemsToCreate = template.items;
@@ -13895,7 +13929,9 @@ window.generateDailySchedule = async function() {
                 type: 'daily',
                 filename: `daily_meetings_${selectedDate}.sch`,
                 items: templateItems,
-                raw_content: data.template
+                raw_content: data.template,
+                schedule_date: selectedDate,  // Store the import date
+                from_meetings: true  // Mark that this template was created from meetings
             };
             
             // Display the template in the current panel
@@ -14082,12 +14118,27 @@ window.generateWeeklySchedule = async function() {
             // Process the template content to extract items
             const templateItems = parseScheduleTemplate(data.template);
             
+            // Get the year and week to calculate the Sunday start date
+            const year = parseInt(document.getElementById('weeklyMeetingYear').value);
+            const week = parseInt(document.getElementById('weeklyMeetingWeek').value);
+            
+            // Calculate the Sunday of that week
+            const jan1 = new Date(year, 0, 1);
+            const dayOfWeek = jan1.getDay();
+            const daysToFirstSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+            const firstSunday = new Date(year, 0, 1 + daysToFirstSunday);
+            const weekStart = new Date(firstSunday);
+            weekStart.setDate(firstSunday.getDate() + (week - 1) * 7);
+            const sundayDate = weekStart.toISOString().split('T')[0];
+            
             // Create a template object
             currentTemplate = {
                 type: 'weekly',
-                filename: `weekly_meetings_${new Date().toISOString().split('T')[0]}.sch`,
+                filename: `weekly_meetings_week${week}_${year}.sch`,
                 items: templateItems,
-                raw_content: data.template
+                raw_content: data.template,
+                schedule_date: sundayDate,  // Store the Sunday date
+                from_meetings: true  // Mark that this template was created from meetings
             };
             
             // Display the template
@@ -14194,12 +14245,20 @@ window.generateMonthlySchedule = async function() {
             // Process the template content to extract items
             const templateItems = parseScheduleTemplate(data.template);
             
+            // Get the year and month to calculate the first day
+            const year = parseInt(document.getElementById('monthlyMeetingYear').value);
+            const month = parseInt(document.getElementById('monthlyMeetingMonth').value);
+            const monthStart = new Date(year, month - 1, 1);
+            const startDate = monthStart.toISOString().split('T')[0];
+            
             // Create a template object
             currentTemplate = {
                 type: 'monthly',
-                filename: `monthly_meetings_${new Date().toISOString().split('T')[0]}.sch`,
+                filename: `monthly_meetings_${year}_${String(month).padStart(2, '0')}.sch`,
                 items: templateItems,
-                raw_content: data.template
+                raw_content: data.template,
+                schedule_date: startDate,  // Store the first day of the month
+                from_meetings: true  // Mark that this template was created from meetings
             };
             
             // Display the template

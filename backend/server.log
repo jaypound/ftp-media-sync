@@ -1,0 +1,932 @@
+/Users/jaypound/git/ftp-media-sync/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-09-08 15:03:09,628 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:09,646 - database_postgres - INFO - Connected to PostgreSQL database
+Starting FTP Sync Backend with DEBUG logging...
+Backend will be available at: http://127.0.0.1:5000
+Watch this terminal for detailed connection logs...
+ * Serving Flask app 'app'
+ * Debug mode: on
+2025-09-08 15:03:09,677 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2025-09-08 15:03:09,678 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-09-08 15:03:09,696 - werkzeug - INFO -  * Restarting with stat
+/Users/jaypound/git/ftp-media-sync/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-09-08 15:03:10,136 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:10,152 - database_postgres - INFO - Connected to PostgreSQL database
+2025-09-08 15:03:10,180 - werkzeug - WARNING -  * Debugger is active!
+2025-09-08 15:03:10,185 - werkzeug - INFO -  * Debugger PIN: 105-656-441
+2025-09-08 15:03:18,973 - __main__ - INFO - === ANALYZED CONTENT REQUEST ===
+2025-09-08 15:03:18,973 - __main__ - INFO - Filters: content_type=, duration_category=, search=
+2025-09-08 15:03:18,989 - __main__ - INFO - Found 122 content items
+2025-09-08 15:03:18,999 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:03:18] "POST /api/analyzed-content HTTP/1.1" 200 -
+2025-09-08 15:03:19,004 - __main__ - INFO - Received template type: daily
+2025-09-08 15:03:19,004 - __main__ - INFO - Template has 2 items
+2025-09-08 15:03:19,004 - __main__ - INFO - Available content count: 122
+2025-09-08 15:03:19,004 - __main__ - INFO - Content expiration status: 54 with expiry date, 68 without expiry date
+2025-09-08 15:03:19,004 - __main__ - INFO - First 3 items for debugging:
+2025-09-08 15:03:19,004 - __main__ - INFO -   Item 0: start_time='00:00:00', title='Morning Show'
+2025-09-08 15:03:19,004 - __main__ - INFO -   Item 1: start_time='00:30:00', title='News'
+2025-09-08 15:03:19,005 - __main__ - INFO - Using schedule date: 2025-09-15
+2025-09-08 15:03:19,005 - __main__ - DEBUG - Parsing daily time format: '00:00:00'
+2025-09-08 15:03:19,005 - __main__ - DEBUG - Parsed 24-hour format to 0.0 seconds
+2025-09-08 15:03:19,005 - __main__ - INFO - Original item 0: Morning Show at '00:00:00' from 0.00h to 0.00h
+2025-09-08 15:03:19,005 - __main__ - INFO -   Duration: 0.0s (0.000000h), exact end: 0.0s
+2025-09-08 15:03:19,005 - __main__ - DEBUG - Parsing daily time format: '00:30:00'
+2025-09-08 15:03:19,005 - __main__ - DEBUG - Parsed 24-hour format to 1800.0 seconds
+2025-09-08 15:03:19,005 - __main__ - INFO - Original item 1: News at '00:30:00' from 0.50h to 0.50h
+2025-09-08 15:03:19,005 - __main__ - INFO -   Duration: 0.0s (0.000000h), exact end: 1800.0s
+2025-09-08 15:03:19,005 - __main__ - INFO - Found 2 original items to preserve
+2025-09-08 15:03:19,005 - __main__ - INFO - Using 1 provided gaps
+2025-09-08 15:03:19,005 - __main__ - INFO -   Gap 1: 0.2h - 0.5h (duration: 0.2h)
+2025-09-08 15:03:19,005 - __main__ - INFO - Total gap time to fill: 0.2 hours
+2025-09-08 15:03:19,005 - __main__ - INFO - Pre-validating file existence for available content...
+2025-09-08 15:03:19,013 - ftp_manager - INFO - Connected to castus1
+2025-09-08 15:03:19,022 - ftp_manager - INFO - Connected to castus2
+2025-09-08 15:03:19,022 - __main__ - INFO - Sample file paths from available content:
+2025-09-08 15:03:19,022 - __main__ - INFO -   Sample 1: PSAs/241209_PSA_Lightindarkness 15 ENG.mp4
+2025-09-08 15:03:19,022 - __main__ - INFO -   Sample 2: PSAs/241209_PSA_Two for One 15 ENG.mp4
+2025-09-08 15:03:19,022 - __main__ - INFO -   Sample 3: BUMPS/240711_BMP_ Freedom Parkway_DAY_ATL26.mp4
+2025-09-08 15:03:19,022 - __main__ - INFO -   Sample 4: PSAs/240912_PSA_La Shana Employers 15 ENG.mp4
+2025-09-08 15:03:19,022 - __main__ - INFO -   Sample 5: PSAs/250121_PSA_Gun Prepare for Misuses School 15 ENG.mp4
+2025-09-08 15:03:19,023 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Lightindarkness 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,023 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Lightindarkness 15 ENG.mp4
+2025-09-08 15:03:19,023 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Two for One 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,024 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Two for One 15 ENG.mp4
+2025-09-08 15:03:19,024 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_ Freedom Parkway_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,024 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_ Freedom Parkway_DAY_ATL26.mp4
+2025-09-08 15:03:19,025 - __main__ - DEBUG - File not found at PSAs/240912_PSA_La Shana Employers 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,025 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_La Shana Employers 15 ENG.mp4
+2025-09-08 15:03:19,025 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Prepare for Misuses School 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,025 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Prepare for Misuses School 15 ENG.mp4
+2025-09-08 15:03:19,026 - __main__ - DEBUG - File not found at PSAs/240410_PSA_Lung Cancer Matches 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,026 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240410_PSA_Lung Cancer Matches 30 ENG.mp4
+2025-09-08 15:03:19,026 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Cookietins 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,026 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Cookietins 15 ENG.mp4
+2025-09-08 15:03:19,026 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Old Fourth Ward 1_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,027 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Old Fourth Ward 1_DAY_ATL26.mp4
+2025-09-08 15:03:19,027 - __main__ - DEBUG - File not found at BUMPS/240823_BMP_ Capital Dome AI_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,027 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240823_BMP_ Capital Dome AI_NIGHT_ATL26.mp4
+2025-09-08 15:03:19,027 - __main__ - DEBUG - File not found at BUMPS/240905_BMP_Skyline_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,028 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240905_BMP_Skyline_DAY_ATL26.mp4
+2025-09-08 15:03:19,028 - __main__ - DEBUG - File not found at BUMPS/240830_BMP_Mercedes Benz_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,028 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240830_BMP_Mercedes Benz_NIGHT_ATL26.mp4
+2025-09-08 15:03:19,028 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Krog Street Tunnel_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,029 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Krog Street Tunnel_DAY_ATL26.mp4
+2025-09-08 15:03:19,029 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Prepare for Misuse 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,029 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Prepare for Misuse 15 ENG.mp4
+2025-09-08 15:03:19,029 - __main__ - DEBUG - File not found at PSAs/240912_PSA_Jeff Starts 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,030 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_Jeff Starts 15 ENG.mp4
+2025-09-08 15:03:19,030 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_East Atlanta_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,030 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_East Atlanta_DAY_ATL26.mp4
+2025-09-08 15:03:19,030 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_ Buildings_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,031 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_ Buildings_DAY_ATL26.mp4
+2025-09-08 15:03:19,031 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Tyler Perry Studios_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,031 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Tyler Perry Studios_DAY_ATL26.mp4
+2025-09-08 15:03:19,031 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Prepare for Misuse Kids 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,032 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Prepare for Misuse Kids 15 ENG.mp4
+2025-09-08 15:03:19,032 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Old Fourth Ward 2_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,032 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Old Fourth Ward 2_DAY_ATL26.mp4
+2025-09-08 15:03:19,032 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_State Farm_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,033 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_State Farm_DAY_ATL26.mp4
+2025-09-08 15:03:19,033 - __main__ - DEBUG - File not found at BUMPS/240823_BMP_Downtown Aerial_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,033 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240823_BMP_Downtown Aerial_NIGHT_ATL26.mp4
+2025-09-08 15:03:19,033 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Fox Theatre_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,034 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Fox Theatre_DAY_ATL26.mp4
+2025-09-08 15:03:19,034 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Centennial Park_AI_NIGHT.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,034 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Centennial Park_AI_NIGHT.mp4
+2025-09-08 15:03:19,035 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Skyline_AI_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,035 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Skyline_AI_NIGHT_ATL26.mp4
+2025-09-08 15:03:19,035 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Georgia Aquarium_AI_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,036 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Georgia Aquarium_AI_ATL26.mp4
+2025-09-08 15:03:19,036 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Inman Park_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,036 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Inman Park_DAY_ATL26.mp4
+2025-09-08 15:03:19,036 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Hustle 30 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,037 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Hustle 30 SP.mp4
+2025-09-08 15:03:19,037 - __main__ - DEBUG - File not found at PSAs/240920_PSA_Gun Threat 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,037 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240920_PSA_Gun Threat 30 ENG.mp4
+2025-09-08 15:03:19,038 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Come Correct-30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,038 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Come Correct-30 ENG.mp4
+2025-09-08 15:03:19,038 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun-the Threat 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,038 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun-the Threat 30 ENG.mp4
+2025-09-08 15:03:19,039 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun the Threat 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,039 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun the Threat 60 ENG.mp4
+2025-09-08 15:03:19,039 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Safe Stories Reba 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,039 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Safe Stories Reba 30 ENG.mp4
+2025-09-08 15:03:19,039 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Montage 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,040 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Montage 30 ENG.mp4
+2025-09-08 15:03:19,040 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Innercircles 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,040 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Innercircles 60 ENG.mp4
+2025-09-08 15:03:19,040 - __main__ - DEBUG - File not found at PSAs/241030_PSA_Change the Outcome 60 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,041 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241030_PSA_Change the Outcome 60 SP.mp4
+2025-09-08 15:03:19,041 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Love Protects 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,041 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Love Protects 30 ENG.mp4
+2025-09-08 15:03:19,041 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Vape Narrator 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,041 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Vape Narrator 30 ENG.mp4
+2025-09-08 15:03:19,042 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Vape Talk 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,042 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Vape Talk 60 ENG.mp4
+2025-09-08 15:03:19,042 - __main__ - DEBUG - File not found at PSAs/240912_PSA_Justin Stars 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,042 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_Justin Stars 30 ENG.mp4
+2025-09-08 15:03:19,043 - __main__ - DEBUG - File not found at PSAs/240912_PSA_La Shana Employers 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,043 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_La Shana Employers 30 ENG.mp4
+2025-09-08 15:03:19,043 - __main__ - DEBUG - File not found at PSAs/240912_PSA_Tear the Paper Ceiling Anthem 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,043 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_Tear the Paper Ceiling Anthem 60 ENG.mp4
+2025-09-08 15:03:19,043 - __main__ - DEBUG - File not found at PSAs/241030_PSA_Be your Own Hero 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,044 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241030_PSA_Be your Own Hero 60 ENG.mp4
+2025-09-08 15:03:19,044 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 60 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,044 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 60 SP.mp4
+2025-09-08 15:03:19,044 - __main__ - DEBUG - File not found at PSAs/220307_PSA_Adopt-A-Drain 45 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,044 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220307_PSA_Adopt-A-Drain 45 ENG.mp4
+2025-09-08 15:03:19,045 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,045 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 60 ENG.mp4
+2025-09-08 15:03:19,045 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 30 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,045 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 30 SP.mp4
+2025-09-08 15:03:19,046 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,046 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 30 ENG.mp4
+2025-09-08 15:03:19,046 - __main__ - DEBUG - File not found at PSAs/231214_PSA_Diabetes Hero 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,046 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/231214_PSA_Diabetes Hero 60 ENG.mp4
+2025-09-08 15:03:19,047 - __main__ - DEBUG - File not found at PSAs/240229_PSA_Water Leaks 1.48 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,047 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240229_PSA_Water Leaks 1.48 ENG.mp4
+2025-09-08 15:03:19,047 - __main__ - DEBUG - File not found at PSAs/240410_PSA_Lung Cancer Hope 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,047 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240410_PSA_Lung Cancer Hope 30 ENG.mp4
+2025-09-08 15:03:19,048 - __main__ - DEBUG - File not found at PSAs/240425_PSA_Emergency Prepare BBQ 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,048 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240425_PSA_Emergency Prepare BBQ 30 ENG.mp4
+2025-09-08 15:03:19,048 - __main__ - DEBUG - File not found at PSAs/240425_PSA_Emergency Prepare Take Control 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,048 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240425_PSA_Emergency Prepare Take Control 30 ENG.mp4
+2025-09-08 15:03:19,048 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Liberty 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,049 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Liberty 30 ENG.mp4
+2025-09-08 15:03:19,049 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Liberty 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,049 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Liberty 60 ENG.mp4
+2025-09-08 15:03:19,049 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Love Protects 30 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,050 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Love Protects 30 SP.mp4
+2025-09-08 15:03:19,050 - __main__ - DEBUG - File not found at PSAs/241030_PSA_Be your Own Hero 60 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,050 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241030_PSA_Be your Own Hero 60 SP.mp4
+2025-09-08 15:03:19,051 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Life 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,051 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Life 30 ENG.mp4
+2025-09-08 15:03:19,051 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Gracie and Pedro Seat for Everyone 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,052 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Gracie and Pedro Seat for Everyone 30 ENG.mp4
+2025-09-08 15:03:19,052 - __main__ - DEBUG - File not found at SIZZLES/240229_SZL_2026 World Cup Sizzle.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,052 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/SIZZLES/240229_SZL_2026 World Cup Sizzle.mp4
+2025-09-08 15:03:19,053 - __main__ - DEBUG - File not found at SIZZLES/240807_SZL_ATL26 Sizzle 2024.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,053 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/SIZZLES/240807_SZL_ATL26 Sizzle 2024.mp4
+2025-09-08 15:03:19,053 - __main__ - DEBUG - File not found at SPECIAL PROJECTS/250701-SPP_Swearing-in Judge Allyson Pitts.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,053 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/SPECIAL PROJECTS/250701-SPP_Swearing-in Judge Allyson Pitts.mp4
+2025-09-08 15:03:19,054 - __main__ - DEBUG - File not found at BUMPS/240828_BMP_West End_AI_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,054 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240828_BMP_West End_AI_NIGHT_ATL26.mp4
+2025-09-08 15:03:19,054 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Midtown_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,054 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Midtown_DAY_ATL26.mp4
+2025-09-08 15:03:19,055 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Mercedes Benz_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,055 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Mercedes Benz_DAY_ATL26.mp4
+2025-09-08 15:03:19,055 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Oakland Cemetery_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,055 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Oakland Cemetery_DAY_ATL26.mp4
+2025-09-08 15:03:19,055 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun the Threat 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,056 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun the Threat 15 ENG.mp4
+2025-09-08 15:03:19,056 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_Cascade_SWAT_Day _ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,056 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_Cascade_SWAT_Day _ATL26.mp4
+2025-09-08 15:03:19,056 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_College Park_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,057 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_College Park_DAY_ATL26.mp4
+2025-09-08 15:03:19,057 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_Midtown 2_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,057 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_Midtown 2_DAY_ATL26.mp4
+2025-09-08 15:03:19,057 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_West End_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,058 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_West End_DAY_ATL26.mp4
+2025-09-08 15:03:19,058 - __main__ - DEBUG - File not found at PSAs/220330_PSA_Replace Your Showerhead 47 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,058 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220330_PSA_Replace Your Showerhead 47 ENG.mp4
+2025-09-08 15:03:19,058 - __main__ - DEBUG - File not found at PSAs/240325_PSA_ATL Suppliers 58 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,059 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240325_PSA_ATL Suppliers 58 ENG.mp4
+2025-09-08 15:03:19,059 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-imirlisteningisaformoflove-hd-eng-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,059 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-imirlisteningisaformoflove-hd-eng-30.mp4
+2025-09-08 15:03:19,059 - __main__ - DEBUG - File not found at PSAs/250903_PSA_Piv-cristianlisteningisaformoflove-hd-spa-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,060 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_Piv-cristianlisteningisaformoflove-hd-spa-30.mp4
+2025-09-08 15:03:19,060 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Fulleffect-hd-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,060 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Fulleffect-hd-eng-30.mov.mp4
+2025-09-08 15:03:19,060 - __main__ - DEBUG - File not found at PROMOS/250904_PMO_Beltline-Third-Quarterly-Briefing.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,060 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PROMOS/250904_PMO_Beltline-Third-Quarterly-Briefing.mp4
+2025-09-08 15:03:19,061 - __main__ - DEBUG - File not found at PROMOS/250903_PMO_Beltine Third Quarterly Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,061 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PROMOS/250903_PMO_Beltine Third Quarterly Meeting.mp4
+2025-09-08 15:03:19,061 - __main__ - DEBUG - File not found at ATL DIRECT/250826_ATLD_New City Hall Lights.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,061 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATL DIRECT/250826_ATLD_New City Hall Lights.mp4
+2025-09-08 15:03:19,062 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Vidaplenamentellena2-hd-spa-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,062 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Vidaplenamentellena2-hd-spa-30.mov.mp4
+2025-09-08 15:03:19,062 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Playdatespanish-hd-spa-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,062 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Playdatespanish-hd-spa-30.mov.mp4
+2025-09-08 15:03:19,063 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Worries-hd-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,063 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Worries-hd-eng-30.mov.mp4
+2025-09-08 15:03:19,063 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Whenyougraduate-eng-60-hd.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,063 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Whenyougraduate-eng-60-hd.mov.mp4
+2025-09-08 15:03:19,063 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Cuandotutegraduas-spa-60-hd.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,064 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Cuandotutegraduas-spa-60-hd.mov.mp4
+2025-09-08 15:03:19,064 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Fulleffect-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,064 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Fulleffect-hd-eng-60.mov.mp4
+2025-09-08 15:03:19,064 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Nodebatedebate-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,065 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Nodebatedebate-hd-eng-60.mov.mp4
+2025-09-08 15:03:19,065 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Vidaplenamentellena-hd-spa-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,065 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Vidaplenamentellena-hd-spa-60.mov.mp4
+2025-09-08 15:03:19,065 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Yearbook-darlene-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,066 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Yearbook-darlene-hd-eng-60.mov.mp4
+2025-09-08 15:03:19,066 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Pregame-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,066 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Pregame-hd-eng-60.mov.mp4
+2025-09-08 15:03:19,066 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Thisispretirement-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,066 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Thisispretirement-eng-30.mov.mp4
+2025-09-08 15:03:19,067 - __main__ - DEBUG - File not found at PSAs/220330_PSA_Replace Your Faucet Aerator 45 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,067 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220330_PSA_Replace Your Faucet Aerator 45 ENG.mp4
+2025-09-08 15:03:19,067 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Elizabeth-hd-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,067 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Elizabeth-hd-eng-30.mov.mp4
+2025-09-08 15:03:19,068 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Elizabeth-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,068 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Elizabeth-hd-eng-60.mov.mp4
+2025-09-08 15:03:19,068 - __main__ - DEBUG - File not found at PSAs/241119_PSA_Reporting with the 311 App A Step-by-Step Guide 31 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,068 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241119_PSA_Reporting with the 311 App A Step-by-Step Guide 31 ENG.mp4
+2025-09-08 15:03:19,069 - __main__ - DEBUG - File not found at PSAs/231214_PSA_Diabetes Hedgehog 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,069 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/231214_PSA_Diabetes Hedgehog 60 ENG.mp4
+2025-09-08 15:03:19,069 - __main__ - DEBUG - File not found at PSAs/220330_PSA_Replace Your Leaky Toilet Flapper 51 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,069 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220330_PSA_Replace Your Leaky Toilet Flapper 51 ENG.mp4
+2025-09-08 15:03:19,070 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-listeningisaformoflove-hd-spa-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,070 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-listeningisaformoflove-hd-spa-30.mp4
+2025-09-08 15:03:19,070 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-60.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,070 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-60.mp4
+2025-09-08 15:03:19,071 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,071 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-30.mp4
+2025-09-08 15:03:19,071 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-janessalisteningisaformoflove-hd-eng-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,071 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-janessalisteningisaformoflove-hd-eng-30.mp4
+2025-09-08 15:03:19,072 - __main__ - DEBUG - File not found at PKGS/250828_PKG_Mohamed Balla from Sudan to ATL.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,072 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PKGS/250828_PKG_Mohamed Balla from Sudan to ATL.mp4
+2025-09-08 15:03:19,072 - __main__ - DEBUG - File not found at LEGISLATIVE MINUTE/250904_LM_September 3.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,072 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/LEGISLATIVE MINUTE/250904_LM_September 3.mp4
+2025-09-08 15:03:19,073 - __main__ - DEBUG - File not found at ATL DIRECT/250903_ATLD_DragonCon Parade_1.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,073 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATL DIRECT/250903_ATLD_DragonCon Parade_1.mp4
+2025-09-08 15:03:19,073 - __main__ - DEBUG - File not found at ATLANTA NOW/250826_AN_Emergency Responders Demo Day.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,073 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATLANTA NOW/250826_AN_Emergency Responders Demo Day.mp4
+2025-09-08 15:03:19,073 - __main__ - DEBUG - File not found at LEGISLATIVE MINUTE/250806_LM_Legislative Minute AUG 2025.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,074 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/LEGISLATIVE MINUTE/250806_LM_Legislative Minute AUG 2025.mp4
+2025-09-08 15:03:19,074 - __main__ - DEBUG - File not found at INSIDE ATLANTA/250904_IA_Adamsville Community Food Pantry Ribbon Cutting feaf CM A Boone.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,074 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/INSIDE ATLANTA/250904_IA_Adamsville Community Food Pantry Ribbon Cutting feaf CM A Boone.mp4
+2025-09-08 15:03:19,074 - __main__ - DEBUG - File not found at INSIDE ATLANTA/250902_IA_Joint Town_feat CM ABooneoone and CW Nikema Williams.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,075 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/INSIDE ATLANTA/250902_IA_Joint Town_feat CM ABooneoone and CW Nikema Williams.mp4
+2025-09-08 15:03:19,075 - __main__ - DEBUG - File not found at ATLANTA NOW/250819_AN_Northwest BeltLine Trail Opening.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,075 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATLANTA NOW/250819_AN_Northwest BeltLine Trail Opening.mp4
+2025-09-08 15:03:19,075 - __main__ - DEBUG - File not found at ATLANTA NOW/250827_AN_Mayors Cup Golf Tournament_v3.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,075 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATLANTA NOW/250827_AN_Mayors Cup Golf Tournament_v3.mp4
+2025-09-08 15:03:19,076 - __main__ - DEBUG - File not found at MEETINGS/250908_MTG_Zoning_Committee.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,076 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250908_MTG_Zoning_Committee.mp4
+2025-09-08 15:03:19,076 - __main__ - DEBUG - File not found at INSIDE ATLANTA/250825_IA__Safe Routes To School Empire Blvd Walk Bike Lane Ext feat MC Lewis.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,076 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/INSIDE ATLANTA/250825_IA__Safe Routes To School Empire Blvd Walk Bike Lane Ext feat MC Lewis.mp4
+2025-09-08 15:03:19,076 - __main__ - DEBUG - File not found at MEETINGS/250904_MTG_Board of Zoning Adjustment.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,077 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250904_MTG_Board of Zoning Adjustment.mp4
+2025-09-08 15:03:19,077 - __main__ - DEBUG - File not found at MEETINGS/250827_MTG_City Utilities Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,077 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250827_MTG_City Utilities Committee Meeting.mp4
+2025-09-08 15:03:19,077 - __main__ - DEBUG - File not found at MEETINGS/250902_MTG_City Council.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,078 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250902_MTG_City Council.mp4
+2025-09-08 15:03:19,078 - __main__ - DEBUG - File not found at MEETINGS/250902_MTG_Committee on Council.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,078 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250902_MTG_Committee on Council.mp4
+2025-09-08 15:03:19,078 - __main__ - DEBUG - File not found at MEETINGS/250903_MTG_COMMUNITY DEV HUMAN SERVICES COMMITTEE.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,078 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250903_MTG_COMMUNITY DEV HUMAN SERVICES COMMITTEE.mp4
+2025-09-08 15:03:19,079 - __main__ - DEBUG - File not found at MEETINGS/250827_FinanceExecutive Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,079 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250827_FinanceExecutive Committee Meeting.mp4
+2025-09-08 15:03:19,079 - __main__ - DEBUG - File not found at MEETINGS/250819_MTG_License Review Board Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,079 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250819_MTG_License Review Board Meeting.mp4
+2025-09-08 15:03:19,079 - __main__ - DEBUG - File not found at MEETINGS/250904_MTG_Zoning Review Board.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,080 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250904_MTG_Zoning Review Board.mp4
+2025-09-08 15:03:19,080 - __main__ - DEBUG - File not found at MEETINGS/250825_MTG_CDHS Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,080 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250825_MTG_CDHS Committee Meeting.mp4
+2025-09-08 15:03:19,080 - __main__ - DEBUG - File not found at MEETINGS/250825_MTG_PSLA Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,080 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250825_MTG_PSLA Committee Meeting.mp4
+2025-09-08 15:03:19,081 - __main__ - DEBUG - File not found at MEETINGS/250825_MTG_Zoning Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,081 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250825_MTG_Zoning Committee Meeting.mp4
+2025-09-08 15:03:19,081 - __main__ - DEBUG - File not found at MEETINGS/250827_MTG_Transportation Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:19,081 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250827_MTG_Transportation Committee Meeting.mp4
+2025-09-08 15:03:19,082 - __main__ - INFO - Available content count: 122
+2025-09-08 15:03:19,082 - __main__ - INFO - Content available for scheduling: 122
+2025-09-08 15:03:19,082 - __main__ - INFO - Sample content item keys: ['_id', 'analysis_completed', 'content_title', 'content_type', 'duration_category', 'engagement_score', 'file_duration', 'file_name', 'file_path', 'file_size', 'guid', 'id', 'scheduling', 'summary']
+2025-09-08 15:03:19,082 - __main__ - INFO - Sample duration_category: id
+2025-09-08 15:03:19,082 - __main__ - INFO - Content by category: {'id': 35, 'spots': 63, 'long_form': 13, 'short_form': 11}
+2025-09-08 15:03:19,082 - __main__ - INFO - Assets already scheduled in template: 0
+2025-09-08 15:03:19,082 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:19,082 - __main__ - INFO - Replay delays: {'id': 6, 'long_form': 8, 'short_form': 2, 'spots': 2}
+2025-09-08 15:03:19,082 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:19,082 - scheduler_postgres - INFO - Scheduling config loaded: {'default_export_server': 'target', 'default_export_path': '/mnt/md127/Schedules/Contributors/Jay', 'max_consecutive_errors': 100, 'rotation_order': ['id', 'spots', 'long_form', 'short_form'], 'replay_delays': {'id': 6, 'long_form': 8, 'short_form': 2, 'spots': 2}, 'additional_delay_per_airing': {'id': 1, 'long_form': 8, 'short_form': 4, 'spots': 2}, 'content_expiration': {'id': 30, 'long_form': 180, 'short_form': 90, 'spots': 60}, 'timeslots': {'afternoon': {'end': 18, 'label': 'Afternoon (12-6 PM)', 'start': 12}, 'early_morning': {'end': 9, 'label': 'Early Morning (6-9 AM)', 'start': 6}, 'evening': {'end': 24, 'label': 'Evening (9 PM-12 AM)', 'start': 21}, 'morning': {'end': 12, 'label': 'Morning (9 AM-12 PM)', 'start': 9}, 'overnight': {'end': 6, 'label': 'Overnight (12-6 AM)', 'start': 0}, 'prime_time': {'end': 21, 'label': 'Prime Time (6-9 PM)', 'start': 18}}, 'duration_categories': {'id': {'label': 'ID (< 16s)', 'max': 16, 'min': 0}, 'long_form': {'label': 'Long Form (> 20min)', 'max': None, 'min': 1200}, 'short_form': {'label': 'Short Form (2-20min)', 'max': 1200, 'min': 120}, 'spots': {'label': 'Spots (16s - 2min)', 'max': 120, 'min': 16}}}
+2025-09-08 15:03:19,082 - scheduler_postgres - INFO - Loaded rotation order from config: ['id', 'spots', 'long_form', 'short_form']
+2025-09-08 15:03:19,083 - __main__ - INFO - Using rotation order: ['id', 'spots', 'long_form', 'short_form']
+2025-09-08 15:03:19,083 - __main__ - INFO - Filling gap from 0.2h to 0.5h (duration: 0.2h)
+2025-09-08 15:03:19,083 - __main__ - INFO -   Exact gap values: start=900s (0.250000h), end=1800s (0.500000h)
+2025-09-08 15:03:19,083 - __main__ - INFO -   Daily schedule: All content airs on 2025-09-15
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Lightindarkness 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Two for One 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'La Shana Employers 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun Prepare for Misuses School 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Lung Cancer Matches 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Cookietins 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Old Fourth Ward 1_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Capital Dome AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Skyline_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Mercedes Benz_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Krog Street Tunnel_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun Prepare for Misuse 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Jeff Starts 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'East Atlanta_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - INFO - EXPIRATION CHECK: Content 'Buildings_DAY_ATL26' expires on 2025-09-06, cannot schedule for 2025-09-15 (position: 0.2h)
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Tyler Perry Studios_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun Prepare for Misuse Kids 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Old Fourth Ward 2_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'State Farm_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Downtown Aerial_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Fox Theatre_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Centennial Park_AI_NIGHT' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Skyline_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Georgia Aquarium_AI_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Inman Park_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'West End_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Midtown_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Mercedes Benz_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Oakland Cemetery_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun the Threat 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Selected ID from top 13 candidates for variety
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Hustle 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Come Correct-30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun-the Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun the Threat 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Gun Safe Stories Reba 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Montage 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Innercircles 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Change the Outcome 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Love Protects 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Vape Narrator 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Vape Talk 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Justin Stars 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'La Shana Employers 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,083 - __main__ - DEBUG - Content 'Tear the Paper Ceiling Anthem 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Be your Own Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Flu Playdefense 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Adopt-A-Drain 45 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Flu Playdefense 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Flu Playdefense 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Flu Playdefense 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Diabetes Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Water Leaks 1.48 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Lung Cancer Hope 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Emergency Prepare BBQ 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Emergency Prepare Take Control 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Liberty 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Liberty 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Love Protects 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Be your Own Hero 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Life 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Gracie and Pedro Seat for Everyone 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content '2026 World Cup Sizzle' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'ATL26 Sizzle 2024' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Replace Your Showerhead 47 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'ATL Suppliers 58 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Reporting with the 311 App A Step-by-Step Guide 31 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Diabetes Hedgehog 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Replace Your Leaky Toilet Flapper 51 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - INFO - No long_form content fits remaining gap of 14.2 minutes
+2025-09-08 15:03:19,084 - __main__ - INFO - Searching all categories for content that fits...
+2025-09-08 15:03:19,084 - __main__ - INFO - Found short_form content 'Zoning_Committee' (10.6 min) that fits gap
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 371 blocked: 0.2h since last, need 2.0h
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Lightindarkness 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Two for One 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'La Shana Employers 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Gun Prepare for Misuses School 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Lung Cancer Matches 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 'Cookietins 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,084 - __main__ - DEBUG - Content 218 blocked: 0.2h since last, need 6.0h
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Old Fourth Ward 1_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Capital Dome AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Skyline_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Mercedes Benz_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Krog Street Tunnel_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun Prepare for Misuse 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Jeff Starts 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'East Atlanta_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - INFO - EXPIRATION CHECK: Content 'Buildings_DAY_ATL26' expires on 2025-09-06, cannot schedule for 2025-09-15 (position: 0.5h)
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Tyler Perry Studios_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun Prepare for Misuse Kids 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Old Fourth Ward 2_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'State Farm_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Downtown Aerial_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Fox Theatre_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Centennial Park_AI_NIGHT' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Skyline_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Georgia Aquarium_AI_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Inman Park_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'West End_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Midtown_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Mercedes Benz_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Oakland Cemetery_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun the Threat 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Selected ID from top 13 candidates for variety
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Hustle 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 208 blocked: 0.2h since last, need 2.0h
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Come Correct-30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun-the Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun the Threat 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Gun Safe Stories Reba 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Montage 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Innercircles 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Change the Outcome 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Love Protects 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Vape Narrator 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Vape Talk 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Justin Stars 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'La Shana Employers 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Tear the Paper Ceiling Anthem 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Be your Own Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Flu Playdefense 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Adopt-A-Drain 45 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Flu Playdefense 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Flu Playdefense 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Flu Playdefense 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,085 - __main__ - DEBUG - Content 'Diabetes Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Water Leaks 1.48 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Lung Cancer Hope 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Emergency Prepare BBQ 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Emergency Prepare Take Control 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Liberty 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Liberty 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Love Protects 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Be your Own Hero 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Life 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Gracie and Pedro Seat for Everyone 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content '2026 World Cup Sizzle' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'ATL26 Sizzle 2024' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Replace Your Showerhead 47 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'ATL Suppliers 58 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Reporting with the 311 App A Step-by-Step Guide 31 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Diabetes Hedgehog 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - DEBUG - Content 'Replace Your Leaky Toilet Flapper 51 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:19,086 - __main__ - INFO - No long_form content fits remaining gap of 0.1 minutes
+2025-09-08 15:03:19,086 - __main__ - INFO - Searching all categories for content that fits...
+2025-09-08 15:03:19,086 - __main__ - WARNING - No content from any category fits remaining gap of 0.1 minutes
+2025-09-08 15:03:19,086 - __main__ - INFO - Gap details: ends at 0.50h (0:30), position=0.50h
+2025-09-08 15:03:19,086 - __main__ - INFO - Gap of 4.8 seconds is too small to fill. Moving to next gap.
+2025-09-08 15:03:19,086 - __main__ - INFO - Fill gaps completed: 6 total items added, 0.2 hours total
+2025-09-08 15:03:19,086 - __main__ - INFO - === FINAL VERIFICATION: Checking if all original items are preserved ===
+2025-09-08 15:03:19,086 - __main__ - INFO - VERIFICATION PASSED: All original items preserved, no overlaps detected
+2025-09-08 15:03:19,086 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:03:19] "POST /api/fill-template-gaps HTTP/1.1" 200 -
+2025-09-08 15:03:38,926 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:03:38] "OPTIONS /api/status HTTP/1.1" 200 -
+2025-09-08 15:03:38,928 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:03:38] "GET /api/status HTTP/1.1" 200 -
+2025-09-08 15:03:40,714 - werkzeug - INFO -  * Detected change in '/Users/jaypound/git/ftp-media-sync/backend/test_fill_gaps.py', reloading
+Starting FTP Sync Backend with DEBUG logging...
+Backend will be available at: http://127.0.0.1:5000
+Watch this terminal for detailed connection logs...
+2025-09-08 15:03:40,773 - werkzeug - INFO -  * Restarting with stat
+/Users/jaypound/git/ftp-media-sync/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2025-09-08 15:03:41,180 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:41,197 - database_postgres - INFO - Connected to PostgreSQL database
+2025-09-08 15:03:41,224 - werkzeug - WARNING -  * Debugger is active!
+2025-09-08 15:03:41,228 - werkzeug - INFO -  * Debugger PIN: 105-656-441
+2025-09-08 15:03:47,304 - __main__ - INFO - === ANALYZED CONTENT REQUEST ===
+2025-09-08 15:03:47,304 - __main__ - INFO - Filters: content_type=, duration_category=, search=
+2025-09-08 15:03:47,323 - __main__ - INFO - Found 122 content items
+2025-09-08 15:03:47,333 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:03:47] "POST /api/analyzed-content HTTP/1.1" 200 -
+2025-09-08 15:03:47,338 - __main__ - INFO - Received template type: daily
+2025-09-08 15:03:47,339 - __main__ - INFO - Template has 2 items
+2025-09-08 15:03:47,339 - __main__ - INFO - Available content count: 122
+2025-09-08 15:03:47,339 - __main__ - INFO - Content expiration status: 54 with expiry date, 68 without expiry date
+2025-09-08 15:03:47,339 - __main__ - INFO - First 3 items for debugging:
+2025-09-08 15:03:47,339 - __main__ - INFO -   Item 0: start_time='00:00:00', title='Morning Show'
+2025-09-08 15:03:47,339 - __main__ - INFO -   Item 1: start_time='00:30:00', title='News'
+2025-09-08 15:03:47,340 - __main__ - INFO - Using schedule date: 2025-09-15
+2025-09-08 15:03:47,340 - __main__ - DEBUG - Parsing daily time format: '00:00:00'
+2025-09-08 15:03:47,340 - __main__ - DEBUG - Parsed 24-hour format to 0.0 seconds
+2025-09-08 15:03:47,340 - __main__ - INFO - Original item 0: Morning Show at '00:00:00' from 0.00h to 0.00h
+2025-09-08 15:03:47,340 - __main__ - INFO -   Duration: 0.0s (0.000000h), exact end: 0.0s
+2025-09-08 15:03:47,340 - __main__ - DEBUG - Parsing daily time format: '00:30:00'
+2025-09-08 15:03:47,340 - __main__ - DEBUG - Parsed 24-hour format to 1800.0 seconds
+2025-09-08 15:03:47,340 - __main__ - INFO - Original item 1: News at '00:30:00' from 0.50h to 0.50h
+2025-09-08 15:03:47,340 - __main__ - INFO -   Duration: 0.0s (0.000000h), exact end: 1800.0s
+2025-09-08 15:03:47,340 - __main__ - INFO - Found 2 original items to preserve
+2025-09-08 15:03:47,340 - __main__ - INFO - Using 1 provided gaps
+2025-09-08 15:03:47,340 - __main__ - INFO -   Gap 1: 0.2h - 0.5h (duration: 0.2h)
+2025-09-08 15:03:47,340 - __main__ - INFO - Total gap time to fill: 0.2 hours
+2025-09-08 15:03:47,340 - __main__ - INFO - Pre-validating file existence for available content...
+2025-09-08 15:03:47,349 - ftp_manager - INFO - Connected to castus1
+2025-09-08 15:03:47,358 - ftp_manager - INFO - Connected to castus2
+2025-09-08 15:03:47,358 - __main__ - INFO - Sample file paths from available content:
+2025-09-08 15:03:47,358 - __main__ - INFO -   Sample 1: PSAs/241209_PSA_Lightindarkness 15 ENG.mp4
+2025-09-08 15:03:47,358 - __main__ - INFO -   Sample 2: PSAs/241209_PSA_Two for One 15 ENG.mp4
+2025-09-08 15:03:47,358 - __main__ - INFO -   Sample 3: BUMPS/240711_BMP_ Freedom Parkway_DAY_ATL26.mp4
+2025-09-08 15:03:47,358 - __main__ - INFO -   Sample 4: PSAs/240912_PSA_La Shana Employers 15 ENG.mp4
+2025-09-08 15:03:47,358 - __main__ - INFO -   Sample 5: PSAs/250121_PSA_Gun Prepare for Misuses School 15 ENG.mp4
+2025-09-08 15:03:47,359 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Lightindarkness 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,359 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Lightindarkness 15 ENG.mp4
+2025-09-08 15:03:47,359 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Two for One 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,360 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Two for One 15 ENG.mp4
+2025-09-08 15:03:47,360 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_ Freedom Parkway_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,360 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_ Freedom Parkway_DAY_ATL26.mp4
+2025-09-08 15:03:47,361 - __main__ - DEBUG - File not found at PSAs/240912_PSA_La Shana Employers 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,361 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_La Shana Employers 15 ENG.mp4
+2025-09-08 15:03:47,362 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Prepare for Misuses School 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,362 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Prepare for Misuses School 15 ENG.mp4
+2025-09-08 15:03:47,362 - __main__ - DEBUG - File not found at PSAs/240410_PSA_Lung Cancer Matches 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,362 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240410_PSA_Lung Cancer Matches 30 ENG.mp4
+2025-09-08 15:03:47,363 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Cookietins 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,363 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Cookietins 15 ENG.mp4
+2025-09-08 15:03:47,363 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Old Fourth Ward 1_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,363 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Old Fourth Ward 1_DAY_ATL26.mp4
+2025-09-08 15:03:47,364 - __main__ - DEBUG - File not found at BUMPS/240823_BMP_ Capital Dome AI_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,364 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240823_BMP_ Capital Dome AI_NIGHT_ATL26.mp4
+2025-09-08 15:03:47,364 - __main__ - DEBUG - File not found at BUMPS/240905_BMP_Skyline_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,364 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240905_BMP_Skyline_DAY_ATL26.mp4
+2025-09-08 15:03:47,364 - __main__ - DEBUG - File not found at BUMPS/240830_BMP_Mercedes Benz_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,365 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240830_BMP_Mercedes Benz_NIGHT_ATL26.mp4
+2025-09-08 15:03:47,365 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Krog Street Tunnel_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,365 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Krog Street Tunnel_DAY_ATL26.mp4
+2025-09-08 15:03:47,365 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Prepare for Misuse 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,366 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Prepare for Misuse 15 ENG.mp4
+2025-09-08 15:03:47,366 - __main__ - DEBUG - File not found at PSAs/240912_PSA_Jeff Starts 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,366 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_Jeff Starts 15 ENG.mp4
+2025-09-08 15:03:47,366 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_East Atlanta_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,367 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_East Atlanta_DAY_ATL26.mp4
+2025-09-08 15:03:47,367 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_ Buildings_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,367 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_ Buildings_DAY_ATL26.mp4
+2025-09-08 15:03:47,367 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Tyler Perry Studios_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,368 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Tyler Perry Studios_DAY_ATL26.mp4
+2025-09-08 15:03:47,368 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Prepare for Misuse Kids 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,368 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Prepare for Misuse Kids 15 ENG.mp4
+2025-09-08 15:03:47,368 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Old Fourth Ward 2_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,369 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Old Fourth Ward 2_DAY_ATL26.mp4
+2025-09-08 15:03:47,369 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_State Farm_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,369 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_State Farm_DAY_ATL26.mp4
+2025-09-08 15:03:47,370 - __main__ - DEBUG - File not found at BUMPS/240823_BMP_Downtown Aerial_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,370 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240823_BMP_Downtown Aerial_NIGHT_ATL26.mp4
+2025-09-08 15:03:47,370 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Fox Theatre_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,370 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Fox Theatre_DAY_ATL26.mp4
+2025-09-08 15:03:47,371 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Centennial Park_AI_NIGHT.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,371 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Centennial Park_AI_NIGHT.mp4
+2025-09-08 15:03:47,371 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Skyline_AI_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,371 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Skyline_AI_NIGHT_ATL26.mp4
+2025-09-08 15:03:47,372 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Georgia Aquarium_AI_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,372 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Georgia Aquarium_AI_ATL26.mp4
+2025-09-08 15:03:47,372 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Inman Park_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,372 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Inman Park_DAY_ATL26.mp4
+2025-09-08 15:03:47,373 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Hustle 30 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,373 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Hustle 30 SP.mp4
+2025-09-08 15:03:47,373 - __main__ - DEBUG - File not found at PSAs/240920_PSA_Gun Threat 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,373 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240920_PSA_Gun Threat 30 ENG.mp4
+2025-09-08 15:03:47,374 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Come Correct-30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,374 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Come Correct-30 ENG.mp4
+2025-09-08 15:03:47,374 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun-the Threat 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,375 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun-the Threat 30 ENG.mp4
+2025-09-08 15:03:47,375 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun the Threat 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,375 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun the Threat 60 ENG.mp4
+2025-09-08 15:03:47,375 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun Safe Stories Reba 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,376 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun Safe Stories Reba 30 ENG.mp4
+2025-09-08 15:03:47,376 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Montage 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,376 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Montage 30 ENG.mp4
+2025-09-08 15:03:47,376 - __main__ - DEBUG - File not found at PSAs/241209_PSA_Innercircles 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,377 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241209_PSA_Innercircles 60 ENG.mp4
+2025-09-08 15:03:47,377 - __main__ - DEBUG - File not found at PSAs/241030_PSA_Change the Outcome 60 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,377 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241030_PSA_Change the Outcome 60 SP.mp4
+2025-09-08 15:03:47,377 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Love Protects 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,378 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Love Protects 30 ENG.mp4
+2025-09-08 15:03:47,378 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Vape Narrator 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,378 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Vape Narrator 30 ENG.mp4
+2025-09-08 15:03:47,378 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Vape Talk 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,379 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Vape Talk 60 ENG.mp4
+2025-09-08 15:03:47,379 - __main__ - DEBUG - File not found at PSAs/240912_PSA_Justin Stars 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,379 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_Justin Stars 30 ENG.mp4
+2025-09-08 15:03:47,379 - __main__ - DEBUG - File not found at PSAs/240912_PSA_La Shana Employers 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,380 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_La Shana Employers 30 ENG.mp4
+2025-09-08 15:03:47,380 - __main__ - DEBUG - File not found at PSAs/240912_PSA_Tear the Paper Ceiling Anthem 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,380 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240912_PSA_Tear the Paper Ceiling Anthem 60 ENG.mp4
+2025-09-08 15:03:47,381 - __main__ - DEBUG - File not found at PSAs/241030_PSA_Be your Own Hero 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,381 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241030_PSA_Be your Own Hero 60 ENG.mp4
+2025-09-08 15:03:47,381 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 60 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,381 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 60 SP.mp4
+2025-09-08 15:03:47,382 - __main__ - DEBUG - File not found at PSAs/220307_PSA_Adopt-A-Drain 45 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,382 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220307_PSA_Adopt-A-Drain 45 ENG.mp4
+2025-09-08 15:03:47,382 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,382 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 60 ENG.mp4
+2025-09-08 15:03:47,383 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 30 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,383 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 30 SP.mp4
+2025-09-08 15:03:47,383 - __main__ - DEBUG - File not found at PSAs/241024_PSA_Flu Playdefense 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,383 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241024_PSA_Flu Playdefense 30 ENG.mp4
+2025-09-08 15:03:47,384 - __main__ - DEBUG - File not found at PSAs/231214_PSA_Diabetes Hero 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,384 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/231214_PSA_Diabetes Hero 60 ENG.mp4
+2025-09-08 15:03:47,384 - __main__ - DEBUG - File not found at PSAs/240229_PSA_Water Leaks 1.48 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,385 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240229_PSA_Water Leaks 1.48 ENG.mp4
+2025-09-08 15:03:47,385 - __main__ - DEBUG - File not found at PSAs/240410_PSA_Lung Cancer Hope 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,385 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240410_PSA_Lung Cancer Hope 30 ENG.mp4
+2025-09-08 15:03:47,386 - __main__ - DEBUG - File not found at PSAs/240425_PSA_Emergency Prepare BBQ 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,386 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240425_PSA_Emergency Prepare BBQ 30 ENG.mp4
+2025-09-08 15:03:47,386 - __main__ - DEBUG - File not found at PSAs/240425_PSA_Emergency Prepare Take Control 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,386 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240425_PSA_Emergency Prepare Take Control 30 ENG.mp4
+2025-09-08 15:03:47,387 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Liberty 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,387 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Liberty 30 ENG.mp4
+2025-09-08 15:03:47,387 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Liberty 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,387 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Liberty 60 ENG.mp4
+2025-09-08 15:03:47,388 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Love Protects 30 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,388 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Love Protects 30 SP.mp4
+2025-09-08 15:03:47,388 - __main__ - DEBUG - File not found at PSAs/241030_PSA_Be your Own Hero 60 SP.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,388 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241030_PSA_Be your Own Hero 60 SP.mp4
+2025-09-08 15:03:47,389 - __main__ - DEBUG - File not found at PSAs/240822_PSA_Life 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,389 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240822_PSA_Life 30 ENG.mp4
+2025-09-08 15:03:47,389 - __main__ - DEBUG - File not found at PSAs/241009_PSA_Gracie and Pedro Seat for Everyone 30 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,390 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241009_PSA_Gracie and Pedro Seat for Everyone 30 ENG.mp4
+2025-09-08 15:03:47,390 - __main__ - DEBUG - File not found at SIZZLES/240229_SZL_2026 World Cup Sizzle.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,390 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/SIZZLES/240229_SZL_2026 World Cup Sizzle.mp4
+2025-09-08 15:03:47,390 - __main__ - DEBUG - File not found at SIZZLES/240807_SZL_ATL26 Sizzle 2024.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,391 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/SIZZLES/240807_SZL_ATL26 Sizzle 2024.mp4
+2025-09-08 15:03:47,391 - __main__ - DEBUG - File not found at SPECIAL PROJECTS/250701-SPP_Swearing-in Judge Allyson Pitts.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,391 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/SPECIAL PROJECTS/250701-SPP_Swearing-in Judge Allyson Pitts.mp4
+2025-09-08 15:03:47,392 - __main__ - DEBUG - File not found at BUMPS/240828_BMP_West End_AI_NIGHT_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,392 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240828_BMP_West End_AI_NIGHT_ATL26.mp4
+2025-09-08 15:03:47,392 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Midtown_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,392 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Midtown_DAY_ATL26.mp4
+2025-09-08 15:03:47,392 - __main__ - DEBUG - File not found at BUMPS/240711_BMP_Mercedes Benz_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,393 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240711_BMP_Mercedes Benz_DAY_ATL26.mp4
+2025-09-08 15:03:47,393 - __main__ - DEBUG - File not found at BUMPS/240912_BMP_Oakland Cemetery_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,393 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240912_BMP_Oakland Cemetery_DAY_ATL26.mp4
+2025-09-08 15:03:47,393 - __main__ - DEBUG - File not found at PSAs/250121_PSA_Gun the Threat 15 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,394 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250121_PSA_Gun the Threat 15 ENG.mp4
+2025-09-08 15:03:47,394 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_Cascade_SWAT_Day _ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,395 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_Cascade_SWAT_Day _ATL26.mp4
+2025-09-08 15:03:47,395 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_College Park_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,395 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_College Park_DAY_ATL26.mp4
+2025-09-08 15:03:47,395 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_Midtown 2_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,396 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_Midtown 2_DAY_ATL26.mp4
+2025-09-08 15:03:47,396 - __main__ - DEBUG - File not found at BUMPS/240814_BMP_West End_DAY_ATL26.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,396 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/BUMPS/240814_BMP_West End_DAY_ATL26.mp4
+2025-09-08 15:03:47,396 - __main__ - DEBUG - File not found at PSAs/220330_PSA_Replace Your Showerhead 47 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,396 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220330_PSA_Replace Your Showerhead 47 ENG.mp4
+2025-09-08 15:03:47,397 - __main__ - DEBUG - File not found at PSAs/240325_PSA_ATL Suppliers 58 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,397 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/240325_PSA_ATL Suppliers 58 ENG.mp4
+2025-09-08 15:03:47,397 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-imirlisteningisaformoflove-hd-eng-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,397 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-imirlisteningisaformoflove-hd-eng-30.mp4
+2025-09-08 15:03:47,398 - __main__ - DEBUG - File not found at PSAs/250903_PSA_Piv-cristianlisteningisaformoflove-hd-spa-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,398 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_Piv-cristianlisteningisaformoflove-hd-spa-30.mp4
+2025-09-08 15:03:47,398 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Fulleffect-hd-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,398 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Fulleffect-hd-eng-30.mov.mp4
+2025-09-08 15:03:47,399 - __main__ - DEBUG - File not found at PROMOS/250904_PMO_Beltline-Third-Quarterly-Briefing.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,399 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PROMOS/250904_PMO_Beltline-Third-Quarterly-Briefing.mp4
+2025-09-08 15:03:47,399 - __main__ - DEBUG - File not found at PROMOS/250903_PMO_Beltine Third Quarterly Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,400 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PROMOS/250903_PMO_Beltine Third Quarterly Meeting.mp4
+2025-09-08 15:03:47,400 - __main__ - DEBUG - File not found at ATL DIRECT/250826_ATLD_New City Hall Lights.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,400 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATL DIRECT/250826_ATLD_New City Hall Lights.mp4
+2025-09-08 15:03:47,400 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Vidaplenamentellena2-hd-spa-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,400 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Vidaplenamentellena2-hd-spa-30.mov.mp4
+2025-09-08 15:03:47,401 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Playdatespanish-hd-spa-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,401 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Playdatespanish-hd-spa-30.mov.mp4
+2025-09-08 15:03:47,401 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Worries-hd-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,402 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Worries-hd-eng-30.mov.mp4
+2025-09-08 15:03:47,402 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Whenyougraduate-eng-60-hd.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,402 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Whenyougraduate-eng-60-hd.mov.mp4
+2025-09-08 15:03:47,402 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Cuandotutegraduas-spa-60-hd.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,402 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Cuandotutegraduas-spa-60-hd.mov.mp4
+2025-09-08 15:03:47,403 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Fulleffect-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,403 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Fulleffect-hd-eng-60.mov.mp4
+2025-09-08 15:03:47,403 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Nodebatedebate-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,404 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Nodebatedebate-hd-eng-60.mov.mp4
+2025-09-08 15:03:47,404 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Vidaplenamentellena-hd-spa-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,404 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Vidaplenamentellena-hd-spa-60.mov.mp4
+2025-09-08 15:03:47,404 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Yearbook-darlene-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,405 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Yearbook-darlene-hd-eng-60.mov.mp4
+2025-09-08 15:03:47,405 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Pregame-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,405 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Pregame-hd-eng-60.mov.mp4
+2025-09-08 15:03:47,405 - __main__ - DEBUG - File not found at PSAs/280828_PSA_Thisispretirement-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,406 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/280828_PSA_Thisispretirement-eng-30.mov.mp4
+2025-09-08 15:03:47,406 - __main__ - DEBUG - File not found at PSAs/220330_PSA_Replace Your Faucet Aerator 45 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,406 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220330_PSA_Replace Your Faucet Aerator 45 ENG.mp4
+2025-09-08 15:03:47,406 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Elizabeth-hd-eng-30.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,406 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Elizabeth-hd-eng-30.mov.mp4
+2025-09-08 15:03:47,407 - __main__ - DEBUG - File not found at PSAs/250828_PSA_Elizabeth-hd-eng-60.mov.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,407 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250828_PSA_Elizabeth-hd-eng-60.mov.mp4
+2025-09-08 15:03:47,407 - __main__ - DEBUG - File not found at PSAs/241119_PSA_Reporting with the 311 App A Step-by-Step Guide 31 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,407 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/241119_PSA_Reporting with the 311 App A Step-by-Step Guide 31 ENG.mp4
+2025-09-08 15:03:47,408 - __main__ - DEBUG - File not found at PSAs/231214_PSA_Diabetes Hedgehog 60 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,408 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/231214_PSA_Diabetes Hedgehog 60 ENG.mp4
+2025-09-08 15:03:47,408 - __main__ - DEBUG - File not found at PSAs/220330_PSA_Replace Your Leaky Toilet Flapper 51 ENG.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,408 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/220330_PSA_Replace Your Leaky Toilet Flapper 51 ENG.mp4
+2025-09-08 15:03:47,409 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-listeningisaformoflove-hd-spa-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,409 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-listeningisaformoflove-hd-spa-30.mp4
+2025-09-08 15:03:47,409 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-60.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,409 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-60.mp4
+2025-09-08 15:03:47,410 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,410 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-listeningisaformoflove-hd-eng-30.mp4
+2025-09-08 15:03:47,410 - __main__ - DEBUG - File not found at PSAs/250903_PSA_piv-janessalisteningisaformoflove-hd-eng-30.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,410 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PSAs/250903_PSA_piv-janessalisteningisaformoflove-hd-eng-30.mp4
+2025-09-08 15:03:47,411 - __main__ - DEBUG - File not found at PKGS/250828_PKG_Mohamed Balla from Sudan to ATL.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,411 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/PKGS/250828_PKG_Mohamed Balla from Sudan to ATL.mp4
+2025-09-08 15:03:47,411 - __main__ - DEBUG - File not found at LEGISLATIVE MINUTE/250904_LM_September 3.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,411 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/LEGISLATIVE MINUTE/250904_LM_September 3.mp4
+2025-09-08 15:03:47,411 - __main__ - DEBUG - File not found at ATL DIRECT/250903_ATLD_DragonCon Parade_1.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,412 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATL DIRECT/250903_ATLD_DragonCon Parade_1.mp4
+2025-09-08 15:03:47,412 - __main__ - DEBUG - File not found at ATLANTA NOW/250826_AN_Emergency Responders Demo Day.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,412 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATLANTA NOW/250826_AN_Emergency Responders Demo Day.mp4
+2025-09-08 15:03:47,412 - __main__ - DEBUG - File not found at LEGISLATIVE MINUTE/250806_LM_Legislative Minute AUG 2025.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,413 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/LEGISLATIVE MINUTE/250806_LM_Legislative Minute AUG 2025.mp4
+2025-09-08 15:03:47,413 - __main__ - DEBUG - File not found at INSIDE ATLANTA/250904_IA_Adamsville Community Food Pantry Ribbon Cutting feaf CM A Boone.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,413 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/INSIDE ATLANTA/250904_IA_Adamsville Community Food Pantry Ribbon Cutting feaf CM A Boone.mp4
+2025-09-08 15:03:47,413 - __main__ - DEBUG - File not found at INSIDE ATLANTA/250902_IA_Joint Town_feat CM ABooneoone and CW Nikema Williams.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,414 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/INSIDE ATLANTA/250902_IA_Joint Town_feat CM ABooneoone and CW Nikema Williams.mp4
+2025-09-08 15:03:47,414 - __main__ - DEBUG - File not found at ATLANTA NOW/250819_AN_Northwest BeltLine Trail Opening.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,414 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATLANTA NOW/250819_AN_Northwest BeltLine Trail Opening.mp4
+2025-09-08 15:03:47,414 - __main__ - DEBUG - File not found at ATLANTA NOW/250827_AN_Mayors Cup Golf Tournament_v3.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,415 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/ATLANTA NOW/250827_AN_Mayors Cup Golf Tournament_v3.mp4
+2025-09-08 15:03:47,415 - __main__ - DEBUG - File not found at MEETINGS/250908_MTG_Zoning_Committee.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,415 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250908_MTG_Zoning_Committee.mp4
+2025-09-08 15:03:47,415 - __main__ - DEBUG - File not found at INSIDE ATLANTA/250825_IA__Safe Routes To School Empire Blvd Walk Bike Lane Ext feat MC Lewis.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,415 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/INSIDE ATLANTA/250825_IA__Safe Routes To School Empire Blvd Walk Bike Lane Ext feat MC Lewis.mp4
+2025-09-08 15:03:47,416 - __main__ - DEBUG - File not found at MEETINGS/250904_MTG_Board of Zoning Adjustment.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,416 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250904_MTG_Board of Zoning Adjustment.mp4
+2025-09-08 15:03:47,416 - __main__ - DEBUG - File not found at MEETINGS/250827_MTG_City Utilities Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,416 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250827_MTG_City Utilities Committee Meeting.mp4
+2025-09-08 15:03:47,417 - __main__ - DEBUG - File not found at MEETINGS/250902_MTG_City Council.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,417 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250902_MTG_City Council.mp4
+2025-09-08 15:03:47,417 - __main__ - DEBUG - File not found at MEETINGS/250902_MTG_Committee on Council.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,418 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250902_MTG_Committee on Council.mp4
+2025-09-08 15:03:47,418 - __main__ - DEBUG - File not found at MEETINGS/250903_MTG_COMMUNITY DEV HUMAN SERVICES COMMITTEE.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,418 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250903_MTG_COMMUNITY DEV HUMAN SERVICES COMMITTEE.mp4
+2025-09-08 15:03:47,418 - __main__ - DEBUG - File not found at MEETINGS/250827_FinanceExecutive Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,419 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250827_FinanceExecutive Committee Meeting.mp4
+2025-09-08 15:03:47,419 - __main__ - DEBUG - File not found at MEETINGS/250819_MTG_License Review Board Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,419 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250819_MTG_License Review Board Meeting.mp4
+2025-09-08 15:03:47,419 - __main__ - DEBUG - File not found at MEETINGS/250904_MTG_Zoning Review Board.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,419 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250904_MTG_Zoning Review Board.mp4
+2025-09-08 15:03:47,420 - __main__ - DEBUG - File not found at MEETINGS/250825_MTG_CDHS Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,420 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250825_MTG_CDHS Committee Meeting.mp4
+2025-09-08 15:03:47,420 - __main__ - DEBUG - File not found at MEETINGS/250825_MTG_PSLA Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,420 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250825_MTG_PSLA Committee Meeting.mp4
+2025-09-08 15:03:47,420 - __main__ - DEBUG - File not found at MEETINGS/250825_MTG_Zoning Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,421 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250825_MTG_Zoning Committee Meeting.mp4
+2025-09-08 15:03:47,421 - __main__ - DEBUG - File not found at MEETINGS/250827_MTG_Transportation Committee Meeting.mp4: 550 Could not get file size.
+2025-09-08 15:03:47,421 - __main__ - DEBUG - File found on source server at: /mnt/main/ATL26 On-Air Content/MEETINGS/250827_MTG_Transportation Committee Meeting.mp4
+2025-09-08 15:03:47,422 - __main__ - INFO - Available content count: 122
+2025-09-08 15:03:47,422 - __main__ - INFO - Content available for scheduling: 122
+2025-09-08 15:03:47,422 - __main__ - INFO - Sample content item keys: ['_id', 'analysis_completed', 'content_title', 'content_type', 'duration_category', 'engagement_score', 'file_duration', 'file_name', 'file_path', 'file_size', 'guid', 'id', 'scheduling', 'summary']
+2025-09-08 15:03:47,422 - __main__ - INFO - Sample duration_category: id
+2025-09-08 15:03:47,422 - __main__ - INFO - Content by category: {'id': 35, 'spots': 63, 'long_form': 13, 'short_form': 11}
+2025-09-08 15:03:47,422 - __main__ - INFO - Assets already scheduled in template: 0
+2025-09-08 15:03:47,422 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:47,422 - __main__ - INFO - Replay delays: {'id': 6, 'long_form': 8, 'short_form': 2, 'spots': 2}
+2025-09-08 15:03:47,422 - config_manager - INFO - Configuration loaded from config.json
+2025-09-08 15:03:47,422 - scheduler_postgres - INFO - Scheduling config loaded: {'default_export_server': 'target', 'default_export_path': '/mnt/md127/Schedules/Contributors/Jay', 'max_consecutive_errors': 100, 'rotation_order': ['id', 'spots', 'long_form', 'short_form'], 'replay_delays': {'id': 6, 'long_form': 8, 'short_form': 2, 'spots': 2}, 'additional_delay_per_airing': {'id': 1, 'long_form': 8, 'short_form': 4, 'spots': 2}, 'content_expiration': {'id': 30, 'long_form': 180, 'short_form': 90, 'spots': 60}, 'timeslots': {'afternoon': {'end': 18, 'label': 'Afternoon (12-6 PM)', 'start': 12}, 'early_morning': {'end': 9, 'label': 'Early Morning (6-9 AM)', 'start': 6}, 'evening': {'end': 24, 'label': 'Evening (9 PM-12 AM)', 'start': 21}, 'morning': {'end': 12, 'label': 'Morning (9 AM-12 PM)', 'start': 9}, 'overnight': {'end': 6, 'label': 'Overnight (12-6 AM)', 'start': 0}, 'prime_time': {'end': 21, 'label': 'Prime Time (6-9 PM)', 'start': 18}}, 'duration_categories': {'id': {'label': 'ID (< 16s)', 'max': 16, 'min': 0}, 'long_form': {'label': 'Long Form (> 20min)', 'max': None, 'min': 1200}, 'short_form': {'label': 'Short Form (2-20min)', 'max': 1200, 'min': 120}, 'spots': {'label': 'Spots (16s - 2min)', 'max': 120, 'min': 16}}}
+2025-09-08 15:03:47,422 - scheduler_postgres - INFO - Loaded rotation order from config: ['id', 'spots', 'long_form', 'short_form']
+2025-09-08 15:03:47,422 - __main__ - INFO - Using rotation order: ['id', 'spots', 'long_form', 'short_form']
+2025-09-08 15:03:47,422 - __main__ - INFO - Filling gap from 0.2h to 0.5h (duration: 0.2h)
+2025-09-08 15:03:47,422 - __main__ - INFO -   Exact gap values: start=900s (0.250000h), end=1800s (0.500000h)
+2025-09-08 15:03:47,422 - __main__ - INFO -   Daily schedule: All content airs on 2025-09-15
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Lightindarkness 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Two for One 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'La Shana Employers 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun Prepare for Misuses School 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Lung Cancer Matches 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Cookietins 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Old Fourth Ward 1_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Capital Dome AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Skyline_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Mercedes Benz_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Krog Street Tunnel_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun Prepare for Misuse 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Jeff Starts 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'East Atlanta_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - INFO - EXPIRATION CHECK: Content 'Buildings_DAY_ATL26' expires on 2025-09-06, cannot schedule for 2025-09-15 (position: 0.2h)
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Tyler Perry Studios_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun Prepare for Misuse Kids 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Old Fourth Ward 2_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'State Farm_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Downtown Aerial_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Fox Theatre_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Centennial Park_AI_NIGHT' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Skyline_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Georgia Aquarium_AI_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Inman Park_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'West End_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Midtown_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Mercedes Benz_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Oakland Cemetery_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun the Threat 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Selected ID from top 13 candidates for variety
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Hustle 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Come Correct-30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun-the Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun the Threat 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Gun Safe Stories Reba 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Montage 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Innercircles 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Change the Outcome 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Love Protects 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Vape Narrator 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Vape Talk 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Justin Stars 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'La Shana Employers 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Tear the Paper Ceiling Anthem 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Be your Own Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Flu Playdefense 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Adopt-A-Drain 45 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Flu Playdefense 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Flu Playdefense 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Flu Playdefense 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Diabetes Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Water Leaks 1.48 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Lung Cancer Hope 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Emergency Prepare BBQ 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Emergency Prepare Take Control 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Liberty 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Liberty 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Love Protects 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,423 - __main__ - DEBUG - Content 'Be your Own Hero 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Life 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gracie and Pedro Seat for Everyone 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content '2026 World Cup Sizzle' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'ATL26 Sizzle 2024' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Replace Your Showerhead 47 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'ATL Suppliers 58 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Reporting with the 311 App A Step-by-Step Guide 31 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Diabetes Hedgehog 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Replace Your Leaky Toilet Flapper 51 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - INFO - No long_form content fits remaining gap of 14.2 minutes
+2025-09-08 15:03:47,424 - __main__ - INFO - Searching all categories for content that fits...
+2025-09-08 15:03:47,424 - __main__ - INFO - Found short_form content 'Zoning_Committee' (10.6 min) that fits gap
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 371 blocked: 0.2h since last, need 2.0h
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Lightindarkness 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Two for One 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'La Shana Employers 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun Prepare for Misuses School 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Lung Cancer Matches 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Cookietins 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Old Fourth Ward 1_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Capital Dome AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Skyline_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 18 blocked: 0.2h since last, need 6.0h
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Mercedes Benz_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Krog Street Tunnel_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun Prepare for Misuse 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Jeff Starts 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'East Atlanta_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - INFO - EXPIRATION CHECK: Content 'Buildings_DAY_ATL26' expires on 2025-09-06, cannot schedule for 2025-09-15 (position: 0.5h)
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Tyler Perry Studios_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun Prepare for Misuse Kids 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Old Fourth Ward 2_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'State Farm_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Downtown Aerial_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Fox Theatre_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Centennial Park_AI_NIGHT' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Skyline_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Georgia Aquarium_AI_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Inman Park_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'West End_AI_NIGHT_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Midtown_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Mercedes Benz_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Oakland Cemetery_DAY_ATL26' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun the Threat 15 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Selected ID from top 13 candidates for variety
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Hustle 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 208 blocked: 0.2h since last, need 2.0h
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Come Correct-30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun-the Threat 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun the Threat 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,424 - __main__ - DEBUG - Content 'Gun Safe Stories Reba 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Montage 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Innercircles 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Change the Outcome 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Love Protects 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Vape Narrator 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Vape Talk 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Justin Stars 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'La Shana Employers 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Tear the Paper Ceiling Anthem 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Be your Own Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Flu Playdefense 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Adopt-A-Drain 45 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Flu Playdefense 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Flu Playdefense 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Flu Playdefense 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Diabetes Hero 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Water Leaks 1.48 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Lung Cancer Hope 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Emergency Prepare BBQ 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Emergency Prepare Take Control 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Liberty 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Liberty 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Love Protects 30 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Be your Own Hero 60 SP' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Life 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Gracie and Pedro Seat for Everyone 30 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content '2026 World Cup Sizzle' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'ATL26 Sizzle 2024' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Replace Your Showerhead 47 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'ATL Suppliers 58 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Reporting with the 311 App A Step-by-Step Guide 31 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Diabetes Hedgehog 60 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - DEBUG - Content 'Replace Your Leaky Toilet Flapper 51 ENG' has no expiration date, can be scheduled
+2025-09-08 15:03:47,425 - __main__ - INFO - No long_form content fits remaining gap of 0.1 minutes
+2025-09-08 15:03:47,425 - __main__ - INFO - Searching all categories for content that fits...
+2025-09-08 15:03:47,425 - __main__ - WARNING - No content from any category fits remaining gap of 0.1 minutes
+2025-09-08 15:03:47,425 - __main__ - INFO - Gap details: ends at 0.50h (0:30), position=0.50h
+2025-09-08 15:03:47,425 - __main__ - INFO - Gap of 4.8 seconds is too small to fill. Moving to next gap.
+2025-09-08 15:03:47,425 - __main__ - INFO - Fill gaps completed: 6 total items added, 0.2 hours total
+2025-09-08 15:03:47,425 - __main__ - INFO - === FINAL VERIFICATION: Checking if all original items are preserved ===
+2025-09-08 15:03:47,425 - __main__ - INFO - VERIFICATION PASSED: All original items preserved, no overlaps detected
+2025-09-08 15:03:47,426 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:03:47] "POST /api/fill-template-gaps HTTP/1.1" 200 -
+2025-09-08 15:04:38,929 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:04:38] "OPTIONS /api/status HTTP/1.1" 200 -
+2025-09-08 15:04:38,932 - werkzeug - INFO - 127.0.0.1 - - [08/Sep/2025 15:04:38] "GET /api/status HTTP/1.1" 200 -
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

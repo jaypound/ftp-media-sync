@@ -4137,10 +4137,24 @@ def fill_template_gaps():
         template = data.get('template')
         available_content = data.get('available_content', [])
         gaps = data.get('gaps', [])
+        schedule_date = data.get('schedule_date')  # Date when schedule starts (YYYY-MM-DD format)
         
         # Debug: Log the template items
         logger.info(f"Received template type: {template.get('type')}")
         logger.info(f"Template has {len(template.get('items', []))} items")
+        logger.info(f"Available content count: {len(available_content)}")
+        
+        # Debug: Check expiration dates in available content
+        content_with_expiry = 0
+        content_without_expiry = 0
+        for content in available_content:
+            # Check in the scheduling object
+            scheduling = content.get('scheduling', {})
+            if scheduling.get('content_expiry_date'):
+                content_with_expiry += 1
+            else:
+                content_without_expiry += 1
+        logger.info(f"Content expiration status: {content_with_expiry} with expiry date, {content_without_expiry} without expiry date")
         if template.get('items'):
             logger.info("First 3 items for debugging:")
             for i, item in enumerate(template.get('items', [])[:3]):
@@ -4154,6 +4168,29 @@ def fill_template_gaps():
         
         # Determine schedule type
         schedule_type = template.get('type', 'daily')
+        
+        # Parse schedule date
+        base_date = None
+        if schedule_date:
+            try:
+                base_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+                logger.info(f"Using schedule date: {base_date.strftime('%Y-%m-%d')}")
+            except ValueError:
+                logger.warning(f"Invalid schedule_date format: {schedule_date}, using current date")
+                base_date = datetime.now()
+        else:
+            base_date = datetime.now()
+            logger.info(f"No schedule_date provided, using current date: {base_date.strftime('%Y-%m-%d')}")
+        
+        # For weekly schedules, adjust to start on Sunday
+        if schedule_type == 'weekly':
+            # Find the Sunday of the week containing the base date
+            days_until_sunday = (6 - base_date.weekday()) % 7
+            if days_until_sunday == 0 and base_date.weekday() != 6:
+                # If today is not Sunday, go to previous Sunday
+                days_until_sunday = -base_date.weekday() - 1
+            base_date = base_date + timedelta(days=days_until_sunday)
+            logger.info(f"Adjusted to Sunday for weekly schedule: {base_date.strftime('%Y-%m-%d')}")
         
         # Keep a copy of original items with their time ranges for overlap detection
         original_items = []
@@ -4611,6 +4648,14 @@ def fill_template_gaps():
             logger.info(f"Filling gap from {gap_start/3600:.1f}h to {gap_end/3600:.1f}h (duration: {gap_duration/3600:.1f}h)")
             logger.info(f"  Exact gap values: start={gap_start}s ({gap_start/3600:.6f}h), end={gap_end}s ({gap_end/3600:.6f}h)")
             
+            # Log date calculation for this gap
+            if schedule_type == 'weekly':
+                gap_day_offset = int(gap_start // 86400)
+                gap_air_date = base_date + timedelta(days=gap_day_offset)
+                logger.info(f"  Weekly schedule: Gap starts on {gap_air_date.strftime('%A %Y-%m-%d')} (day {gap_day_offset} from Sunday)")
+            else:
+                logger.info(f"  Daily schedule: All content airs on {base_date.strftime('%Y-%m-%d')}")
+            
             current_position = gap_start
             
             while current_position < gap_end:
@@ -4628,6 +4673,8 @@ def fill_template_gaps():
                 category_content = []
                 wrong_category = 0
                 blocked_by_delay = 0
+                blocked_by_expiry = 0
+                no_expiry_date = 0
                 
                 # Get replay delay for this category (in hours)
                 replay_delay_hours = replay_delays.get(duration_category, 24)
@@ -4652,6 +4699,46 @@ def fill_template_gaps():
                         wrong_category += 1
                         continue
                     
+                    # Calculate the actual air date/time for this gap position
+                    if schedule_type == 'weekly':
+                        # For weekly schedules, calculate which day of the week this position falls on
+                        days_offset = int(current_position // 86400)  # 86400 seconds per day
+                        air_date = base_date + timedelta(days=days_offset)
+                    else:
+                        # For daily schedules, it's the same date
+                        air_date = base_date
+                    
+                    # Check expiration date (stored in scheduling object)
+                    scheduling = content.get('scheduling', {})
+                    expiry_date_str = scheduling.get('content_expiry_date')
+                    if not expiry_date_str:
+                        # No expiration date means content doesn't expire
+                        no_expiry_date += 1
+                        logger.debug(f"Content '{content.get('content_title', content.get('file_name'))}' has no expiration date, can be scheduled")
+                    else:
+                        try:
+                            # Parse various date formats
+                            if isinstance(expiry_date_str, str):
+                                if 'T' in expiry_date_str:
+                                    expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
+                                else:
+                                    expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d')
+                            else:
+                                expiry_date = expiry_date_str
+                            
+                            # Make dates timezone-naive for comparison
+                            if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo:
+                                expiry_date = expiry_date.replace(tzinfo=None)
+                            if hasattr(air_date, 'tzinfo') and air_date.tzinfo:
+                                air_date = air_date.replace(tzinfo=None)
+                            
+                            if expiry_date <= air_date:
+                                blocked_by_expiry += 1
+                                logger.info(f"EXPIRATION CHECK: Content '{content.get('content_title', content.get('file_name'))}' expires on {expiry_date.strftime('%Y-%m-%d')}, cannot schedule for {air_date.strftime('%Y-%m-%d')} (position: {current_position/3600:.1f}h)")
+                                continue
+                        except Exception as e:
+                            logger.warning(f"Error parsing expiration date for content {content_id}: {e}")
+                    
                     # Check replay delay
                     content_id = content.get('id')
                     if content_id in asset_schedule_times:
@@ -4674,7 +4761,7 @@ def fill_template_gaps():
                     category_content.append(content)
             
                 if not category_content:
-                    logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, total_available={len(content_by_id)}")
+                    logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, blocked_by_expiry={blocked_by_expiry}, no_expiry_date={no_expiry_date}, total_available={len(content_by_id)}")
                 
                 # If no content due to delays, try with reduced delays only as last resort
                 if not category_content and blocked_by_delay > 0 and total_cycles_without_content >= 2:
