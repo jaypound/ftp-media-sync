@@ -1130,20 +1130,44 @@ class PostgreSQLDatabaseManager:
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            # Check if end_time column exists
             cursor.execute("""
-                SELECT 
-                    id,
-                    meeting_name,
-                    meeting_date,
-                    start_time,
-                    duration_hours,
-                    room,
-                    atl26_broadcast,
-                    created_at,
-                    updated_at
-                FROM meetings
-                ORDER BY meeting_date ASC, start_time ASC
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'meetings' AND column_name = 'end_time'
             """)
+            has_end_time = cursor.fetchone() is not None
+            
+            if has_end_time:
+                cursor.execute("""
+                    SELECT 
+                        id,
+                        meeting_name,
+                        meeting_date,
+                        start_time,
+                        end_time,
+                        duration_hours,
+                        room,
+                        atl26_broadcast,
+                        created_at,
+                        updated_at
+                    FROM meetings
+                    ORDER BY meeting_date ASC, start_time ASC
+                """)
+            else:
+                cursor.execute("""
+                    SELECT 
+                        id,
+                        meeting_name,
+                        meeting_date,
+                        start_time,
+                        duration_hours,
+                        room,
+                        atl26_broadcast,
+                        created_at,
+                        updated_at
+                    FROM meetings
+                    ORDER BY meeting_date ASC, start_time ASC
+                """)
             
             meetings = cursor.fetchall()
             cursor.close()
@@ -1151,7 +1175,7 @@ class PostgreSQLDatabaseManager:
             # Convert to proper format
             result = []
             for meeting in meetings:
-                result.append({
+                meeting_dict = {
                     'id': meeting['id'],
                     'meeting_name': meeting['meeting_name'],
                     'meeting_date': meeting['meeting_date'].isoformat() if meeting['meeting_date'] else None,
@@ -1161,7 +1185,11 @@ class PostgreSQLDatabaseManager:
                     'atl26_broadcast': meeting['atl26_broadcast'],
                     'created_at': meeting['created_at'].isoformat() if meeting['created_at'] else None,
                     'updated_at': meeting['updated_at'].isoformat() if meeting['updated_at'] else None
-                })
+                }
+                # Add end_time if available
+                if 'end_time' in meeting and meeting['end_time']:
+                    meeting_dict['end_time'] = meeting['end_time'].strftime('%I:%M %p')
+                result.append(meeting_dict)
             
             return result
             
@@ -1172,7 +1200,7 @@ class PostgreSQLDatabaseManager:
             self._put_connection(conn)
     
     def create_meeting(self, meeting_name: str, meeting_date: str, start_time: str, 
-                      duration_hours: float = 2.0, room: str = None, atl26_broadcast: bool = True) -> Optional[int]:
+                      duration_hours: float = None, end_time: str = None, room: str = None, atl26_broadcast: bool = True) -> Optional[int]:
         """Create a new meeting"""
         if not self.connected:
             return None
@@ -1183,14 +1211,46 @@ class PostgreSQLDatabaseManager:
         if meeting_datetime.weekday() == 6:  # Sunday
             raise ValueError(f"Cannot create meeting on Sunday ({meeting_date})")
         
+        # If end_time is provided but duration_hours is not, calculate duration
+        if end_time and not duration_hours:
+            start_dt = datetime.strptime(start_time, '%H:%M:%S' if len(start_time.split(':')) == 3 else '%H:%M')
+            end_dt = datetime.strptime(end_time, '%H:%M:%S' if len(end_time.split(':')) == 3 else '%H:%M')
+            
+            # Handle meetings that cross midnight
+            if end_dt < start_dt:
+                from datetime import timedelta
+                end_dt = end_dt + timedelta(days=1)
+            
+            duration_delta = end_dt - start_dt
+            duration_hours = duration_delta.total_seconds() / 3600
+        
+        # Default duration if neither end_time nor duration_hours provided
+        if duration_hours is None:
+            duration_hours = 2.0
+        
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            
+            # Check if end_time column exists
             cursor.execute("""
-                INSERT INTO meetings (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast))
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'meetings' AND column_name = 'end_time'
+            """)
+            has_end_time = cursor.fetchone() is not None
+            
+            if has_end_time and end_time:
+                cursor.execute("""
+                    INSERT INTO meetings (meeting_name, meeting_date, start_time, end_time, duration_hours, room, atl26_broadcast)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (meeting_name, meeting_date, start_time, end_time, duration_hours, room, atl26_broadcast))
+            else:
+                cursor.execute("""
+                    INSERT INTO meetings (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast))
             
             meeting_id = cursor.fetchone()['id']
             conn.commit()
@@ -1207,25 +1267,64 @@ class PostgreSQLDatabaseManager:
             self._put_connection(conn)
     
     def update_meeting(self, meeting_id: int, meeting_name: str, meeting_date: str, 
-                      start_time: str, duration_hours: float = 2.0, room: str = None, atl26_broadcast: bool = True) -> bool:
+                      start_time: str, duration_hours: float = None, end_time: str = None, room: str = None, atl26_broadcast: bool = True) -> bool:
         """Update an existing meeting"""
         if not self.connected:
             return False
         
+        # If end_time is provided but duration_hours is not, calculate duration
+        if end_time and not duration_hours:
+            from datetime import datetime, timedelta
+            start_dt = datetime.strptime(start_time, '%H:%M:%S' if len(start_time.split(':')) == 3 else '%H:%M')
+            end_dt = datetime.strptime(end_time, '%H:%M:%S' if len(end_time.split(':')) == 3 else '%H:%M')
+            
+            # Handle meetings that cross midnight
+            if end_dt < start_dt:
+                end_dt = end_dt + timedelta(days=1)
+            
+            duration_delta = end_dt - start_dt
+            duration_hours = duration_delta.total_seconds() / 3600
+        
+        # Default duration if neither end_time nor duration_hours provided
+        if duration_hours is None:
+            duration_hours = 2.0
+        
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            
+            # Check if end_time column exists
             cursor.execute("""
-                UPDATE meetings 
-                SET meeting_name = %s, 
-                    meeting_date = %s, 
-                    start_time = %s, 
-                    duration_hours = %s, 
-                    room = %s,
-                    atl26_broadcast = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast, meeting_id))
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'meetings' AND column_name = 'end_time'
+            """)
+            has_end_time = cursor.fetchone() is not None
+            
+            if has_end_time and end_time:
+                cursor.execute("""
+                    UPDATE meetings 
+                    SET meeting_name = %s, 
+                        meeting_date = %s, 
+                        start_time = %s, 
+                        end_time = %s,
+                        duration_hours = %s, 
+                        room = %s,
+                        atl26_broadcast = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (meeting_name, meeting_date, start_time, end_time, duration_hours, room, atl26_broadcast, meeting_id))
+            else:
+                cursor.execute("""
+                    UPDATE meetings 
+                    SET meeting_name = %s, 
+                        meeting_date = %s, 
+                        start_time = %s, 
+                        duration_hours = %s, 
+                        room = %s,
+                        atl26_broadcast = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (meeting_name, meeting_date, start_time, duration_hours, room, atl26_broadcast, meeting_id))
             
             affected = cursor.rowcount
             conn.commit()

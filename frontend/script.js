@@ -13619,8 +13619,7 @@ function renderMeetingsTable() {
             <tr>
                 <td>${meeting.meeting_name}</td>
                 <td>${formatMeetingDate(meeting.meeting_date)}</td>
-                <td>${meeting.start_time}</td>
-                <td>${meeting.duration_hours} hours</td>
+                <td>${meeting.end_time ? `${meeting.start_time} - ${meeting.end_time}` : meeting.start_time}</td>
                 <td><span class="meeting-schedule-room">${meeting.room || ''}</span></td>
                 <td>${broadcastBadge}</td>
                 <td>
@@ -13659,6 +13658,21 @@ window.openAddMeetingModal = function() {
     document.getElementById('meetingForm').reset();
     document.getElementById('meetingBroadcast').checked = true;
     document.getElementById('meetingRoom').value = '';
+    
+    // Set default end time (2 hours after current time)
+    const now = new Date();
+    const startHours = now.getHours();
+    const startMinutes = now.getMinutes();
+    const endHours = (startHours + 2) % 24;
+    
+    const meetingTimeInput = document.getElementById('meetingTime');
+    const meetingEndTimeInput = document.getElementById('meetingEndTime');
+    
+    if (meetingTimeInput && meetingEndTimeInput) {
+        meetingTimeInput.value = `${startHours.toString().padStart(2, '0')}:${startMinutes.toString().padStart(2, '0')}`;
+        meetingEndTimeInput.value = `${endHours.toString().padStart(2, '0')}:${startMinutes.toString().padStart(2, '0')}`;
+    }
+    
     document.getElementById('meetingModal').classList.add('active');
 };
 
@@ -13694,7 +13708,41 @@ window.editMeeting = function(meetingId) {
     }
     document.getElementById('meetingTime').value = timeValue;
     
-    document.getElementById('meetingDuration').value = meeting.duration_hours;
+    // Set end time based on start time and duration
+    const endTimeInput = document.getElementById('meetingEndTime');
+    if (endTimeInput) {
+        if (meeting.end_time) {
+            // If we have an end_time from the backend, use it directly
+            let endTimeValue = meeting.end_time;
+            if (endTimeValue) {
+                const timeMatch = endTimeValue.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+                if (timeMatch) {
+                    let hours = parseInt(timeMatch[1]);
+                    const minutes = timeMatch[2];
+                    const meridiem = timeMatch[3].toUpperCase();
+                    
+                    if (meridiem === 'PM' && hours !== 12) {
+                        hours += 12;
+                    } else if (meridiem === 'AM' && hours === 12) {
+                        hours = 0;
+                    }
+                    
+                    endTimeValue = `${hours.toString().padStart(2, '0')}:${minutes}`;
+                }
+            }
+            endTimeInput.value = endTimeValue;
+        } else if (meeting.duration_hours && timeValue) {
+            // Calculate end time from start time and duration for backward compatibility
+            const [hours, minutes] = timeValue.split(':').map(Number);
+            const startMinutes = hours * 60 + minutes;
+            const endMinutes = startMinutes + (meeting.duration_hours * 60);
+            
+            const endHours = Math.floor(endMinutes / 60) % 24;
+            const endMins = endMinutes % 60;
+            
+            endTimeInput.value = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+        }
+    }
     document.getElementById('meetingRoom').value = meeting.room || '';
     document.getElementById('meetingBroadcast').checked = meeting.atl26_broadcast;
     document.getElementById('meetingModal').classList.add('active');
@@ -13708,30 +13756,24 @@ window.closeMeetingModal = function() {
 
 // Save meeting
 window.saveMeeting = async function() {
-    // Convert 24-hour time to 12-hour format with AM/PM
-    let timeValue = document.getElementById('meetingTime').value;
-    if (timeValue) {
-        const [hours24, minutes] = timeValue.split(':');
-        let hours = parseInt(hours24);
-        let meridiem = 'AM';
-        
-        if (hours >= 12) {
-            meridiem = 'PM';
-            if (hours > 12) {
-                hours -= 12;
-            }
-        } else if (hours === 0) {
-            hours = 12;
-        }
-        
-        timeValue = `${hours}:${minutes} ${meridiem}`;
+    // Get start and end times in 24-hour format from the time inputs
+    let startTimeValue = document.getElementById('meetingTime').value;
+    let endTimeValue = document.getElementById('meetingEndTime').value;
+    
+    // The time inputs already give us HH:MM format, just add seconds for consistency
+    if (startTimeValue && startTimeValue.split(':').length === 2) {
+        startTimeValue += ':00';
+    }
+    
+    if (endTimeValue && endTimeValue.split(':').length === 2) {
+        endTimeValue += ':00';
     }
     
     const formData = {
         meeting_name: document.getElementById('meetingName').value,
         meeting_date: document.getElementById('meetingDate').value,
-        start_time: timeValue,
-        duration_hours: parseFloat(document.getElementById('meetingDuration').value),
+        start_time: startTimeValue,
+        end_time: endTimeValue,
         room: document.getElementById('meetingRoom').value || null,
         atl26_broadcast: document.getElementById('meetingBroadcast').checked
     };

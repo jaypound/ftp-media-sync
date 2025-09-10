@@ -6707,11 +6707,51 @@ def create_meeting():
     """Create a new meeting"""
     try:
         data = request.json
+        
+        # Handle both end_time and duration_hours for backward compatibility
+        end_time = data.get('end_time')
+        duration_hours = None
+        
+        if end_time:
+            # If end_time is provided, calculate duration_hours for backward compatibility
+            start_time_str = data.get('start_time')
+            if start_time_str and end_time:
+                from datetime import datetime, timedelta
+                
+                # Parse times (handle both HH:MM and HH:MM:SS formats)
+                start_time_str = start_time_str.strip()
+                end_time_str = end_time.strip()
+                
+                # Ensure consistent format for parsing
+                if len(start_time_str.split(':')) == 2:
+                    start_time_str += ':00'
+                if len(end_time_str.split(':')) == 2:
+                    end_time_str += ':00'
+                    
+                try:
+                    start_dt = datetime.strptime(start_time_str, '%H:%M:%S')
+                    end_dt = datetime.strptime(end_time_str, '%H:%M:%S')
+                    
+                    # Handle meetings that cross midnight
+                    if end_dt < start_dt:
+                        end_dt = end_dt + timedelta(days=1)
+                    
+                    # Calculate duration in hours
+                    duration_delta = end_dt - start_dt
+                    duration_hours = duration_delta.total_seconds() / 3600
+                except ValueError as e:
+                    logger.error(f"Time parsing error: {str(e)}")
+                    return jsonify({'status': 'error', 'message': 'Invalid time format. Use HH:MM'}), 400
+        else:
+            # Fallback to duration_hours if end_time not provided
+            duration_hours = float(data.get('duration_hours', 2.0))
+        
         meeting_id = db_manager.create_meeting(
             meeting_name=data.get('meeting_name'),
             meeting_date=data.get('meeting_date'),
             start_time=data.get('start_time'),
-            duration_hours=float(data.get('duration_hours', 2.0)),
+            end_time=end_time,
+            duration_hours=duration_hours,
             room=data.get('room'),
             atl26_broadcast=data.get('atl26_broadcast', True)
         )
@@ -6729,12 +6769,52 @@ def update_meeting(meeting_id):
     """Update a meeting"""
     try:
         data = request.json
+        
+        # Handle both end_time and duration_hours for backward compatibility
+        end_time = data.get('end_time')
+        duration_hours = None
+        
+        if end_time:
+            # If end_time is provided, calculate duration_hours for backward compatibility
+            start_time_str = data.get('start_time')
+            if start_time_str and end_time:
+                from datetime import datetime, timedelta
+                
+                # Parse times (handle both HH:MM and HH:MM:SS formats)
+                start_time_str = start_time_str.strip()
+                end_time_str = end_time.strip()
+                
+                # Ensure consistent format for parsing
+                if len(start_time_str.split(':')) == 2:
+                    start_time_str += ':00'
+                if len(end_time_str.split(':')) == 2:
+                    end_time_str += ':00'
+                    
+                try:
+                    start_dt = datetime.strptime(start_time_str, '%H:%M:%S')
+                    end_dt = datetime.strptime(end_time_str, '%H:%M:%S')
+                    
+                    # Handle meetings that cross midnight
+                    if end_dt < start_dt:
+                        end_dt = end_dt + timedelta(days=1)
+                    
+                    # Calculate duration in hours
+                    duration_delta = end_dt - start_dt
+                    duration_hours = duration_delta.total_seconds() / 3600
+                except ValueError as e:
+                    logger.error(f"Time parsing error: {str(e)}")
+                    return jsonify({'status': 'error', 'message': 'Invalid time format. Use HH:MM'}), 400
+        else:
+            # Fallback to duration_hours if end_time not provided
+            duration_hours = float(data.get('duration_hours', 2.0))
+        
         updated = db_manager.update_meeting(
             meeting_id=meeting_id,
             meeting_name=data.get('meeting_name'),
             meeting_date=data.get('meeting_date'),
             start_time=data.get('start_time'),
-            duration_hours=float(data.get('duration_hours', 2.0)),
+            end_time=end_time,
+            duration_hours=duration_hours,
             room=data.get('room'),
             atl26_broadcast=data.get('atl26_broadcast', True)
         )
@@ -6921,15 +7001,20 @@ def generate_daily_schedule_template():
             room = meeting.get('room', '')
             sdi_input = room_to_sdi.get(room, '/mnt/main/tv/inputs/1-SDI in')  # Default to SDI 1
             
-            # Parse start time and calculate end time
+            # Parse start time and end time
             start_time = meeting['start_time']
-            duration_hours = meeting.get('duration_hours', 2.0)
             
-            # Convert start time to datetime for calculation
-            from datetime import datetime, timedelta
-            start_dt = datetime.strptime(start_time, '%I:%M %p')
-            end_dt = start_dt + timedelta(hours=duration_hours)
-            end_time = end_dt.strftime('%I:%M %p').lower()
+            # Use end_time if available, otherwise calculate from duration
+            if 'end_time' in meeting and meeting['end_time']:
+                end_time = meeting['end_time'].lower()
+            else:
+                # Fallback to calculating from duration for backward compatibility
+                duration_hours = meeting.get('duration_hours', 2.0)
+                from datetime import datetime, timedelta
+                start_dt = datetime.strptime(start_time, '%I:%M %p')
+                end_dt = start_dt + timedelta(hours=duration_hours)
+                end_time = end_dt.strftime('%I:%M %p').lower()
+            
             start_time_lower = start_time.lower()
             
             # Generate a consistent GUID for the SDI input
@@ -7001,13 +7086,19 @@ def generate_weekly_schedule_template():
             meeting_date = datetime.strptime(meeting['meeting_date'], '%Y-%m-%d')
             day_name = meeting_date.strftime('%a').lower()  # mon, tue, wed, etc.
             
-            # Parse start time and calculate end time
+            # Parse start time and end time
             start_time = meeting['start_time']
-            duration_hours = meeting.get('duration_hours', 2.0)
             
-            start_dt = datetime.strptime(start_time, '%I:%M %p')
-            end_dt = start_dt + timedelta(hours=duration_hours)
-            end_time = end_dt.strftime('%I:%M %p').lower()
+            # Use end_time if available, otherwise calculate from duration
+            if 'end_time' in meeting and meeting['end_time']:
+                end_time = meeting['end_time'].lower()
+            else:
+                # Fallback to calculating from duration for backward compatibility
+                duration_hours = meeting.get('duration_hours', 2.0)
+                start_dt = datetime.strptime(start_time, '%I:%M %p')
+                end_dt = start_dt + timedelta(hours=duration_hours)
+                end_time = end_dt.strftime('%I:%M %p').lower()
+            
             start_time_lower = start_time.lower()
             
             # Generate GUID
@@ -7086,13 +7177,19 @@ def generate_monthly_schedule_template():
             meeting_date = datetime.strptime(meeting['meeting_date'], '%Y-%m-%d')
             day_of_month = meeting_date.day
             
-            # Parse start time and calculate end time
+            # Parse start time and end time
             start_time = meeting['start_time']
-            duration_hours = meeting.get('duration_hours', 2.0)
             
-            start_dt = datetime.strptime(start_time, '%I:%M %p')
-            end_dt = start_dt + timedelta(hours=duration_hours)
-            end_time = end_dt.strftime('%I:%M %p').lower()
+            # Use end_time if available, otherwise calculate from duration
+            if 'end_time' in meeting and meeting['end_time']:
+                end_time = meeting['end_time'].lower()
+            else:
+                # Fallback to calculating from duration for backward compatibility
+                duration_hours = meeting.get('duration_hours', 2.0)
+                start_dt = datetime.strptime(start_time, '%I:%M %p')
+                end_dt = start_dt + timedelta(hours=duration_hours)
+                end_time = end_dt.strftime('%I:%M %p').lower()
+            
             start_time_lower = start_time.lower()
             
             # Generate GUID
