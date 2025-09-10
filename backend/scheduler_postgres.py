@@ -871,17 +871,23 @@ class PostgreSQLScheduler:
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
+            # Get all schedules, not just active ones, for reporting purposes
             cursor.execute("""
                 SELECT 
-                    s.*,
+                    s.id,
+                    s.schedule_name as name,
+                    s.air_date,
+                    s.created_date as created_at,
+                    s.active,
+                    s.total_duration_seconds,
                     COUNT(si.id) as total_items,
                     SUM(si.scheduled_duration_seconds) as total_duration
                 FROM schedules s
                 LEFT JOIN scheduled_items si ON s.id = si.schedule_id
-                WHERE s.active = TRUE
-                GROUP BY s.id
-                ORDER BY s.air_date DESC
-                LIMIT 30
+                WHERE s.air_date >= CURRENT_DATE - INTERVAL '60 days'
+                GROUP BY s.id, s.schedule_name, s.air_date, s.created_date, s.active, s.total_duration_seconds
+                ORDER BY s.created_date DESC
+                LIMIT 200
             """)
             
             results = cursor.fetchall()

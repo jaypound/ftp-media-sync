@@ -75,6 +75,9 @@ const ModuleLoader = {
         'meeting_schedule': {
             init: 'meetingScheduleInit'
         },
+        'reports': {
+            init: 'reportsInit'
+        },
         'fill_graphics': {
             init: 'fillGraphicsInit'
         }

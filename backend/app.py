@@ -1573,6 +1573,38 @@ def reorder_schedule_items():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/generate-report', methods=['POST'])
+def generate_report():
+    """Generate various analytical reports"""
+    try:
+        data = request.json
+        report_type = data.get('report_type')
+        
+        if report_type == 'schedule-analysis':
+            schedule_id = data.get('schedule_id')
+            if not schedule_id:
+                return jsonify({'success': False, 'message': 'Schedule ID required'})
+            
+            # Import here to avoid circular imports
+            from reports import ScheduleAnalysisReport
+            
+            report = ScheduleAnalysisReport(db_manager)
+            report_data = report.generate(schedule_id)
+            
+            return jsonify({
+                'success': True,
+                'data': report_data
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Unknown report type: {report_type}'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error generating report: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
 @app.route('/api/delete-schedule-item', methods=['POST'])
 def delete_schedule_item():
     """Delete a single item from a schedule"""
@@ -1654,15 +1686,21 @@ def list_schedules():
         # Get active schedules from PostgreSQL
         schedules = scheduler_postgres.get_active_schedules()
         
-        # Convert datetime objects to strings
+        # Convert datetime objects to strings and ensure consistent field names
         for schedule in schedules:
             if 'air_date' in schedule and schedule['air_date']:
                 schedule['air_date'] = schedule['air_date'].isoformat()
+            if 'created_at' in schedule and schedule['created_at']:
+                schedule['created_at'] = schedule['created_at'].isoformat()
+            # Also handle created_date for backward compatibility
             if 'created_date' in schedule and schedule['created_date']:
-                schedule['created_date'] = schedule['created_date'].isoformat()
+                schedule['created_at'] = schedule['created_date'].isoformat()
             # Format duration
             if schedule.get('total_duration'):
                 schedule['total_duration_hours'] = float(schedule['total_duration']) / 3600
+            elif schedule.get('total_duration_seconds'):
+                schedule['total_duration'] = float(schedule['total_duration_seconds'])
+                schedule['total_duration_hours'] = float(schedule['total_duration_seconds']) / 3600
         
         logger.info(f"Found {len(schedules)} active schedules")
         

@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="admin/admin.css">
     <link rel="stylesheet" href="scheduling/scheduling.css">
     <link rel="stylesheet" href="meeting_schedule/meeting_schedule.css">
+    <link rel="stylesheet" href="reports/reports.css">
     <link rel="stylesheet" href="meeting_trimmer/meeting_trimmer.css">
     <link rel="stylesheet" href="fill_graphics/fill_graphics.css">
 </head>
@@ -54,6 +55,10 @@
                 <button class="nav-item" onclick="showPanel('meetings')">
                     <i class="fas fa-calendar-check"></i>
                     Meetings Schedule
+                </button>
+                <button class="nav-item" onclick="showPanel('reports')">
+                    <i class="fas fa-chart-bar"></i>
+                    Reports
                 </button>
                 <button class="nav-item" onclick="showPanel('fill-graphics')">
                     <i class="fas fa-image"></i>
@@ -875,6 +880,13 @@
                         <p>No meetings scheduled. Click "Add Meeting" or import from the City Council website.</p>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Reports Panel -->
+        <div id="reports" class="panel reports-panel">
+            <div id="reportsContainer" class="reports-container">
+                <!-- Reports content will be loaded here by reports.js -->
             </div>
         </div>
 
@@ -1795,6 +1807,7 @@
     <script src="scheduling/scheduling_template_library.js"></script>
     <script src="scheduling/scheduling_expiration.js"></script>
     <script src="meeting_schedule/meeting_schedule.js"></script>
+    <script src="reports/reports.js"></script>
     <script src="fill_graphics/fill_graphics.js"></script>
     
     <!-- Delete Options Modal -->
