@@ -4471,7 +4471,7 @@ def fill_template_gaps():
             for content in available_content:
                 # Check if this content is from Recordings folder
                 file_path = content.get('file_path', '')
-                if '/mnt/main/Recordings' in file_path:
+                if file_path and '/mnt/main/Recordings' in file_path:
                     filtered_count += 1
                     continue  # Skip content from Recordings folder
                 
@@ -4487,8 +4487,8 @@ def fill_template_gaps():
                 file_exists = False
                 
                 # If file_path doesn't start with /mnt/, try common base paths
-                paths_to_check = [file_path]
-                if not file_path.startswith('/mnt/'):
+                paths_to_check = [file_path] if file_path else []
+                if file_path and not file_path.startswith('/mnt/'):
                     # Common base paths where content might be stored
                     # Note: /mnt/main and /mnt/md127 are the same via symbolic link
                     base_paths = [

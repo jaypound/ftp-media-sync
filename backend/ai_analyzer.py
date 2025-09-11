@@ -22,7 +22,7 @@ class AIAnalyzer:
             if self.api_provider == "openai":
                 self.model = "gpt-3.5-turbo"
             elif self.api_provider == "anthropic":
-                self.model = "claude-3-sonnet-20240229"
+                self.model = "claude-3-5-sonnet-20241022"
             elif self.api_provider == "ollama":
                 self.model = "llama2"
         
@@ -71,11 +71,34 @@ class AIAnalyzer:
                 
             elif self.api_provider == "anthropic":
                 try:
-                    if self.api_key:
-                        self.client = Anthropic(api_key=self.api_key)
+                    # Clear any proxy-related environment variables that might affect Anthropic
+                    import os
+                    proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy']
+                    saved_proxies = {}
+                    for var in proxy_vars:
+                        if var in os.environ:
+                            saved_proxies[var] = os.environ[var]
+                            del os.environ[var]
+                    
+                    try:
+                        # Initialize with only api_key
+                        if self.api_key:
+                            self.client = Anthropic(api_key=self.api_key)
+                        else:
+                            self.client = Anthropic()
+                        logger.info(f"Anthropic client setup successful with model: {self.model}")
+                    finally:
+                        # Restore proxy settings
+                        for var, value in saved_proxies.items():
+                            os.environ[var] = value
+                            
+                except TypeError as e:
+                    if "proxies" in str(e):
+                        logger.error("Anthropic initialization failed due to proxies parameter. This may be due to an outdated anthropic package.")
+                        logger.info("Please try: pip install --upgrade anthropic")
                     else:
-                        self.client = Anthropic()
-                    logger.info(f"Anthropic client setup successful with model: {self.model}")
+                        logger.error(f"Anthropic setup failed with TypeError: {e}")
+                    self.client = None
                 except Exception as anthropic_error:
                     logger.error(f"Anthropic client setup failed: {anthropic_error}")
                     self.client = None
