@@ -21,21 +21,45 @@ class FileAnalyzer:
         video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.m4v', '.flv']
         return any(file_path.lower().endswith(ext) for ext in video_extensions)
     
-    def parse_filename_metadata(self, filename: str) -> Dict[str, str]:
+    def parse_filename_metadata(self, filename: str, file_path: str = None) -> Dict[str, str]:
         """Parse metadata from filename following format: YYMMDD_ABC_Description.ext
+        Also considers directory path for content type determination.
         
         Args:
             filename: The filename to parse (e.g., '250705_PSA_Public Service Announcement.mp4')
+            file_path: Full file path (optional, used for directory-based content type)
             
         Returns:
             dict: Contains 'content_type' and 'content_title' or empty strings if parsing fails
         """
         try:
+            # Directory to content type mappings
+            directory_mappings = {
+                'ATLANTA NOW': 'AN',
+                'ATL DIRECT': 'ATLD',
+                'BUMPS': 'BMP',
+                'IMOW': 'IMOW',
+                'INCLUSION MONTHS': 'IM',
+                'INSIDE ATLANTA': 'IA',
+                'LEGISLATIVE MINUTE': 'LM',
+                'MEETINGS': 'MTG',
+                'MOVING ATLANTA FORWARD': 'MAF',
+                'PKGS': 'PKG',
+                'PROMOS': 'PMO',
+                'PSAs': 'PSA',
+                'SIZZLES': 'SZL',
+                'SPECIAL PROJECTS': 'SPP',
+                'OTHER': 'OTHER'
+            }
+            
             # Remove file extension
             name_without_ext = os.path.splitext(filename)[0]
             
             # Split by underscore
             parts = name_without_ext.split('_', 2)  # Split into max 3 parts
+            
+            content_type = ''
+            content_title = ''
             
             if len(parts) >= 3:
                 # parts[0] = date (YYMMDD)
@@ -43,19 +67,34 @@ class FileAnalyzer:
                 # parts[2] = content_title (rest of filename)
                 content_type = parts[1].strip()
                 content_title = parts[2].strip()
-                
-                logger.debug(f"Parsed filename '{filename}': content_type='{content_type}', content_title='{content_title}'")
-                
-                return {
-                    'content_type': content_type,
-                    'content_title': content_title
-                }
             else:
                 logger.warning(f"Filename '{filename}' does not follow expected format (YYMMDD_ABC_Title.ext)")
-                return {
-                    'content_type': '',
-                    'content_title': ''
-                }
+            
+            # If we have a file path, check directory for content type override
+            # This handles cases where filename has content type but directory should take precedence
+            if file_path:
+                # Extract directory from path
+                path_parts = file_path.replace('\\', '/').split('/')
+                for part in reversed(path_parts[:-1]):  # Exclude filename
+                    if part in directory_mappings:
+                        directory_content_type = directory_mappings[part]
+                        # Only override if current content_type doesn't match expected pattern
+                        # or if directory type is more specific
+                        if content_type != directory_content_type:
+                            logger.info(f"Overriding content type from '{content_type}' to '{directory_content_type}' based on directory '{part}'")
+                            content_type = directory_content_type
+                        break
+            
+            # If still no content type but we have a valid filename pattern, classify as 'OTHER'
+            if not content_type and len(parts) >= 3:
+                content_type = 'OTHER'
+            
+            logger.debug(f"Parsed filename '{filename}': content_type='{content_type}', content_title='{content_title}'")
+            
+            return {
+                'content_type': content_type,
+                'content_title': content_title
+            }
                 
         except Exception as e:
             logger.warning(f"Error parsing filename '{filename}': {str(e)}")
@@ -143,7 +182,7 @@ class FileAnalyzer:
                     )
                 
                 # Step 4: Parse filename metadata
-                filename_metadata = self.parse_filename_metadata(file_name)
+                filename_metadata = self.parse_filename_metadata(file_name, file_path)
                 
                 # Step 5: Calculate duration category and add scheduling metadata
                 duration_category = self.get_duration_category(audio_result['duration'])
@@ -488,6 +527,7 @@ class FileAnalyzer:
         # Content type preferences
         type_preferences = {
             'AN': ['morning', 'afternoon', 'prime_time', 'evening'],  # Atlanta Now - news/current events
+            'ATLD': ['morning', 'afternoon', 'prime_time', 'evening'],  # ATL Direct - city news/updates
             'BMP': ['overnight', 'early_morning', 'morning', 'afternoon', 'prime_time', 'evening'],  # Bumps can go anywhere
             'IMOW': ['prime_time', 'evening', 'afternoon'],  # In My Own Words - personal stories
             'IM': ['morning', 'afternoon', 'early_morning'],  # Inclusion Months - educational
@@ -499,7 +539,8 @@ class FileAnalyzer:
             'PMO': ['prime_time', 'evening', 'afternoon'],  # Promos - promotional content
             'SZL': ['prime_time', 'evening', 'afternoon'],  # Sizzle - promotional content
             'SPP': ['prime_time', 'evening', 'afternoon'],  # Special Projects
-            'OTH': ['afternoon', 'evening']  # Other - default placement
+            'OTH': ['afternoon', 'evening'],  # Other - default placement
+            'OTHER': ['afternoon', 'evening']  # Other - default placement
         }
         
         # Duration preferences

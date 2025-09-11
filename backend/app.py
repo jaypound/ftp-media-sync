@@ -1414,6 +1414,7 @@ def rename_content():
         # Determine new folder based on content type
         content_type_mappings = {
             'AN': 'ATLANTA NOW',
+            'ATLD': 'ATL DIRECT',
             'BMP': 'BUMPS', 
             'IMOW': 'IMOW',
             'IM': 'INCLUSION MONTHS',

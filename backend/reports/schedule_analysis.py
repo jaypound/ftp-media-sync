@@ -83,9 +83,12 @@ class ScheduleAnalysisReport:
             
             # Get unique content count
             cursor.execute("""
-                SELECT COUNT(DISTINCT asset_id) as unique_content
-                FROM scheduled_items
-                WHERE schedule_id = %s
+                SELECT COUNT(DISTINCT si.asset_id) as unique_content
+                FROM scheduled_items si
+                JOIN assets a ON si.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                WHERE si.schedule_id = %s
+                AND i.file_path NOT LIKE 'FILL%%'
             """, (schedule_id,))
             
             unique_count = cursor.fetchone()['unique_content']
@@ -116,7 +119,9 @@ class ScheduleAnalysisReport:
                     AVG(si.scheduled_duration_seconds) / 60.0 as avg_minutes
                 FROM scheduled_items si
                 JOIN assets a ON si.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 WHERE si.schedule_id = %s
+                AND i.file_path NOT LIKE 'FILL%%'
                 GROUP BY a.duration_category
                 ORDER BY total_hours DESC
             """, (schedule_id,))
@@ -149,7 +154,9 @@ class ScheduleAnalysisReport:
                     SUM(si.scheduled_duration_seconds) / 3600.0 as total_hours
                 FROM scheduled_items si
                 JOIN assets a ON si.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 WHERE si.schedule_id = %s
+                AND i.file_path NOT LIKE 'FILL%%'
                 GROUP BY a.content_type
                 ORDER BY count DESC
             """, (schedule_id,))
@@ -175,15 +182,17 @@ class ScheduleAnalysisReport:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT 
-                    a.content_title as title,
+                    i.file_path as title,
                     a.content_type as type,
                     a.duration_category as category,
                     COUNT(si.id) as count,
                     a.duration_seconds / 60.0 as duration_minutes
                 FROM scheduled_items si
                 JOIN assets a ON si.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 WHERE si.schedule_id = %s
-                GROUP BY a.id, a.content_title, a.content_type, 
+                AND i.file_path NOT LIKE 'FILL%%'
+                GROUP BY a.id, i.file_path, a.content_type, 
                          a.duration_category, a.duration_seconds
                 ORDER BY count DESC
                 LIMIT %s
@@ -215,7 +224,9 @@ class ScheduleAnalysisReport:
                     a.duration_category as category
                 FROM scheduled_items si
                 JOIN assets a ON si.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 WHERE si.schedule_id = %s
+                AND i.file_path NOT LIKE 'FILL%%'
                 ORDER BY si.sequence_number
                 LIMIT %s
             """, (schedule_id, limit))
@@ -244,7 +255,9 @@ class ScheduleAnalysisReport:
                     COUNT(*) as count
                 FROM scheduled_items si
                 JOIN assets a ON si.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 WHERE si.schedule_id = %s
+                AND i.file_path NOT LIKE 'FILL%%'
                 GROUP BY hour, a.duration_category
                 ORDER BY hour, count DESC
             """, (schedule_id,))
@@ -270,17 +283,19 @@ class ScheduleAnalysisReport:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT 
-                    a.content_title as title,
+                    i.file_path as title,
                     a.content_type as type,
                     a.duration_category as category,
                     a.duration_seconds / 60.0 as duration_minutes,
                     sm.last_scheduled_date,
                     sm.total_airings
                 FROM assets a
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                 WHERE a.analysis_completed = TRUE
                 AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
                 AND COALESCE(sm.content_expiry_date, %s::date + INTERVAL '1 year') > %s::date
+                AND i.file_path NOT LIKE 'FILL%%'
                 AND a.id NOT IN (
                     SELECT DISTINCT asset_id 
                     FROM scheduled_items 
@@ -289,7 +304,7 @@ class ScheduleAnalysisReport:
                 ORDER BY 
                     sm.last_scheduled_date ASC NULLS FIRST,
                     a.duration_category,
-                    a.content_title
+                    i.file_path
                 LIMIT %s
             """, (air_date, air_date, schedule_id, limit))
             
