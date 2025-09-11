@@ -638,7 +638,9 @@ function displayScannedFiles() {
         
         // Check if file has been analyzed
         const isAnalyzed = file.is_analyzed || false;
-        console.log(`File ${file.name} analyzed status:`, isAnalyzed);
+        const engagementScore = file.analysis_info?.engagement_score;
+        const hasEngagementScore = engagementScore !== undefined && engagementScore !== null;
+        console.log(`File ${file.name} analyzed status:`, isAnalyzed, 'engagement:', engagementScore);
         
         // Filter based on showUnanalyzedOnly toggle
         if (showUnanalyzedOnly && isAnalyzed) {
@@ -652,7 +654,11 @@ function displayScannedFiles() {
                 <div class="file-path">${file.path || file.name}</div>
             </div>
             <div class="file-actions">
-                ${isAnalyzed ? '<span class="analyzed-status">✅ Analyzed</span>' : ''}
+                ${hasEngagementScore ? `
+                    <span class="engagement-score" title="Engagement Score">
+                        <i class="fas fa-star"></i> ${engagementScore}
+                    </span>
+                ` : isAnalyzed ? '<span class="analyzed-status">✅ Analyzed</span>' : ''}
                 ${isVideoFile ? `
                     <button class="button analyze-btn ${isAnalyzed ? 'analyzed' : ''}" 
                             onclick="addToAnalysisQueue('${btoa(file.path || file.name).replace(/[^a-zA-Z0-9]/g, '')}')" 
@@ -671,11 +677,24 @@ function displayScannedFiles() {
     targetFiles.forEach(file => {
         const fileItem = document.createElement('div');
         fileItem.className = 'scanned-file-item';
+        
+        // Check if file is analyzed and has engagement score
+        const isAnalyzed = file.is_analyzed || false;
+        const engagementScore = file.analysis_info?.engagement_score;
+        const hasEngagementScore = engagementScore !== undefined && engagementScore !== null;
+        
         fileItem.innerHTML = `
             <div class="file-info">
                 <div class="file-name">${file.name}</div>
                 <div class="file-size">${formatFileSize(file.size)}</div>
                 <div class="file-path">${file.path || file.name}</div>
+            </div>
+            <div class="file-actions">
+                ${hasEngagementScore ? `
+                    <span class="engagement-score" title="Engagement Score">
+                        <i class="fas fa-star"></i> ${engagementScore}
+                    </span>
+                ` : isAnalyzed ? '<span class="analyzed-status">✅</span>' : ''}
             </div>
         `;
         targetFilesList.appendChild(fileItem);
@@ -2981,13 +3000,60 @@ async function startAnalysis() {
                 const analysisResult = result.results[0];
                 if (analysisResult.success) {
                     log(`✅ Analysis completed for: ${queueItem.file.name}`);
+                    
+                    // Get the analysis data from the result
+                    const analysisData = analysisResult.analysis;
+                    
+                    // Update the file object with analysis info
+                    const fileToUpdate = sourceFiles.find(f => (f.path || f.name) === (queueItem.file.path || queueItem.file.name));
+                    if (fileToUpdate) {
+                        fileToUpdate.is_analyzed = true;
+                        fileToUpdate.analysis_info = {
+                            engagement_score: analysisData?.engagement_score,
+                            summary: analysisData?.summary,
+                            _id: analysisData?._id
+                        };
+                    }
+                    
+                    // Update target files too if this file is also on target
+                    const targetFileToUpdate = targetFiles.find(f => (f.path || f.name) === (queueItem.file.path || queueItem.file.name));
+                    if (targetFileToUpdate) {
+                        targetFileToUpdate.is_analyzed = true;
+                        targetFileToUpdate.analysis_info = {
+                            engagement_score: analysisData?.engagement_score,
+                            summary: analysisData?.summary,
+                            _id: analysisData?._id
+                        };
+                    }
+                    
+                    // Update the file item UI with engagement score
                     if (button) {
-                        button.innerHTML = '<i class="fas fa-check"></i> Analyzed';
+                        const fileItem = button.closest('.scanned-file-item');
+                        if (fileItem && analysisData?.engagement_score !== undefined) {
+                            // Find the file-actions div
+                            const fileActionsDiv = fileItem.querySelector('.file-actions');
+                            if (fileActionsDiv) {
+                                // Remove any existing status indicators
+                                const existingStatus = fileActionsDiv.querySelector('.analyzed-status, .engagement-score');
+                                if (existingStatus) {
+                                    existingStatus.remove();
+                                }
+                                
+                                // Add engagement score before the button
+                                const scoreSpan = document.createElement('span');
+                                scoreSpan.className = 'engagement-score';
+                                scoreSpan.title = 'Engagement Score';
+                                scoreSpan.innerHTML = `<i class="fas fa-star"></i> ${analysisData.engagement_score}`;
+                                button.parentNode.insertBefore(scoreSpan, button);
+                            }
+                        }
+                        
+                        button.innerHTML = '<i class="fas fa-redo"></i> Reanalyze';
                         button.classList.add('analyzed');
                         button.classList.remove('added');
+                        button.disabled = false;
                         
                         // Update parent item styling
-                        const fileItem = button.closest('.scanned-file-item');
                         fileItem.classList.add('analyzed');
                         fileItem.classList.remove('queued');
                     }
@@ -7114,14 +7180,48 @@ async function performPeriodicRescan() {
                             // File was completed outside of our monitoring
                             log(`✅ Detected completed analysis: ${queueItem.file.name}`);
                             
+                            // Update the file object with analysis info
+                            const fileToUpdate = sourceFiles.find(f => (f.path || f.name) === filePath);
+                            if (fileToUpdate) {
+                                fileToUpdate.is_analyzed = true;
+                                fileToUpdate.analysis_info = isAnalyzed;
+                            }
+                            
+                            // Update target files too if this file is also on target
+                            const targetFileToUpdate = targetFiles.find(f => (f.path || f.name) === filePath);
+                            if (targetFileToUpdate) {
+                                targetFileToUpdate.is_analyzed = true;
+                                targetFileToUpdate.analysis_info = isAnalyzed;
+                            }
+                            
                             // Update UI
                             const button = document.querySelector(`button[onclick="addToAnalysisQueue('${queueItem.id}')"]`);
                             if (button) {
-                                button.innerHTML = '<i class="fas fa-check"></i> Analyzed';
+                                const fileItem = button.closest('.scanned-file-item');
+                                if (fileItem && isAnalyzed.engagement_score !== undefined) {
+                                    // Find the file-actions div
+                                    const fileActionsDiv = fileItem.querySelector('.file-actions');
+                                    if (fileActionsDiv) {
+                                        // Remove any existing status indicators
+                                        const existingStatus = fileActionsDiv.querySelector('.analyzed-status, .engagement-score');
+                                        if (existingStatus) {
+                                            existingStatus.remove();
+                                        }
+                                        
+                                        // Add engagement score before the button
+                                        const scoreSpan = document.createElement('span');
+                                        scoreSpan.className = 'engagement-score';
+                                        scoreSpan.title = 'Engagement Score';
+                                        scoreSpan.innerHTML = `<i class="fas fa-star"></i> ${isAnalyzed.engagement_score}`;
+                                        button.parentNode.insertBefore(scoreSpan, button);
+                                    }
+                                }
+                                
+                                button.innerHTML = '<i class="fas fa-redo"></i> Reanalyze';
                                 button.classList.add('analyzed');
                                 button.classList.remove('added');
+                                button.disabled = false;
                                 
-                                const fileItem = button.closest('.scanned-file-item');
                                 if (fileItem) {
                                     fileItem.classList.add('analyzed');
                                     fileItem.classList.remove('queued');
@@ -7150,6 +7250,9 @@ async function performPeriodicRescan() {
                         stopAnalysisMonitoring();
                         stopPeriodicRescanning();
                         updateAnalysisButtonState();
+                        
+                        // Rescan files to get updated engagement scores
+                        await updateFileAnalysisStatus();
                         return;
                     }
                 }
@@ -7196,6 +7299,65 @@ async function refreshSourceFiles() {
     } catch (error) {
         log(`❌ Error refreshing source files: ${error.message}`, 'error');
         return false;
+    }
+}
+
+async function updateFileAnalysisStatus() {
+    try {
+        log('🔄 Updating file analysis status and engagement scores...');
+        
+        // Get updated analysis status for all files
+        const allFiles = [...sourceFiles, ...targetFiles];
+        const response = await fetch('/api/analysis-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: allFiles })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                const analyzedFiles = data.analyzed_files || [];
+                
+                // Create a map for quick lookup
+                const analyzedMap = new Map();
+                analyzedFiles.forEach(af => {
+                    analyzedMap.set(af.file_path, af);
+                });
+                
+                // Update source files with analysis info
+                sourceFiles.forEach(file => {
+                    const filePath = file.path || file.name;
+                    const analysisInfo = analyzedMap.get(filePath);
+                    if (analysisInfo) {
+                        file.is_analyzed = true;
+                        file.analysis_info = analysisInfo;
+                    }
+                });
+                
+                // Update target files with analysis info
+                targetFiles.forEach(file => {
+                    const filePath = file.path || file.name;
+                    const analysisInfo = analyzedMap.get(filePath);
+                    if (analysisInfo) {
+                        file.is_analyzed = true;
+                        file.analysis_info = analysisInfo;
+                    }
+                });
+                
+                // Refresh the display
+                displayScannedFiles();
+                log('✅ File analysis status updated successfully');
+                
+                // Show notification about engagement scores
+                const filesWithScores = analyzedFiles.filter(af => af.engagement_score !== null && af.engagement_score !== undefined);
+                if (filesWithScores.length > 0) {
+                    log(`📊 Found ${filesWithScores.length} files with engagement scores`);
+                }
+            }
+        }
+    } catch (error) {
+        log(`❌ Error updating file analysis status: ${error.message}`, 'error');
     }
 }
 
@@ -15009,3 +15171,4 @@ window.closeMissingFilesModal = closeMissingFilesModal;
 window.proceedWithMissingFiles = proceedWithMissingFiles;
 window.removeMissingFiles = removeMissingFiles;
 window.continueCreateSchedule = continueCreateSchedule;
+window.updateFileAnalysisStatus = updateFileAnalysisStatus;

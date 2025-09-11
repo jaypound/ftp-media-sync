@@ -1145,6 +1145,49 @@ body {
     gap: 0.25rem;
 }
 
+.file-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.engagement-score {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    background-color: var(--info-background);
+    color: var(--primary-color);
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.engagement-score i {
+    color: var(--warning-color);
+}
+
+.analyzed-status {
+    color: var(--success-color);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.analyze-btn {
+    font-size: 0.875rem;
+    padding: 0.375rem 0.75rem;
+}
+
+.analyze-btn.analyzed {
+    background-color: var(--secondary-color);
+    opacity: 0.8;
+}
+
+.analyze-btn.analyzed:hover {
+    opacity: 1;
+}
+
 .file-details {
     display: flex;
     gap: 1rem;

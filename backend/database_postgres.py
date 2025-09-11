@@ -86,7 +86,7 @@ class PostgreSQLDatabaseManager:
             # Get file paths
             file_paths = [file.get('path') or file.get('name') for file in files]
             
-            # Query for analyzed files
+            # Query for analyzed files including engagement score
             cursor.execute("""
                 SELECT 
                     a.id,
@@ -94,7 +94,10 @@ class PostgreSQLDatabaseManager:
                     a.created_at,
                     a.mongo_id as _id,
                     i.file_path,
-                    i.file_name
+                    i.file_name,
+                    a.engagement_score,
+                    a.summary,
+                    a.analysis_completed
                 FROM assets a
                 JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 WHERE i.file_path = ANY(%s)
@@ -111,7 +114,10 @@ class PostgreSQLDatabaseManager:
                     'file_path': row['file_path'],
                     'file_name': row['file_name'],
                     'guid': str(row['guid']),
-                    'created_at': row['created_at'].isoformat() if row['created_at'] else None
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'engagement_score': row['engagement_score'],
+                    'summary': row['summary'],
+                    'analysis_completed': row['analysis_completed']
                 })
             
             return analyzed_files
