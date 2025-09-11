@@ -30,7 +30,7 @@ let maxRescanAttempts = 3;
 let showAllFiles = false; // Toggle for showing all files vs unsynced only
 let showTargetOnly = false; // Toggle for showing target-only files
 let showAnalysisAll = false; // Toggle for showing all analysis files
-let showUnanalyzedOnly = false; // Toggle for showing only unanalyzed files in scanned files
+let showUnanalyzedOnly = true; // Toggle for showing only unanalyzed files in scanned files (default to true)
 let isScanning = false;
 let isSyncing = false;
 let isAnalyzing = false;
@@ -187,7 +187,11 @@ async function compareFiles() {
     log('Comparing files between servers...');
     
     const comparisonCard = document.getElementById('comparisonCard');
-    comparisonCard.style.display = 'block';
+    // Show comparison card only if we're on the dashboard
+    const currentPanel = document.querySelector('.panel.active');
+    if (currentPanel && currentPanel.id === 'dashboard') {
+        comparisonCard.style.display = 'block';
+    }
     
     // Clear queues and results
     syncQueue = [];
@@ -592,8 +596,11 @@ function displayScannedFiles() {
     const targetFileCount = document.getElementById('targetFileCount');
     const summaryDiv = document.getElementById('scannedFilesSummary');
     
-    // Show the scanned files card
-    scannedFilesCard.style.display = 'block';
+    // Show the scanned files card only if we're on the dashboard
+    const currentPanel = document.querySelector('.panel.active');
+    if (currentPanel && currentPanel.id === 'dashboard') {
+        scannedFilesCard.style.display = 'block';
+    }
     
     // Show search container immediately when card is shown
     const searchContainer = document.getElementById('scannedFilesSearchContainer');
@@ -674,7 +681,20 @@ function displayScannedFiles() {
     
     // Display target files
     targetFilesList.innerHTML = '';
-    targetFiles.forEach(file => {
+    
+    // Calculate filtered target files
+    const filteredTargetFiles = showUnanalyzedOnly ? 
+        targetFiles.filter(file => !(file.is_analyzed || false)) : 
+        targetFiles;
+    
+    // Update target file count to match the filtered count
+    const targetCountText = showUnanalyzedOnly ? 
+        `${filteredTargetFiles.length} unanalyzed files (${targetFiles.length} total)` :
+        `${targetFiles.length} files found`;
+    targetFileCount.textContent = targetCountText;
+    targetFileCount.setAttribute('data-original-text', targetCountText);
+    
+    filteredTargetFiles.forEach(file => {
         const fileItem = document.createElement('div');
         fileItem.className = 'scanned-file-item';
         
@@ -1951,6 +1971,18 @@ function showPanel(panelName) {
         statusLogsCard.style.display = (panelName === 'dashboard') ? 'block' : 'none';
     }
     
+    // Show/hide Scanned Files card - only show on dashboard
+    const scannedFilesCard = document.getElementById('scannedFilesCard');
+    if (scannedFilesCard) {
+        scannedFilesCard.style.display = (panelName === 'dashboard') ? 'none' : 'none'; // Initially hidden even on dashboard
+    }
+    
+    // Show/hide File Comparison Results card - only show on dashboard
+    const comparisonCard = document.getElementById('comparisonCard');
+    if (comparisonCard) {
+        comparisonCard.style.display = (panelName === 'dashboard') ? 'none' : 'none'; // Initially hidden even on dashboard
+    }
+    
     // Update AppState current panel
     if (window.AppState) {
         window.AppState.setCurrentPanel(panelName);
@@ -2079,7 +2111,7 @@ function toggleUnanalyzedOnly() {
     const toggleBtn = document.getElementById('toggleUnanalyzedOnlyBtn');
     
     if (showUnanalyzedOnly) {
-        toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show All Files';
+        toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Show Analyzed Files';
         toggleBtn.className = 'button warning small';
     } else {
         toggleBtn.innerHTML = '<i class="fas fa-filter"></i> Show Unanalyzed Only';
@@ -6505,6 +6537,16 @@ function viewScheduleItemDetails(scheduleId, itemIdOrAssetId, index) {
                         <strong>Added to Schedule:</strong>
                         <span>${createdAtDisplay}</span>
                         
+                        ${item.theme ? `
+                            <strong>Theme:</strong>
+                            <span style="grid-column: span 2;">${item.theme}</span>
+                        ` : ''}
+                        
+                        ${item.topics && item.topics.length > 0 ? `
+                            <strong>Topics:</strong>
+                            <span style="grid-column: span 2;">${item.topics.join(', ')}</span>
+                        ` : ''}
+                        
                         ${item.summary ? `
                             <strong>Summary:</strong>
                             <span style="grid-column: span 2; margin-top: 0.5rem;">
@@ -8377,6 +8419,16 @@ function viewContentDetails(contentId) {
                         
                         <strong>Shelf Life:</strong>
                         <span>${getShelfLifeInfo(content)}</span>
+                        
+                        ${content.theme ? `
+                        <strong>Theme:</strong>
+                        <span style="grid-column: 2;">${content.theme}</span>
+                        ` : ''}
+                        
+                        ${content.topics && content.topics.length > 0 ? `
+                        <strong>Topics:</strong>
+                        <span style="grid-column: 2;">${content.topics.join(', ')}</span>
+                        ` : ''}
                         
                         ${content.summary ? `
                         <strong>Summary:</strong>

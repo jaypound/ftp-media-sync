@@ -206,6 +206,7 @@ class PostgreSQLDatabaseManager:
                 'transcript': result['transcript'],
                 'language': result['language'],
                 'summary': result['summary'],
+                'theme': result.get('theme', ''),
                 'engagement_score': result['engagement_score'],
                 'engagement_score_reasons': result['engagement_score_reasons'],
                 'shelf_life_score': result['shelf_life_score'],
@@ -368,6 +369,7 @@ class PostgreSQLDatabaseManager:
                 'language': analysis_data.get('language', 'en')[:10],
                 'transcript': analysis_data.get('transcript', ''),
                 'summary': analysis_data.get('summary', ''),
+                'theme': analysis_data.get('theme', '')[:255],  # Add theme field
                 'duration_seconds': analysis_data.get('file_duration'),
                 'duration_category': self._ensure_duration_category(
                     analysis_data.get('duration_category', 'short')
@@ -469,7 +471,7 @@ class PostgreSQLDatabaseManager:
                 query = """
                     INSERT INTO assets (
                         guid, content_type, content_title, language,
-                        transcript, summary, duration_seconds, duration_category,
+                        transcript, summary, theme, duration_seconds, duration_category,
                         engagement_score, engagement_score_reasons, shelf_life_score,
                         shelf_life_reasons, analysis_completed, ai_analysis_enabled,
                         created_at, updated_at
@@ -480,6 +482,7 @@ class PostgreSQLDatabaseManager:
                         %(language)s,
                         %(transcript)s, 
                         %(summary)s, 
+                        %(theme)s,
                         %(duration_seconds)s, 
                         %(duration_category_enum)s,
                         %(engagement_score)s, 
@@ -1090,11 +1093,35 @@ class PostgreSQLDatabaseManager:
             
             cursor.execute(query, params)
             results = cursor.fetchall()
+            
+            # Get asset IDs for fetching tags
+            asset_ids = [row['id'] for row in results if row['id']]
+            
+            # Fetch topics for all assets in one query
+            topics_by_asset = {}
+            if asset_ids:
+                cursor.execute("""
+                    SELECT 
+                        at.asset_id,
+                        t.tag_name
+                    FROM asset_tags at
+                    JOIN tags t ON at.tag_id = t.id
+                    JOIN tag_types tt ON t.tag_type_id = tt.id
+                    WHERE at.asset_id = ANY(%s) AND tt.type_name = 'topic'
+                """, (asset_ids,))
+                
+                for tag_row in cursor.fetchall():
+                    asset_id = tag_row['asset_id']
+                    if asset_id not in topics_by_asset:
+                        topics_by_asset[asset_id] = []
+                    topics_by_asset[asset_id].append(tag_row['tag_name'])
+            
             cursor.close()
             
             # Convert to MongoDB-compatible format
             content_list = []
             for row in results:
+                asset_id = row['id']
                 content = {
                     '_id': row['mongo_id'] or str(row['id']),
                     'id': row['id'],  # Include PostgreSQL ID
@@ -1107,6 +1134,8 @@ class PostgreSQLDatabaseManager:
                     'content_type': row['content_type'],
                     'content_title': row['content_title'],
                     'summary': row['summary'],
+                    'theme': row.get('theme', ''),  # Add theme field
+                    'topics': topics_by_asset.get(asset_id, []),  # Add topics from tags
                     'engagement_score': row['engagement_score'],
                     'analysis_completed': row['analysis_completed'],
                     'scheduling': {

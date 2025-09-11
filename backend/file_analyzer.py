@@ -201,6 +201,7 @@ class FileAnalyzer:
                     "language": audio_result.get('language', 'en'),
                     "summary": ai_result.get('summary', '') if ai_result else '',
                     "topics": ai_result.get('topics', []) if ai_result else [],
+                    "theme": ai_result.get('theme', '') if ai_result else '',
                     "locations": ai_result.get('locations', []) if ai_result else [],
                     "people": ai_result.get('people', []) if ai_result else [],
                     "events": ai_result.get('events', []) if ai_result else [],

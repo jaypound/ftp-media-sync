@@ -121,13 +121,14 @@ The analysis should include:
 
 1. summary: A comprehensive summary of the content (2-3 sentences)
 2. topics: List of main topics discussed (array of strings)
-3. locations: List of any locations mentioned (array of strings)
-4. people: List of any people mentioned (array of strings)
-5. events: List of any events discussed (array of strings)
-6. engagement_score: Score from 0-100 indicating how engaging this content would be for viewers
-7. engagement_score_reasons: Text explanation of the engagement score
-8. shelf_life_score: One of "short", "medium", or "long" indicating content longevity
-9. shelf_life_reasons: Text explanation of the shelf life assessment
+3. theme: The overall theme or message of the content (string) - This helps identify similar content types (e.g. "public safety", "community health", "education", "environmental awareness", "civic engagement", etc.)
+4. locations: List of any locations mentioned (array of strings)
+5. people: List of any people mentioned (array of strings)
+6. events: List of any events discussed (array of strings)
+7. engagement_score: Score from 0-100 indicating how engaging this content would be for viewers
+8. engagement_score_reasons: Text explanation of the engagement score
+9. shelf_life_score: One of "short", "medium", or "long" indicating content longevity
+10. shelf_life_reasons: Text explanation of the shelf life assessment
 
 Please provide only valid JSON in your response, no additional text.
 
@@ -438,6 +439,7 @@ Transcript:
         merged = {
             "summary": "",
             "topics": [],
+            "theme": "",
             "locations": [],
             "people": [],
             "events": [],
@@ -454,6 +456,7 @@ Transcript:
         all_events = set()
         
         summaries = []
+        themes = []
         engagement_scores = []
         engagement_reasons = []
         shelf_life_scores = []
@@ -462,6 +465,7 @@ Transcript:
         for analysis in chunk_analyses:
             if analysis:
                 summaries.append(analysis.get("summary", ""))
+                themes.append(analysis.get("theme", ""))
                 engagement_scores.append(analysis.get("engagement_score", 0))
                 engagement_reasons.append(analysis.get("engagement_score_reasons", ""))
                 shelf_life_scores.append(analysis.get("shelf_life_score", "medium"))
@@ -475,6 +479,13 @@ Transcript:
         # Merge results
         merged["summary"] = " ".join(summaries)
         merged["topics"] = list(all_topics)
+        # For theme, use the most common theme from all chunks
+        if themes:
+            non_empty_themes = [t for t in themes if t]
+            if non_empty_themes:
+                merged["theme"] = max(set(non_empty_themes), key=non_empty_themes.count)
+            else:
+                merged["theme"] = ""
         merged["locations"] = list(all_locations)
         merged["people"] = list(all_people)
         merged["events"] = list(all_events)
