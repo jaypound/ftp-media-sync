@@ -4,7 +4,7 @@
 /* Admin Panel */
 .admin-panel {
     padding: 1.5rem;
-    background-color: var(--panel-bg, #f5f6fa);
+    background-color: var(--background-color);
     min-height: calc(100vh - 60px);
 }
 
@@ -18,11 +18,11 @@
 
 /* Admin Card */
 .admin-card {
-    background-color: var(--card-bg, #fff);
-    border: 1px solid var(--border-color, #e0e0e0);
+    background-color: var(--card-background);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow);
     transition: all 0.3s ease;
 }
 
@@ -32,7 +32,7 @@
 
 .admin-card h3 {
     margin: 0 0 1.5rem 0;
-    color: var(--text-primary, #333);
+    color: var(--text-primary);
     font-size: 1.25rem;
     display: flex;
     align-items: center;
@@ -41,20 +41,22 @@
 
 /* Admin Buttons */
 .admin-buttons {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
 }
 
-.admin-buttons button {
+.admin-buttons button,
+.admin-buttons .button {
     width: 100%;
     padding: 0.75rem 1rem;
     min-height: 48px;
+    margin-bottom: 0;
 }
 
 /* Status Info */
 .admin-status-info {
-    background-color: var(--status-bg, #f8f9fa);
+    background-color: #f8f9fa;
     border-radius: 8px;
     padding: 1rem;
 }
@@ -62,14 +64,14 @@
 .admin-status-info p {
     margin: 0.5rem 0;
     font-size: 0.875rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
 .admin-status-info strong {
-    color: var(--text-primary, #333);
+    color: var(--text-primary);
     font-weight: 600;
 }
 
@@ -89,42 +91,42 @@
 }
 
 .admin-status-indicator.online {
-    background-color: var(--success-light, #e8f5e9);
-    color: var(--success-dark, #2e7d32);
+    background-color: #e8f5e9;
+    color: #2e7d32;
 }
 
 .admin-status-indicator.offline {
-    background-color: var(--error-light, #ffebee);
-    color: var(--error-dark, #c62828);
+    background-color: #ffebee;
+    color: #c62828;
 }
 
 .admin-status-indicator.checking {
-    background-color: var(--warning-light, #fff3e0);
-    color: var(--warning-dark, #f57c00);
+    background-color: #fff3e0;
+    color: #f57c00;
 }
 
 /* Configuration Card */
 .admin-config-card {
-    border: 2px solid var(--primary-color, #2196f3);
+    border: 2px solid var(--primary-color);
 }
 
 .admin-config-card h3 {
-    color: var(--primary-color, #2196f3);
+    color: var(--primary-color);
 }
 
 /* Database Card */
 .admin-database-card {
-    border: 2px solid var(--danger-color, #f44336);
+    border: 2px solid var(--danger-color);
 }
 
 .admin-database-card h3 {
-    color: var(--danger-color, #f44336);
+    color: var(--danger-color);
 }
 
 /* Warning Text */
 .admin-warning {
-    background-color: var(--warning-bg, #fff3e0);
-    border: 1px solid var(--warning-border, #ffb74d);
+    background-color: var(--warning-background);
+    border: 1px solid #ffb74d;
     border-radius: 6px;
     padding: 0.75rem 1rem;
     margin-top: 1rem;
@@ -132,7 +134,7 @@
 
 .admin-warning p {
     margin: 0;
-    color: var(--warning-color, #f57c00);
+    color: var(--warning-color);
     font-size: 0.813rem;
 }
 
@@ -149,8 +151,8 @@
 
 /* File Info */
 .admin-file-info {
-    background-color: var(--info-bg, #e3f2fd);
-    border: 1px solid var(--info-border, #90caf9);
+    background-color: var(--info-background);
+    border: 1px solid #90caf9;
     border-radius: 6px;
     padding: 1rem;
     margin-top: 1rem;
@@ -158,20 +160,20 @@
 
 .admin-file-info h4 {
     margin: 0 0 0.5rem 0;
-    color: var(--info-color, #1565c0);
+    color: var(--info-color);
     font-size: 0.875rem;
 }
 
 .admin-file-info p {
     margin: 0.25rem 0;
     font-size: 0.813rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
 }
 
 /* Log Viewer */
 .admin-log-viewer {
-    background-color: var(--code-bg, #1e1e1e);
-    color: var(--code-color, #d4d4d4);
+    background-color: #1e1e1e;
+    color: #d4d4d4;
     border-radius: 6px;
     padding: 1rem;
     margin-top: 1rem;
@@ -182,43 +184,45 @@
     white-space: pre-wrap;
 }
 
-/* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-    .admin-panel {
-        background-color: #0a0a0a;
-    }
-    
-    .admin-card {
-        background-color: #1a1a1a;
-        border-color: #333;
-    }
-    
-    .admin-status-info {
-        background-color: #222;
-    }
-    
-    .admin-config-card {
-        border-color: #1976d2;
-    }
-    
-    .admin-database-card {
-        border-color: #d32f2f;
-    }
-    
-    .admin-warning {
-        background-color: rgba(255, 152, 0, 0.1);
-        border-color: #f57c00;
-    }
-    
-    .admin-file-info {
-        background-color: rgba(33, 150, 243, 0.1);
-        border-color: #1976d2;
-    }
-    
-    .admin-log-viewer {
-        background-color: #0d0d0d;
-        border: 1px solid #333;
-    }
+/* Dark Mode Support - Class-based */
+body.dark-mode .admin-panel {
+    background-color: var(--background-color);
+}
+
+body.dark-mode .admin-card {
+    background-color: var(--card-background);
+    border-color: var(--border-color);
+}
+
+body.dark-mode .admin-card:hover {
+    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.05);
+}
+
+body.dark-mode .admin-status-info {
+    background-color: #222;
+}
+
+body.dark-mode .admin-config-card {
+    border-color: var(--primary-color);
+}
+
+body.dark-mode .admin-database-card {
+    border-color: var(--danger-color);
+}
+
+body.dark-mode .admin-warning {
+    background-color: var(--warning-background);
+    border-color: #f57c00;
+}
+
+body.dark-mode .admin-file-info {
+    background-color: var(--info-background);
+    border-color: #1976d2;
+}
+
+body.dark-mode .admin-log-viewer {
+    background-color: #0d0d0d;
+    border: 1px solid #333;
 }
 
 /* Responsive Design */

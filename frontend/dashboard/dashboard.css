@@ -4,7 +4,7 @@
 /* Panel Container */
 .dashboard-panel {
     padding: 1.5rem;
-    background-color: var(--panel-bg, #f5f6fa);
+    background-color: var(--background-color);
     min-height: calc(100vh - 60px);
 }
 
@@ -14,7 +14,7 @@
 }
 
 .dashboard-panel-header h2 {
-    color: var(--text-primary, #2c3e50);
+    color: var(--text-primary);
     font-size: 1.75rem;
     margin: 0 0 0.5rem 0;
     display: flex;
@@ -23,7 +23,7 @@
 }
 
 .dashboard-panel-header p {
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
     font-size: 1rem;
     margin: 0;
 }
@@ -38,15 +38,15 @@
 
 /* Stat Card */
 .dashboard-stat-card {
-    background-color: var(--card-bg, #fff);
-    border: 1px solid var(--border-color, #e0e0e0);
+    background-color: var(--card-background);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 1.5rem;
     display: flex;
     align-items: center;
     gap: 1.5rem;
     transition: all 0.3s ease;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow);
 }
 
 .dashboard-stat-card:hover {
@@ -89,7 +89,7 @@
 .dashboard-stat-content h3 {
     margin: 0 0 0.25rem 0;
     font-size: 0.875rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -98,22 +98,22 @@
     margin: 0;
     font-size: 1.5rem;
     font-weight: 600;
-    color: var(--text-primary, #333);
+    color: var(--text-primary);
 }
 
 /* Action Card */
 .dashboard-card {
-    background-color: var(--card-bg, #fff);
-    border: 1px solid var(--border-color, #e0e0e0);
+    background-color: var(--card-background);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 1.5rem;
     margin-bottom: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow);
 }
 
 .dashboard-card h3 {
     margin: 0 0 1rem 0;
-    color: var(--text-primary, #333);
+    color: var(--text-primary);
     font-size: 1.25rem;
     display: flex;
     align-items: center;
@@ -137,20 +137,20 @@
 .dashboard-progress-container {
     margin-top: 1.5rem;
     padding: 1rem;
-    background-color: var(--progress-bg, #f8f9fa);
+    background-color: #f8f9fa;
     border-radius: 8px;
-    border: 1px solid var(--border-color, #e0e0e0);
+    border: 1px solid var(--border-color);
 }
 
 .dashboard-progress-text {
     font-size: 0.875rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
     margin-bottom: 0.5rem;
 }
 
 .dashboard-progress-bar {
     height: 24px;
-    background-color: var(--progress-track, #e0e0e0);
+    background-color: #e0e0e0;
     border-radius: 12px;
     overflow: hidden;
     margin-bottom: 0.5rem;
@@ -171,14 +171,14 @@
 
 .dashboard-progress-stats {
     font-size: 0.875rem;
-    color: var(--text-primary, #333);
+    color: var(--text-primary);
     text-align: center;
 }
 
 /* Analysis Monitor */
 .dashboard-analysis-monitor {
-    background-color: var(--monitor-bg, #f0f4f8);
-    border: 1px solid var(--border-color, #e0e0e0);
+    background-color: #f0f4f8;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 1rem;
     margin-top: 1rem;
@@ -193,7 +193,7 @@
 
 .dashboard-monitor-header h4 {
     margin: 0;
-    color: var(--text-primary, #333);
+    color: var(--text-primary);
     font-size: 1rem;
     display: flex;
     align-items: center;
@@ -208,42 +208,77 @@
 
 .dashboard-monitor-stats span {
     font-size: 0.875rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
     padding: 0.5rem;
-    background-color: var(--card-bg, #fff);
+    background-color: var(--card-background);
     border-radius: 6px;
     text-align: center;
 }
 
-/* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-    .dashboard-panel {
-        background-color: #0a0a0a;
-    }
-    
-    .dashboard-stat-card,
-    .dashboard-card {
-        background-color: #1a1a1a;
-        border-color: #333;
-    }
-    
-    .dashboard-stat-card:hover {
-        box-shadow: 0 4px 12px rgba(255, 255, 255, 0.05);
-    }
-    
-    .dashboard-progress-container {
-        background-color: #222;
-        border-color: #333;
-    }
-    
-    .dashboard-analysis-monitor {
-        background-color: #1a1a1a;
-        border-color: #333;
-    }
-    
-    .dashboard-monitor-stats span {
-        background-color: #222;
-    }
+/* Dark Mode Support - Class-based */
+body.dark-mode .dashboard-panel {
+    background-color: var(--background-color);
+}
+
+body.dark-mode .dashboard-panel-header h2 {
+    color: var(--text-primary);
+}
+
+body.dark-mode .dashboard-panel-header p {
+    color: var(--text-secondary);
+}
+
+body.dark-mode .dashboard-stat-card,
+body.dark-mode .dashboard-card {
+    background-color: var(--card-background);
+    border-color: var(--border-color);
+}
+
+body.dark-mode .dashboard-stat-card:hover {
+    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.05);
+}
+
+body.dark-mode .dashboard-stat-content h3 {
+    color: var(--text-secondary);
+}
+
+body.dark-mode .dashboard-stat-content p {
+    color: var(--text-primary);
+}
+
+body.dark-mode .dashboard-card h3 {
+    color: var(--text-primary);
+}
+
+body.dark-mode .dashboard-progress-container {
+    background-color: #222;
+    border-color: var(--border-color);
+}
+
+body.dark-mode .dashboard-progress-text {
+    color: var(--text-secondary);
+}
+
+body.dark-mode .dashboard-progress-bar {
+    background-color: #444;
+}
+
+body.dark-mode .dashboard-progress-stats {
+    color: var(--text-primary);
+}
+
+body.dark-mode .dashboard-analysis-monitor {
+    background-color: #1a1a1a;
+    border-color: var(--border-color);
+}
+
+body.dark-mode .dashboard-monitor-header h4 {
+    color: var(--text-primary);
+}
+
+body.dark-mode .dashboard-monitor-stats span {
+    background-color: #222;
+    color: var(--text-secondary);
 }
 
 /* Scanned Files Container - Side-by-side layout */
@@ -255,15 +290,15 @@
 }
 
 .dashboard-scanned-files-section {
-    background-color: var(--section-bg, #f8f9fa);
-    border: 1px solid var(--border-color, #e0e0e0);
+    background-color: #f8f9fa;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 1.5rem;
 }
 
 .dashboard-scanned-files-section h4 {
     margin: 0 0 1rem 0;
-    color: var(--primary-color, #2196f3);
+    color: var(--primary-color);
     font-size: 1.125rem;
     display: flex;
     align-items: center;
@@ -272,7 +307,7 @@
 
 .dashboard-file-count {
     font-size: 0.875rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
     margin-bottom: 1rem;
     font-weight: 500;
 }
@@ -286,8 +321,8 @@
 }
 
 .dashboard-comparison-section {
-    background-color: var(--section-bg, #f8f9fa);
-    border: 1px solid var(--border-color, #e0e0e0);
+    background-color: #f8f9fa;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 1.5rem;
 }
@@ -316,7 +351,7 @@
 
 .dashboard-scanned-files-section .file-size {
     font-size: 0.75rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
 }
 
 /* Hide file paths in scanned files */
@@ -341,7 +376,7 @@
 /* Analyzed status styling */
 .dashboard-scanned-files-section .analyzed-status {
     font-size: 0.75rem;
-    color: var(--success-color, #28a745);
+    color: var(--success-color);
     margin-right: 0.5rem;
 }
 
@@ -369,7 +404,7 @@
 
 .dashboard-comparison-section .file-size {
     font-size: 0.75rem;
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary);
 }
 
 /* Hide file paths in comparison results */
@@ -393,57 +428,84 @@
     padding: 0.25rem 0.75rem;
 }
 
-/* Dark Mode Support for new styles */
-@media (prefers-color-scheme: dark) {
-    .dashboard-scanned-files-section,
-    .dashboard-comparison-section {
-        background-color: #1a1a1a;
-        border-color: #333;
-    }
-    
-    /* Dark mode for analyzed status */
-    .dashboard-scanned-files-section .analyzed-status {
-        color: #4ade80;
-    }
-    
-    /* Dark mode for buttons */
-    .dashboard-scanned-files-section .analyze-btn,
-    .dashboard-comparison-section .button,
-    .dashboard-comparison-section .add-to-sync-btn {
-        background-color: #2563eb;
-        color: #fff;
-        border-color: #1d4ed8;
-    }
-    
-    .dashboard-scanned-files-section .analyze-btn:hover,
-    .dashboard-comparison-section .button:hover,
-    .dashboard-comparison-section .add-to-sync-btn:hover {
-        background-color: #1d4ed8;
-        border-color: #1e40af;
-    }
-    
-    /* Analyzed/reanalyze button in dark mode */
-    .dashboard-scanned-files-section .analyze-btn.analyzed {
-        background-color: #10b981;
-        border-color: #059669;
-    }
-    
-    .dashboard-scanned-files-section .analyze-btn.analyzed:hover {
-        background-color: #059669;
-        border-color: #047857;
-    }
-    
-    /* Delete button in dark mode */
-    .dashboard-comparison-section .delete-btn {
-        background-color: #dc2626;
-        color: #fff;
-        border-color: #b91c1c;
-    }
-    
-    .dashboard-comparison-section .delete-btn:hover {
-        background-color: #b91c1c;
-        border-color: #991b1b;
-    }
+/* Dark Mode Support for scanned files and comparison sections */
+body.dark-mode .dashboard-scanned-files-section,
+body.dark-mode .dashboard-comparison-section {
+    background-color: var(--card-background);
+    border-color: var(--border-color);
+}
+
+body.dark-mode .dashboard-scanned-files-section h4,
+body.dark-mode .dashboard-comparison-section h4 {
+    color: var(--primary-color);
+}
+
+body.dark-mode .dashboard-file-count {
+    color: var(--text-secondary);
+}
+
+body.dark-mode .dashboard-scanned-files-section .file-name,
+body.dark-mode .dashboard-comparison-section .file-name {
+    color: var(--text-primary);
+}
+
+body.dark-mode .dashboard-scanned-files-section .file-size,
+body.dark-mode .dashboard-comparison-section .file-size {
+    color: var(--text-secondary);
+}
+
+/* Dark mode for analyzed status */
+body.dark-mode .dashboard-scanned-files-section .analyzed-status {
+    color: #4ade80;
+}
+
+/* Dark mode for engagement score */
+body.dark-mode .engagement-score {
+    background-color: var(--info-background);
+    color: var(--primary-color);
+}
+
+body.dark-mode .engagement-score i {
+    color: var(--warning-color);
+}
+
+/* Dark mode for buttons */
+body.dark-mode .dashboard-scanned-files-section .analyze-btn,
+body.dark-mode .dashboard-comparison-section .button,
+body.dark-mode .dashboard-comparison-section .add-to-sync-btn {
+    background-color: var(--primary-color);
+    color: #fff;
+    border-color: var(--primary-color);
+}
+
+body.dark-mode .dashboard-scanned-files-section .analyze-btn:hover,
+body.dark-mode .dashboard-comparison-section .button:hover,
+body.dark-mode .dashboard-comparison-section .add-to-sync-btn:hover {
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+/* Analyzed/reanalyze button in dark mode */
+body.dark-mode .dashboard-scanned-files-section .analyze-btn.analyzed {
+    background-color: var(--success-color);
+    border-color: var(--success-color);
+}
+
+body.dark-mode .dashboard-scanned-files-section .analyze-btn.analyzed:hover {
+    background-color: #45a049;
+    border-color: #45a049;
+}
+
+/* Delete button in dark mode */
+body.dark-mode .dashboard-comparison-section .delete-btn {
+    background-color: var(--danger-color);
+    color: #fff;
+    border-color: var(--danger-color);
+}
+
+body.dark-mode .dashboard-comparison-section .delete-btn:hover {
+    background-color: #da190b;
+    border-color: #da190b;
 }
 
 /* Responsive Design */

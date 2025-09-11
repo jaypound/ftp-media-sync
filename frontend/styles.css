@@ -1696,7 +1696,7 @@ body.dark-mode .status {
 
 .admin-card h3 {
     margin-bottom: 1rem;
-    color: var(--text-color);
+    color: var(--text-primary);
     font-size: 1.1rem;
 }
 
@@ -1722,7 +1722,7 @@ body.dark-mode .status {
 
 .admin-card p {
     margin: 0.5rem 0;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 .admin-card .warning {
