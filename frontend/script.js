@@ -4709,7 +4709,8 @@ function displayAvailableContent() {
     
     availableContent.forEach(content => {
         const durationTimecode = formatDurationTimecode(content.file_duration || 0);
-        const durationCategory = getDurationCategory(content.file_duration);
+        // Use duration_category from database instead of calculating it
+        const durationCategory = content.duration_category || getDurationCategory(content.file_duration);
         const engagementScore = content.engagement_score || 'N/A';
         
         // Format expiration date
@@ -4764,7 +4765,7 @@ function displayAvailableContent() {
                     <option value="OTHER" ${content.content_type && content.content_type.toUpperCase() === 'OTHER' ? 'selected' : ''}>OTHER</option>
                 </select>
                 <span class="content-duration">${durationTimecode}</span>
-                <span class="content-category">${durationCategory.toUpperCase()}</span>
+                <span class="content-category">${durationCategory ? durationCategory.toUpperCase() : 'UNKNOWN'}</span>
                 <span class="content-score">${engagementScore}%</span>
                 <span class="content-expiration ${expirationClass}">${expirationDisplay}</span>
                 <div class="content-actions">
@@ -7801,8 +7802,8 @@ function sortContent(field) {
                 bVal = parseFloat(b.file_duration) || 0;
                 break;
             case 'category':
-                aVal = getDurationCategory(a.file_duration);
-                bVal = getDurationCategory(b.file_duration);
+                aVal = a.duration_category || getDurationCategory(a.file_duration);
+                bVal = b.duration_category || getDurationCategory(b.file_duration);
                 break;
             case 'engagement':
                 aVal = parseFloat(a.engagement_score) || 0;

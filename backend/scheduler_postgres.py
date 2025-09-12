@@ -156,6 +156,7 @@ class PostgreSQLScheduler:
                     a.duration_seconds,
                     a.duration_category,
                     a.engagement_score,
+                    a.theme,
                     i.id as instance_id,
                     i.file_name,
                     i.file_path,
@@ -217,20 +218,53 @@ class PostgreSQLScheduler:
                 query += " AND a.id NOT IN %(exclude_ids)s"
                 params['exclude_ids'] = tuple(exclude_ids)
             
-            # Order by prioritizing newer content while respecting replay delays
+            # Order by multi-factor scoring system
             query += """
                 ORDER BY 
-                    -- First priority: Never scheduled content, newest first
-                    CASE WHEN sm.last_scheduled_date IS NULL THEN 0 ELSE 1 END,
-                    -- For never scheduled: newest encoded_date first
-                    CASE WHEN sm.last_scheduled_date IS NULL THEN i.encoded_date END DESC NULLS LAST,
-                    -- For scheduled content: least recently scheduled first
+                    -- Multi-factor content score calculation
+                    (
+                        -- Freshness Score (35% weight)
+                        CASE 
+                            WHEN i.encoded_date IS NULL THEN 0
+                            WHEN i.encoded_date >= CURRENT_DATE THEN 100
+                            WHEN i.encoded_date >= CURRENT_DATE - INTERVAL '1 day' THEN 90
+                            WHEN i.encoded_date >= CURRENT_DATE - INTERVAL '3 days' THEN 80
+                            WHEN i.encoded_date >= CURRENT_DATE - INTERVAL '7 days' THEN 60
+                            WHEN i.encoded_date >= CURRENT_DATE - INTERVAL '14 days' THEN 40
+                            WHEN i.encoded_date >= CURRENT_DATE - INTERVAL '30 days' THEN 20
+                            ELSE 10
+                        END * 0.35
+                        
+                        -- Engagement Score (25% weight)
+                        + COALESCE(a.engagement_score, 50) * 0.25
+                        
+                        -- Replay Efficiency (20% weight) - inverse of recent plays
+                        + CASE
+                            WHEN sm.total_airings IS NULL OR sm.total_airings = 0 THEN 100
+                            WHEN sm.total_airings <= 2 THEN 80
+                            WHEN sm.total_airings <= 5 THEN 60
+                            WHEN sm.total_airings <= 10 THEN 40
+                            WHEN sm.total_airings <= 20 THEN 20
+                            ELSE 10
+                        END * 0.20
+                        
+                        -- Time Since Last Play Bonus (20% weight)
+                        + CASE
+                            WHEN sm.last_scheduled_date IS NULL THEN 100
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 24 THEN 100
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 12 THEN 80
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 6 THEN 60
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 3 THEN 40
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 1 THEN 20
+                            ELSE 0
+                        END * 0.20
+                    ) DESC,
+                    
+                    -- Tiebreakers
                     sm.last_scheduled_date ASC NULLS FIRST,
-                    -- Then by fewest airings
                     sm.total_airings ASC NULLS FIRST,
-                    -- Finally by engagement score
-                    a.engagement_score DESC NULLS LAST
-                LIMIT 50
+                    i.encoded_date DESC NULLS LAST
+                LIMIT 100
             """
             
             cursor.execute(query, params)
@@ -305,6 +339,13 @@ class PostgreSQLScheduler:
             # to update their last_scheduled_date in real-time
             scheduled_updates = {}
             
+            # Track the theme of the last scheduled item to avoid back-to-back same themes
+            last_scheduled_theme = None
+            last_scheduled_category = None
+            
+            # Track recent plays for fatigue prevention (asset_id -> list of scheduled times)
+            recent_plays = {}
+            
             while total_duration < self.target_duration_seconds:
                 # Get next duration category
                 duration_category = self._get_next_duration_category()
@@ -343,8 +384,85 @@ class PostgreSQLScheduler:
                         }
                     continue
                 
-                # Select the best content (first in the list due to our ordering)
-                content = available_content[0]
+                # Select the best content with multi-factor scoring and fatigue prevention
+                content = None
+                best_score = -1
+                
+                # Always check theme conflicts for IDs and spots regardless of content type
+                # These short durations are typically PSAs/announcements that shouldn't repeat themes
+                
+                # Score and rank all available content
+                for candidate in available_content:
+                    asset_id = candidate['asset_id']
+                    current_category = candidate.get('duration_category', '')
+                    current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
+                    
+                    # Start with base score from SQL query (already calculated)
+                    score = 100  # Base score
+                    
+                    # Apply fatigue penalty based on recent plays within this schedule
+                    if asset_id in recent_plays:
+                        plays = recent_plays[asset_id]
+                        for play_time in plays:
+                            time_gap = (total_duration - play_time) / 3600  # Hours since last play
+                            
+                            if time_gap < 1:
+                                score -= 100  # Heavy penalty for content played within 1 hour
+                            elif time_gap < 2:
+                                score -= 50   # Medium penalty for 1-2 hours
+                            elif time_gap < 4:
+                                score -= 25   # Light penalty for 2-4 hours
+                            elif time_gap < 6:
+                                score -= 10   # Very light penalty for 4-6 hours
+                        
+                        # Additional penalty for multiple plays
+                        if len(plays) >= 3:
+                            score -= 50 * (len(plays) - 2)  # Heavy penalty for 3+ plays
+                    
+                    # Special handling for IDs - stronger rotation requirements
+                    if current_category == 'id':
+                        if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
+                            last_play = recent_plays[asset_id][-1]
+                            time_gap = (total_duration - last_play) / 3600
+                            if time_gap < 2:
+                                score -= 300  # Very heavy penalty for IDs within 2 hours
+                        
+                        # Bonus for IDs not recently played
+                        if asset_id not in recent_plays:
+                            score += 50
+                    
+                    # Theme conflict penalty for IDs and spots (regardless of content type)
+                    # These short-form content should never have the same theme back-to-back
+                    if (last_scheduled_category in ['id', 'spots'] and 
+                        current_category in ['id', 'spots'] and
+                        current_theme and last_scheduled_theme and
+                        current_theme.lower() == last_scheduled_theme.lower()):
+                        score -= 200  # Heavy penalty for same theme
+                        logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
+                    
+                    # Track best scoring content
+                    if score > best_score:
+                        best_score = score
+                        content = candidate
+                
+                # If no good content found (all have very negative scores), use the first available
+                if not content and available_content:
+                    content = available_content[0]
+                    logger.warning(f"All content has poor scores, using first available")
+                
+                if not content:
+                    # This shouldn't happen if available_content has items
+                    consecutive_errors += 1
+                    total_errors += 1
+                    continue
+                
+                # Log selected content details
+                if content:
+                    play_count = len(recent_plays.get(content['asset_id'], []))
+                    logger.debug(f"Selected: {content.get('content_title', 'Unknown')} "
+                               f"(ID: {content['asset_id']}, Category: {content.get('duration_category')}, "
+                               f"Theme: {content.get('theme', 'None')}, Plays: {play_count}, Score: {best_score})")
+                
                 consecutive_errors = 0  # Reset consecutive error counter
                 
                 # Get delay configuration for this content's duration category
@@ -425,6 +543,11 @@ class PostgreSQLScheduler:
                     scheduled_asset_times[content['asset_id']] = []
                 scheduled_asset_times[content['asset_id']].append(total_duration)
                 
+                # Track recent plays for fatigue prevention
+                if content['asset_id'] not in recent_plays:
+                    recent_plays[content['asset_id']] = []
+                recent_plays[content['asset_id']].append(total_duration)
+                
                 # Update totals
                 total_duration += content_duration
                 
@@ -436,6 +559,10 @@ class PostgreSQLScheduler:
                 
                 # Advance rotation after successfully scheduling content
                 self._advance_rotation()
+                
+                # Update theme tracking for next iteration
+                last_scheduled_theme = content.get('theme', '').strip() if content.get('theme') else None
+                last_scheduled_category = content.get('duration_category', '')
                 
                 # Calculate actual air time for this item
                 # The item starts at (total_duration - content_duration) seconds from schedule start
@@ -1463,6 +1590,13 @@ class PostgreSQLScheduler:
             # Key: asset_id, Value: list of scheduled timestamps (in seconds from start)
             scheduled_asset_times = {}
             
+            # Track the theme of the last scheduled item to avoid back-to-back same themes
+            last_scheduled_theme = None
+            last_scheduled_category = None
+            
+            # Track recent plays for fatigue prevention (asset_id -> list of scheduled times)
+            recent_plays = {}
+            
             # Generate content for each day
             for day_offset in range(7):
                 current_day = start_date_obj + timedelta(days=day_offset)
@@ -1517,8 +1651,85 @@ class PostgreSQLScheduler:
                             }
                         continue
                     
-                    # Select the best content
-                    content = available_content[0]
+                    # Select the best content with multi-factor scoring and fatigue prevention
+                    content = None
+                    best_score = -1
+                    
+                    # Always check theme conflicts for IDs and spots regardless of content type
+                    # These short durations are typically PSAs/announcements that shouldn't repeat themes
+                    
+                    # Score and rank all available content
+                    for candidate in available_content:
+                        asset_id = candidate['asset_id']
+                        current_category = candidate.get('duration_category', '')
+                        current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
+                        
+                        # Start with base score from SQL query (already calculated)
+                        score = 100  # Base score
+                        
+                        # Apply fatigue penalty based on recent plays within this schedule
+                        if asset_id in recent_plays:
+                            plays = recent_plays[asset_id]
+                            for play_time in plays:
+                                time_gap = (total_duration - play_time) / 3600  # Hours since last play
+                                
+                                if time_gap < 1:
+                                    score -= 100  # Heavy penalty for content played within 1 hour
+                                elif time_gap < 2:
+                                    score -= 50   # Medium penalty for 1-2 hours
+                                elif time_gap < 4:
+                                    score -= 25   # Light penalty for 2-4 hours
+                                elif time_gap < 6:
+                                    score -= 10   # Very light penalty for 4-6 hours
+                            
+                            # Additional penalty for multiple plays
+                            if len(plays) >= 3:
+                                score -= 50 * (len(plays) - 2)  # Heavy penalty for 3+ plays
+                        
+                        # Special handling for IDs - stronger rotation requirements
+                        if current_category == 'id':
+                            if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
+                                last_play = recent_plays[asset_id][-1]
+                                time_gap = (total_duration - last_play) / 3600
+                                if time_gap < 2:
+                                    score -= 300  # Very heavy penalty for IDs within 2 hours
+                            
+                            # Bonus for IDs not recently played
+                            if asset_id not in recent_plays:
+                                score += 50
+                        
+                        # Theme conflict penalty for IDs and spots (regardless of content type)
+                        # These short-form content should never have the same theme back-to-back
+                        if (last_scheduled_category in ['id', 'spots'] and 
+                            current_category in ['id', 'spots'] and
+                            current_theme and last_scheduled_theme and
+                            current_theme.lower() == last_scheduled_theme.lower()):
+                            score -= 200  # Heavy penalty for same theme
+                            logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
+                        
+                        # Track best scoring content
+                        if score > best_score:
+                            best_score = score
+                            content = candidate
+                    
+                    # If no good content found (all have very negative scores), use the first available
+                    if not content and available_content:
+                        content = available_content[0]
+                        logger.warning(f"All content has poor scores, using first available")
+                    
+                    if not content:
+                        # This shouldn't happen if available_content has items
+                        consecutive_errors += 1
+                        total_errors += 1
+                        continue
+                    
+                    # Log selected content details
+                    if content:
+                        play_count = len(recent_plays.get(content['asset_id'], []))
+                        logger.debug(f"Selected: {content.get('content_title', 'Unknown')} "
+                                   f"(ID: {content['asset_id']}, Category: {content.get('duration_category')}, "
+                                   f"Theme: {content.get('theme', 'None')}, Plays: {play_count}, Score: {best_score})")
+                    
                     consecutive_errors = 0  # Reset consecutive error counter
                     
                     # Check if this content would cross into the next day
@@ -1562,6 +1773,11 @@ class PostgreSQLScheduler:
                         scheduled_asset_times[content['asset_id']] = []
                     scheduled_asset_times[content['asset_id']].append(total_duration)
                     
+                    # Track recent plays for fatigue prevention
+                    if content['asset_id'] not in recent_plays:
+                        recent_plays[content['asset_id']] = []
+                    recent_plays[content['asset_id']].append(total_duration)
+                    
                     # Log delay tracking info
                     if len(scheduled_asset_times[content['asset_id']]) > 1:
                         prev_time = scheduled_asset_times[content['asset_id']][-2]
@@ -1588,6 +1804,10 @@ class PostgreSQLScheduler:
                     
                     # Advance rotation after successfully scheduling content
                     self._advance_rotation()
+                    
+                    # Update theme tracking for next iteration
+                    last_scheduled_theme = content.get('theme', '').strip() if content.get('theme') else None
+                    last_scheduled_category = content.get('duration_category', '')
                     
                     # Calculate actual air time for this item
                     # The item starts at (total_duration - content_duration) seconds from schedule start
@@ -1689,6 +1909,13 @@ class PostgreSQLScheduler:
             consecutive_errors = 0
             total_errors = 0
             
+            # Track the theme of the last scheduled item to avoid back-to-back same themes
+            last_scheduled_theme = None
+            last_scheduled_category = None
+            
+            # Track recent plays for fatigue prevention (asset_id -> list of scheduled times)
+            recent_plays = {}
+            
             # Generate content for each day of the month
             for day in range(1, days_in_month + 1):
                 current_date = datetime(year, month, day)
@@ -1743,8 +1970,38 @@ class PostgreSQLScheduler:
                             }
                         continue
                     
-                    # Select the best content
-                    content = available_content[0]
+                    # Select the best content, avoiding same theme back-to-back for PSAs, spots, and IDs
+                    content = None
+                    
+                    # Try to find content that doesn't have the same theme for IDs and spots
+                    for candidate in available_content:
+                        current_category = candidate.get('duration_category', '')
+                        current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
+                        
+                        # Theme conflict check for IDs and spots (regardless of content type)
+                        if (last_scheduled_category in ['id', 'spots'] and 
+                            current_category in ['id', 'spots'] and
+                            current_theme and last_scheduled_theme and
+                            current_theme.lower() == last_scheduled_theme.lower()):
+                            logger.info(f"Skipping content with same theme '{current_theme}' as previous item "
+                                      f"({last_scheduled_category} -> {current_category})")
+                            continue
+                        
+                        # This content is acceptable
+                        content = candidate
+                        break
+                    
+                    # If no content found without theme conflict, use the first available
+                    if not content and available_content:
+                        content = available_content[0]
+                        logger.warning(f"No content available without theme conflict, using first available")
+                    
+                    if not content:
+                        # This shouldn't happen if available_content has items
+                        consecutive_errors += 1
+                        total_errors += 1
+                        continue
+                    
                     consecutive_errors = 0
                     
                     # Check if this content would cross into the next day
@@ -1787,12 +2044,21 @@ class PostgreSQLScheduler:
                     scheduled_asset_ids.append(content['asset_id'])
                     day_scheduled_asset_ids.append(content['asset_id'])
                     
+                    # Track recent plays for fatigue prevention
+                    if content['asset_id'] not in recent_plays:
+                        recent_plays[content['asset_id']] = []
+                    recent_plays[content['asset_id']].append(total_duration)
+                    
                     # Update totals
                     total_duration += content_duration
                     sequence_number += 1
                     
                     # Advance rotation after successfully scheduling content
                     self._advance_rotation()
+                    
+                    # Update theme tracking for next iteration
+                    last_scheduled_theme = content.get('theme', '').strip() if content.get('theme') else None
+                    last_scheduled_category = content.get('duration_category', '')
                     
                     # Calculate actual air time for this item
                     # The item starts at (total_duration - content_duration) seconds from schedule start

@@ -1580,9 +1580,9 @@ def generate_report():
     try:
         data = request.json
         report_type = data.get('report_type')
+        schedule_id = data.get('schedule_id')
         
         if report_type == 'schedule-analysis':
-            schedule_id = data.get('schedule_id')
             if not schedule_id:
                 return jsonify({'success': False, 'message': 'Schedule ID required'})
             
@@ -1596,6 +1596,22 @@ def generate_report():
                 'success': True,
                 'data': report_data
             })
+        elif report_type in ['content-replay-distribution', 'replay-heatmap', 
+                             'replay-frequency-boxplot', 'content-freshness',
+                             'pareto-chart', 'replay-gaps', 'comprehensive-analysis']:
+            if not schedule_id:
+                return jsonify({'success': False, 'message': 'Schedule ID required'})
+            
+            # Import here to avoid circular imports
+            from reports import ScheduleReplayAnalysisReport
+            
+            report = ScheduleReplayAnalysisReport(db_manager)
+            report_data = report.generate(schedule_id, report_type)
+            
+            return jsonify({
+                'success': True,
+                'data': report_data
+            })
         else:
             return jsonify({
                 'success': False,
@@ -1603,7 +1619,7 @@ def generate_report():
             })
             
     except Exception as e:
-        logger.error(f"Error generating report: {str(e)}")
+        logger.error(f"Error generating report: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/delete-schedule-item', methods=['POST'])
