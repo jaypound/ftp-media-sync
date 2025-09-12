@@ -12656,6 +12656,20 @@ async function scanSelectedFolders() {
     isScanning = false;
 }
 
+// Merged function to scan and compare files in one operation
+async function scanAndCompareFiles() {
+    // First scan the files
+    await scanSelectedFolders();
+    
+    // If scanning was successful and we have files, compare them
+    if (sourceFiles.length > 0 || targetFiles.length > 0) {
+        // Add a small delay to ensure UI updates
+        setTimeout(() => {
+            compareFiles();
+        }, 100);
+    }
+}
+
 // Meeting Trimmer functions
 let trimSettings = {
     server: 'target',

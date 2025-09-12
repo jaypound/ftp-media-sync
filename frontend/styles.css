@@ -1038,7 +1038,14 @@ body {
 .scanned-files-summary {
     display: flex;
     gap: 2rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0;
+    align-items: center;
+}
+
+.scanned-files-summary span {
+    font-size: 0.875rem;
+    color: #666;
+    line-height: 1;
 }
 
 .summary-item {
