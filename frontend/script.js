@@ -11897,6 +11897,210 @@ async function confirmTemplateExport() {
     }
 }
 
+// Return to Automation Functions
+function showReturnToAutomationModal() {
+    const modal = document.getElementById('returnToAutomationModal');
+    modal.style.display = 'block';
+    
+    // Load project files from /mnt/main/Projects/Master
+    loadProjectFiles();
+}
+
+function closeReturnToAutomationModal() {
+    const modal = document.getElementById('returnToAutomationModal');
+    modal.style.display = 'none';
+}
+
+async function loadProjectFiles() {
+    const select = document.getElementById('projectFileSelect');
+    const selectedFileDiv = document.getElementById('selectedProjectFile');
+    const startBtn = document.getElementById('startAutomationBtn');
+    
+    select.innerHTML = '<option value="" disabled>Loading project files...</option>';
+    selectedFileDiv.textContent = '';
+    startBtn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/list-project-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: '/mnt/main/Projects/Master',
+                extension: '.prj'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.files) {
+            select.innerHTML = '';
+            
+            if (result.files.length === 0) {
+                select.innerHTML = '<option value="" disabled>No .prj files found in /mnt/main/Projects/Master</option>';
+            } else {
+                result.files.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.path;
+                    option.textContent = file.name;
+                    select.appendChild(option);
+                });
+                
+                // Add change event listener
+                select.onchange = function() {
+                    const selectedFile = select.options[select.selectedIndex];
+                    selectedFileDiv.textContent = selectedFile.textContent;
+                    startBtn.disabled = false;
+                };
+            }
+        } else {
+            select.innerHTML = '<option value="" disabled>Error loading project files</option>';
+            console.error('Failed to load project files:', result.message);
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="" disabled>Error loading project files</option>';
+        console.error('Error loading project files:', error);
+    }
+}
+
+async function startAutomation() {
+    const projectFileSelect = document.getElementById('projectFileSelect');
+    const selectedProjectFile = projectFileSelect.value;
+    
+    if (!selectedProjectFile) {
+        alert('Please select a project file');
+        return;
+    }
+    
+    // Get the current template from window.currentTemplate
+    const currentTemplate = window.currentTemplate;
+    
+    if (!currentTemplate || !currentTemplate.items) {
+        alert('No weekly template loaded. Please import weekly meetings first.');
+        return;
+    }
+    
+    const startBtn = document.getElementById('startAutomationBtn');
+    startBtn.disabled = true;
+    startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+    
+    try {
+        log('Starting automation process...', 'info');
+        
+        // Step 1: Update the weekly template with the selected project as default
+        log('Updating weekly template with default project...', 'info');
+        const updateResponse = await fetch('/api/update-template-defaults', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                template: currentTemplate,
+                defaultProject: selectedProjectFile,
+                projectName: projectFileSelect.options[projectFileSelect.selectedIndex].textContent
+            })
+        });
+        
+        const updateResult = await updateResponse.json();
+        if (!updateResult.success) {
+            throw new Error(`Failed to update template: ${updateResult.message}`);
+        }
+        
+        // Update the current template with the new defaults
+        let updatedTemplate = updateResult.template;
+        window.currentTemplate = updatedTemplate; // Update global reference
+        
+        // Step 2: Fill schedule gaps using the existing fillScheduleGaps function
+        log('Filling schedule gaps...', 'info');
+        
+        // Call the existing fillScheduleGaps function which already works
+        if (typeof fillScheduleGaps === 'function') {
+            await fillScheduleGaps();
+            
+            // Get the updated template after filling gaps
+            const filledTemplate = window.currentTemplate;
+            
+            // IMPORTANT: Preserve the defaults we set earlier
+            if (filledTemplate && updatedTemplate.defaults) {
+                filledTemplate.defaults = updatedTemplate.defaults;
+            }
+            
+            updatedTemplate = filledTemplate;
+            window.currentTemplate = updatedTemplate;
+            
+            log('Schedule gaps filled successfully', 'success');
+        } else {
+            throw new Error('Fill schedule gaps function not available');
+        }
+        
+        // Step 3: Export to both Castus servers
+        log('Exporting schedule to Castus servers...', 'info');
+        
+        // Export to both servers
+        const exportServers = ['source', 'target']; // Castus1 and Castus2
+        const exportPath = '/mnt/main/Schedules/Master';
+        
+        // Generate filename with format YYYY_MM_DD_HH_MM_weekly.sch
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = (now.getMonth() + 1).toString().padStart(2, '0');
+        const day = now.getDate().toString().padStart(2, '0');
+        const hours = now.getHours().toString().padStart(2, '0');
+        const minutes = now.getMinutes().toString().padStart(2, '0');
+        const filename = `${year}_${month}_${day}_${hours}_${minutes}_weekly.sch`;
+        
+        for (const server of exportServers) {
+            const exportResponse = await fetch('/api/export-template', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    template: updatedTemplate,
+                    export_server: server,
+                    export_path: exportPath,
+                    filename: filename,
+                    format: 'castus_weekly',
+                    items: updatedTemplate.items || []
+                })
+            });
+            
+            const exportResult = await exportResponse.json();
+            if (exportResult.success) {
+                log(`Schedule exported to ${server} server: ${exportPath}/${filename}`, 'success');
+            } else {
+                log(`Failed to export to ${server}: ${exportResult.message}`, 'error');
+            }
+        }
+        
+        log('Automation process completed successfully!', 'success');
+        alert('Automation completed!\n\nSchedule has been updated and exported to both Castus servers.');
+        
+        // Refresh the template display
+        if (updatedTemplate && updatedTemplate.items) {
+            // Use the scheduling module's display function if available
+            if (typeof schedulingDisplayTemplate === 'function') {
+                schedulingDisplayTemplate(updatedTemplate);
+            } else if (typeof displaySchedulingTemplate === 'function') {
+                displaySchedulingTemplate(updatedTemplate);
+            }
+        }
+        
+        closeReturnToAutomationModal();
+        
+    } catch (error) {
+        log(`Automation error: ${error.message}`, 'error');
+        alert(`Automation failed: ${error.message}`);
+    } finally {
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<i class="fas fa-play"></i> Start Automation';
+    }
+}
+
+// Helper function to get week number
+function getWeekNumber(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
 // Add Schedule Gap function - creates an intentional gap in the schedule
 async function addScheduleGap() {
     try {

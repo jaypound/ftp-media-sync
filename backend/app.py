@@ -2653,7 +2653,7 @@ def generate_simple_playlist_content(files):
     
     return '\n'.join(lines)
 
-def generate_castus_schedule(schedule, items, date, format_type='daily'):
+def generate_castus_schedule(schedule, items, date, format_type='daily', template=None):
     # Reset day counter for weekly schedules
     generate_castus_schedule.current_day = 0
     """Generate schedule content in Castus format"""
@@ -2688,7 +2688,11 @@ def generate_castus_schedule(schedule, items, date, format_type='daily'):
         lines.append("time slot length = 30")
         lines.append("scrolltime = 12:00 am")
         lines.append("filter script = ")
-        lines.append("global default=/mnt/main/Playlists/simple playlist")
+        # Use template defaults if available, otherwise use empty string
+        if template and 'defaults' in template and 'global_default' in template['defaults']:
+            lines.append(f"global default={template['defaults']['global_default']}")
+        else:
+            lines.append("global default=")
         lines.append("global default section=item duration=;")
         lines.append("text encoding = UTF-8")
         lines.append("schedule format version = 5.0.0.4 2021/01/15")
@@ -5496,8 +5500,8 @@ def export_template():
             'channel': 'Comcast Channel 26'
         }
         
-        # Generate Castus format
-        schedule_content = generate_castus_schedule(mock_schedule, template['items'], mock_schedule['air_date'], format_type)
+        # Generate Castus format - pass the template so it can access defaults
+        schedule_content = generate_castus_schedule(mock_schedule, template['items'], mock_schedule['air_date'], format_type, template)
         
         # Check if generate_castus_schedule returned an error (overlap detected)
         if schedule_content.startswith("ERROR:"):
@@ -8147,6 +8151,101 @@ def sync_all_castus_expirations():
         
     except Exception as e:
         error_msg = f"Sync all Castus expirations error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg}), 500
+
+
+@app.route('/api/list-project-files', methods=['POST'])
+def list_project_files():
+    """List project files from a specified directory"""
+    try:
+        data = request.json
+        path = data.get('path', '/mnt/main/Projects/Master')
+        extension = data.get('extension', '.prj')
+        
+        # Use the source FTP server to list files
+        source_config = config_manager.get_server_config('source')
+        if not source_config:
+            return jsonify({'success': False, 'message': 'Source server not configured'}), 400
+        
+        ftp = FTPManager(source_config)
+        
+        try:
+            ftp.connect()
+            files = ftp.list_files(path)
+            
+            # Filter for .prj files
+            prj_files = []
+            for file in files:
+                if file.get('name', '').endswith(extension) and not file.get('is_directory', False):
+                    prj_files.append({
+                        'name': file['name'],
+                        'path': f"{path}/{file['name']}",
+                        'size': file.get('size', 0),
+                        'modified': file.get('modified', '')
+                    })
+            
+            # Sort by name
+            prj_files.sort(key=lambda x: x['name'])
+            
+            return jsonify({
+                'success': True,
+                'files': prj_files,
+                'count': len(prj_files)
+            })
+            
+        finally:
+            ftp.disconnect()
+            
+    except Exception as e:
+        error_msg = f"Failed to list project files: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({'success': False, 'message': error_msg}), 500
+
+@app.route('/api/update-template-defaults', methods=['POST'])
+def update_template_defaults():
+    """Update weekly template with default project settings"""
+    try:
+        data = request.json
+        template = data.get('template')
+        default_project = data.get('defaultProject')
+        project_name = data.get('projectName', 'GRAPHICS_V2.prj')
+        
+        if not template:
+            return jsonify({'success': False, 'message': 'No template provided'}), 400
+            
+        if not default_project:
+            return jsonify({'success': False, 'message': 'No default project specified'}), 400
+        
+        # Create or update template defaults section
+        if 'defaults' not in template:
+            template['defaults'] = {}
+        
+        # Add weekly schedule defaults
+        template['defaults']['day_of_week'] = {}
+        template['defaults']['day'] = 0
+        template['defaults']['time_slot_length'] = 30
+        template['defaults']['scrolltime'] = '12:00 am'
+        template['defaults']['filter_script'] = ''
+        template['defaults']['global_default'] = default_project
+        template['defaults']['global_default_section'] = 'item duration=;'
+        template['defaults']['text_encoding'] = 'UTF-8'
+        template['defaults']['schedule_format_version'] = '5.0.0.4 2021/01/15'
+        
+        # Update template metadata
+        if 'metadata' not in template:
+            template['metadata'] = {}
+        template['metadata']['default_project'] = project_name
+        template['metadata']['updated_at'] = datetime.now().isoformat()
+        
+        return jsonify({
+            'success': True,
+            'template': template,
+            'message': f'Template updated with default project: {project_name}'
+        })
+        
+    except Exception as e:
+        error_msg = f"Failed to update template defaults: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg}), 500
 

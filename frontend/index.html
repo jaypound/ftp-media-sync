@@ -693,6 +693,13 @@
                                     <i class="fas fa-file-export"></i> Export Template
                                 </button>
                             </div>
+                            
+                            <!-- Third row with Return to Automation button -->
+                            <div class="template-buttons-row" style="margin-top: 15px;">
+                                <button class="button primary large" onclick="showReturnToAutomationModal()">
+                                    <i class="fas fa-sync-alt"></i> Return to Automation
+                                </button>
+                            </div>
                         </div>
                         <div id="schedulingTemplateInfo" class="scheduling-template-info" style="display: none;">
                             <p><strong>Template:</strong> <span id="schedulingTemplateName">Untitled</span></p>
@@ -1927,6 +1934,46 @@
                 </button>
                 <button class="button danger" onclick="confirmContentDeleteWithOptions()">
                     <i class="fas fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Return to Automation Modal -->
+    <div id="returnToAutomationModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-sync-alt"></i> Return to Automation</h3>
+                <button class="modal-close" onclick="closeReturnToAutomationModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="automation-info">
+                    <p><strong>This process will:</strong></p>
+                    <ol>
+                        <li>Use the current weekly template (ensure you've imported weekly meetings first)</li>
+                        <li>Select a default project file for filling schedule gaps</li>
+                        <li>Automatically fill all gaps in the schedule</li>
+                        <li>Export the schedule to both Castus servers</li>
+                    </ol>
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px;">
+                    <label for="projectFileSelect">Select Default Project File</label>
+                    <div class="file-browser-container">
+                        <select id="projectFileSelect" class="form-control" size="8" style="width: 100%; height: 200px;">
+                            <option value="" disabled>Loading project files...</option>
+                        </select>
+                    </div>
+                    <div class="file-path-display" style="margin-top: 10px;">
+                        <small>Path: /mnt/main/Projects/Master/</small>
+                        <div id="selectedProjectFile" style="margin-top: 5px; font-weight: bold; color: #0066cc;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeReturnToAutomationModal()">Cancel</button>
+                <button class="button primary" onclick="startAutomation()" id="startAutomationBtn" disabled>
+                    <i class="fas fa-play"></i> Start Automation
                 </button>
             </div>
         </div>
