@@ -12007,10 +12007,47 @@ async function startAutomation() {
         let updatedTemplate = updateResult.template;
         window.currentTemplate = updatedTemplate; // Update global reference
         
-        // Step 2: Fill schedule gaps using the existing fillScheduleGaps function
+        // Step 2: Determine schedule dates from the template
+        // For weekly templates, we need to find the Sunday start date
+        let scheduleStartDate = null;
+        
+        if (updatedTemplate.metadata && updatedTemplate.metadata.week && updatedTemplate.metadata.year) {
+            // Calculate the Sunday of the specified week
+            const year = updatedTemplate.metadata.year;
+            const weekNum = updatedTemplate.metadata.week;
+            
+            // Calculate the first Sunday of the year
+            const jan1 = new Date(year, 0, 1);
+            const dayOfWeek = jan1.getDay(); // 0 = Sunday
+            const daysToFirstSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+            const firstSunday = new Date(year, 0, 1 + daysToFirstSunday);
+            
+            // Calculate the Sunday of the target week
+            const targetSunday = new Date(firstSunday);
+            targetSunday.setDate(firstSunday.getDate() + (weekNum - 1) * 7);
+            
+            scheduleStartDate = targetSunday.toISOString().split('T')[0];
+            log(`Schedule week starts on Sunday: ${scheduleStartDate}`, 'info');
+        } else {
+            // Fall back to next Sunday if no week metadata
+            const today = new Date();
+            const daysUntilSunday = (7 - today.getDay()) % 7 || 7;
+            const nextSunday = new Date(today);
+            nextSunday.setDate(today.getDate() + daysUntilSunday);
+            scheduleStartDate = nextSunday.toISOString().split('T')[0];
+            log(`No week metadata found, using next Sunday: ${scheduleStartDate}`, 'warning');
+        }
+        
+        // Step 3: Use the existing fillScheduleGaps function which works correctly
         log('Filling schedule gaps...', 'info');
         
-        // Call the existing fillScheduleGaps function which already works
+        // Ensure the template has the schedule date
+        if (scheduleStartDate) {
+            updatedTemplate.schedule_date = scheduleStartDate;
+            window.currentTemplate.schedule_date = scheduleStartDate;
+        }
+        
+        // Call the existing fillScheduleGaps function
         if (typeof fillScheduleGaps === 'function') {
             await fillScheduleGaps();
             
@@ -12030,7 +12067,7 @@ async function startAutomation() {
             throw new Error('Fill schedule gaps function not available');
         }
         
-        // Step 3: Export to both Castus servers
+        // Step 4: Export to both Castus servers
         log('Exporting schedule to Castus servers...', 'info');
         
         // Export to both servers
