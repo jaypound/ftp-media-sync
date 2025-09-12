@@ -193,6 +193,8 @@ function schedulingDisplayScheduleDetails(schedule) {
     
     // Store the schedule globally for export function to use
     currentSchedule = schedule;
+    // Also store it on window object for cross-module access
+    window.currentSchedule = schedule;
 }
 
 // Function to show list of schedules

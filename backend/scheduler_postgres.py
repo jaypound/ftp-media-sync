@@ -953,6 +953,7 @@ class PostgreSQLScheduler:
                         a.duration_category,
                         a.engagement_score,
                         a.summary,
+                        a.theme,
                         COALESCE(i.file_name, si.metadata->>'file_name') as file_name,
                         COALESCE(i.file_path, si.metadata->>'file_path') as file_path,
                         i.encoded_date,
@@ -976,6 +977,7 @@ class PostgreSQLScheduler:
                         a.duration_category,
                         a.engagement_score,
                         a.summary,
+                        a.theme,
                         i.file_name,
                         i.file_path,
                         i.encoded_date,
@@ -1000,6 +1002,34 @@ class PostgreSQLScheduler:
                     logger.debug(f"  Item {i}: scheduled_start_time={st}, type={type(st)}, repr={repr(st)}")
                     if hasattr(st, 'microsecond'):
                         logger.debug(f"    microsecond={st.microsecond}")
+                
+                # Fetch topics for all items
+                asset_ids = [r['asset_id'] for r in results if r.get('asset_id')]
+                if asset_ids:
+                    cursor.execute("""
+                        SELECT 
+                            at.asset_id,
+                            t.tag_name
+                        FROM asset_tags at
+                        JOIN tags t ON at.tag_id = t.id
+                        JOIN tag_types tt ON t.tag_type_id = tt.id
+                        WHERE at.asset_id = ANY(%s) AND tt.type_name = 'topic'
+                    """, (asset_ids,))
+                    
+                    topics_by_asset = {}
+                    for tag_row in cursor.fetchall():
+                        asset_id = tag_row['asset_id']
+                        if asset_id not in topics_by_asset:
+                            topics_by_asset[asset_id] = []
+                        topics_by_asset[asset_id].append(tag_row['tag_name'])
+                    
+                    # Add topics to results
+                    for result in results:
+                        asset_id = result.get('asset_id')
+                        if asset_id and asset_id in topics_by_asset:
+                            result['topics'] = topics_by_asset[asset_id]
+                        else:
+                            result['topics'] = []
             
             cursor.close()
             
@@ -1032,12 +1062,22 @@ class PostgreSQLScheduler:
             if not items or old_position >= len(items) or new_position >= len(items):
                 return False
             
+            # Log items for debugging
+            logger.info(f"Fetched {len(items)} items for schedule {schedule_id}")
+            logger.debug(f"Items before reorder: {items[:5]}...")  # Log first 5 items
+            
             # Reorder the items in memory
             item_to_move = items.pop(old_position)
             items.insert(new_position, item_to_move)
             
             # Update sequence numbers for all affected items
-            for new_seq, (item_id, _) in enumerate(items):
+            for new_seq, item in enumerate(items):
+                # Handle both dict and tuple formats since cursor might be RealDictCursor
+                if isinstance(item, dict):
+                    item_id = item['id']
+                else:
+                    item_id = item[0]
+                
                 cursor.execute("""
                     UPDATE scheduled_items 
                     SET sequence_number = %s 

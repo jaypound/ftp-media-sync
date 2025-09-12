@@ -6363,8 +6363,9 @@ async function moveScheduleItem(scheduleId, index, direction) {
     displayScheduleDetails(currentSchedule);
     
     try {
-        // Send update to backend
-        const response = await fetch('/api/reorder-schedule-items', {
+        // Send update to backend - use proper API base URL
+        const apiBaseUrl = window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api';
+        const response = await fetch(`${apiBaseUrl}/reorder-schedule-items`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -6375,7 +6376,7 @@ async function moveScheduleItem(scheduleId, index, direction) {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             showNotification('Success', 'Item moved successfully', 'success');
@@ -6537,9 +6538,19 @@ function viewScheduleItemDetails(scheduleId, itemIdOrAssetId, index) {
                         <strong>Added to Schedule:</strong>
                         <span>${createdAtDisplay}</span>
                         
+                        ${item.theme || item.topics && item.topics.length > 0 || item.topic ? `
+                            <strong>Content Details:</strong>
+                            <span style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin: 0.5rem 0;"></span>
+                        ` : ''}
+                        
                         ${item.theme ? `
                             <strong>Theme:</strong>
                             <span style="grid-column: span 2;">${item.theme}</span>
+                        ` : ''}
+                        
+                        ${item.topic ? `
+                            <strong>Topic:</strong>
+                            <span style="grid-column: span 2;">${item.topic}</span>
                         ` : ''}
                         
                         ${item.topics && item.topics.length > 0 ? `
