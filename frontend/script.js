@@ -4091,6 +4091,29 @@ function generateReplayConfigHTML() {
                 </table>
             </div>
             
+            <div class="optimization-controls">
+                <h4>Optimize Delays</h4>
+                <p>Calculate optimal delays based on your current content supply:</p>
+                
+                <div class="optimization-controls-row">
+                    <label for="optimization-strategy">Strategy:</label>
+                    <select id="optimization-strategy" class="config-select">
+                        <option value="uniform">Uniform Distribution (Even spacing)</option>
+                        <option value="statistical">Statistical Coverage (2 std dev)</option>
+                        <option value="balanced" selected>Balanced Rotation (Recommended)</option>
+                        <option value="conservative">Conservative (Slower rotation)</option>
+                        <option value="aggressive">Aggressive (Faster rotation)</option>
+                    </select>
+                    <button onclick="calculateOptimalDelays()" class="config-button">
+                        Calculate Optimal Delays
+                    </button>
+                </div>
+                
+                <div id="optimization-results" class="optimization-results" style="display: none;">
+                    <!-- Results will be displayed here -->
+                </div>
+            </div>
+            
             <div class="replay-config-note">
                 <p><strong>How it works:</strong></p>
                 <ul>
@@ -4465,6 +4488,194 @@ function saveReplayConfig() {
         short_form: parseFloat(document.getElementById('short_form_additional_delay').value),
         long_form: parseFloat(document.getElementById('long_form_additional_delay').value)
     };
+}
+
+async function calculateOptimalDelays() {
+    const strategy = document.getElementById('optimization-strategy').value;
+    const resultsDiv = document.getElementById('optimization-results');
+    
+    try {
+        // Show loading state
+        resultsDiv.innerHTML = '<div>Analyzing content supply...</div>';
+        resultsDiv.style.display = 'block';
+        
+        // Get content counts from backend
+        const response = await window.API.get('/content-counts-by-category');
+        const contentCounts = response.counts || {};
+        
+        // Calculate optimal delays based on strategy
+        const optimizedDelays = calculateDelaysForStrategy(contentCounts, strategy);
+        
+        // Display results
+        displayOptimizationResults(optimizedDelays, contentCounts, strategy);
+        
+    } catch (error) {
+        console.error('Error calculating optimal delays:', error);
+        resultsDiv.innerHTML = '<div style="color: red;">Error calculating optimal delays. Please try again.</div>';
+    }
+}
+
+function calculateDelaysForStrategy(contentCounts, strategy) {
+    const categories = ['id', 'spots', 'short_form', 'long_form'];
+    const scheduleHours = 24; // Daily schedule
+    const delays = {};
+    
+    switch (strategy) {
+        case 'uniform':
+            // Even spacing for all categories
+            categories.forEach(cat => {
+                const count = contentCounts[cat] || 0;
+                if (count > 0) {
+                    // Aim for even distribution across the schedule
+                    delays[cat] = {
+                        initial: Math.round((scheduleHours / count) * 60) / 60, // Round to nearest hour
+                        additional: Math.round((scheduleHours / count) * 0.5 * 60) / 60
+                    };
+                }
+            });
+            break;
+            
+        case 'statistical':
+            // Based on 2 standard deviations
+            categories.forEach(cat => {
+                const count = contentCounts[cat] || 0;
+                if (count > 0) {
+                    const avgPlaysPerItem = scheduleHours / count;
+                    const stdDev = Math.sqrt(avgPlaysPerItem);
+                    delays[cat] = {
+                        initial: Math.round(avgPlaysPerItem * 60) / 60,
+                        additional: Math.round(2 * stdDev * 60) / 60
+                    };
+                }
+            });
+            break;
+            
+        case 'balanced':
+            // Recommended balanced approach
+            const baselines = { id: 6, spots: 12, short_form: 24, long_form: 48 };
+            categories.forEach(cat => {
+                const count = contentCounts[cat] || 0;
+                if (count > 0) {
+                    const baseline = baselines[cat];
+                    const adjustmentFactor = Math.min(2, Math.max(0.5, 100 / count));
+                    delays[cat] = {
+                        initial: Math.round(baseline * adjustmentFactor),
+                        additional: Math.round(baseline * 0.25 * adjustmentFactor)
+                    };
+                }
+            });
+            break;
+            
+        case 'conservative':
+            // Slower rotation for less repetition
+            categories.forEach(cat => {
+                const count = contentCounts[cat] || 0;
+                if (count > 0) {
+                    const factor = cat === 'id' ? 1.5 : cat === 'spots' ? 2 : cat === 'short_form' ? 3 : 4;
+                    delays[cat] = {
+                        initial: Math.round((scheduleHours / count) * factor * 60) / 60,
+                        additional: Math.round((scheduleHours / count) * factor * 0.3 * 60) / 60
+                    };
+                }
+            });
+            break;
+            
+        case 'aggressive':
+            // Faster rotation for more variety
+            categories.forEach(cat => {
+                const count = contentCounts[cat] || 0;
+                if (count > 0) {
+                    const factor = cat === 'id' ? 0.5 : cat === 'spots' ? 0.6 : cat === 'short_form' ? 0.7 : 0.8;
+                    delays[cat] = {
+                        initial: Math.max(1, Math.round((scheduleHours / count) * factor * 60) / 60),
+                        additional: Math.max(0.5, Math.round((scheduleHours / count) * factor * 0.2 * 60) / 60)
+                    };
+                }
+            });
+            break;
+    }
+    
+    return delays;
+}
+
+function displayOptimizationResults(delays, contentCounts, strategy) {
+    const resultsDiv = document.getElementById('optimization-results');
+    const strategyNames = {
+        uniform: 'Uniform Distribution',
+        statistical: 'Statistical Coverage',
+        balanced: 'Balanced Rotation',
+        conservative: 'Conservative',
+        aggressive: 'Aggressive'
+    };
+    
+    let html = `
+        <h5 class="optimization-results-title">Optimization Results - ${strategyNames[strategy]}</h5>
+        <table class="optimization-table">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Content Count</th>
+                    <th>Current Initial</th>
+                    <th>Optimal Initial</th>
+                    <th>Current Additional</th>
+                    <th>Optimal Additional</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    const categories = ['id', 'spots', 'short_form', 'long_form'];
+    const categoryLabels = { id: 'ID', spots: 'Spots', short_form: 'Short Form', long_form: 'Long Form' };
+    
+    categories.forEach(cat => {
+        const count = contentCounts[cat] || 0;
+        const optimal = delays[cat] || { initial: 0, additional: 0 };
+        const currentInitial = scheduleConfig.REPLAY_DELAYS[cat] || 0;
+        const currentAdditional = scheduleConfig.ADDITIONAL_DELAY_PER_AIRING[cat] || 0;
+        
+        html += `
+            <tr>
+                <td class="category-name">${categoryLabels[cat]}</td>
+                <td class="text-center">${count}</td>
+                <td class="text-center">${currentInitial}h</td>
+                <td class="text-center optimal-value">${optimal.initial}h</td>
+                <td class="text-center">${currentAdditional}h</td>
+                <td class="text-center optimal-value">${optimal.additional}h</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+        <div class="optimization-actions">
+            <button onclick="applyOptimalDelays(${JSON.stringify(delays).replace(/"/g, '&quot;')})" 
+                    class="config-button primary">
+                Apply Optimal Delays
+            </button>
+            <button onclick="document.getElementById('optimization-results').style.display='none'" 
+                    class="config-button secondary">
+                Cancel
+            </button>
+        </div>
+    `;
+    
+    resultsDiv.innerHTML = html;
+}
+
+function applyOptimalDelays(delays) {
+    // Apply the optimal delays to the form inputs
+    Object.keys(delays).forEach(cat => {
+        const delay = delays[cat];
+        document.getElementById(`${cat}_replay_delay`).value = delay.initial;
+        document.getElementById(`${cat}_additional_delay`).value = delay.additional;
+    });
+    
+    // Hide results
+    document.getElementById('optimization-results').style.display = 'none';
+    
+    // Show success message
+    log('✅ Optimal delays applied! Remember to save your configuration.');
 }
 
 function saveExpirationConfig() {

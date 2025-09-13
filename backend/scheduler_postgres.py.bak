@@ -66,7 +66,6 @@ class PostgreSQLScheduler:
         3. 50% of configured delays
         4. 25% of configured delays
         5. No delays (0%)
-        6. If still no content, reset category-specific exclusions and try again
         
         Returns:
             List of available content items
@@ -102,142 +101,36 @@ class PostgreSQLScheduler:
                     item['_delay_factor_used'] = factor
                 return available_content
         
-        # No content found even with no delays - check if we can reset
+        # No content found even with no delays
         logger.error(f"❌ No content available for {duration_category} even with all delay restrictions removed")
         
-        # Get all assets in this category to see what we're excluding
+        # Debug: Get total content in category to understand the issue
         conn = db_manager._get_connection()
         try:
             cursor = conn.cursor()
-            
-            # Get all asset IDs for this category
             cursor.execute("""
-                SELECT a.id
+                SELECT COUNT(*) as total_count
                 FROM assets a
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                 WHERE a.duration_category = %s
-                  AND a.analysis_completed = TRUE
-                  AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > %s)
-            """, (duration_category, schedule_date if schedule_date else datetime.now()))
+                  AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP)
+            """, (duration_category,))
+            result = cursor.fetchone()
+            total_in_category = result['total_count'] if result else 0
             
-            category_asset_ids = {row['id'] for row in cursor}
+            logger.error(f"   Total {duration_category} content in database: {total_in_category}")
+            logger.error(f"   Excluded items: {len(exclude_ids)}")
+            
+            if total_in_category > 0 and len(exclude_ids) >= total_in_category:
+                logger.error(f"   ⚠️ ALL {duration_category} content has been excluded!")
+            
             cursor.close()
-            
-            if not category_asset_ids:
-                logger.error(f"   No valid {duration_category} content in database (all expired or not analyzed)")
-                return []
-            
-            # Find which category assets are being excluded
-            excluded_category_assets = set(exclude_ids) & category_asset_ids
-            
-            logger.error(f"   Total {duration_category} content in database: {len(category_asset_ids)}")
-            logger.error(f"   Excluded items from this category: {len(excluded_category_assets)}")
-            
-            # Check if we should reset - either all content is excluded OR we have excluded content but still can't find anything
-            should_reset = False
-            if excluded_category_assets:
-                if len(excluded_category_assets) == len(category_asset_ids):
-                    # All content in this category has been excluded
-                    should_reset = True
-                    logger.warning(f"🔄 All {duration_category} content is excluded - triggering reset")
-                elif len(category_asset_ids) > 0:
-                    # We have valid content but still can't get any - likely all blocked by other constraints
-                    # If we've excluded at least 25% of the category, allow reset
-                    exclusion_ratio = len(excluded_category_assets) / len(category_asset_ids)
-                    if exclusion_ratio >= 0.25:
-                        should_reset = True
-                        logger.warning(f"🔄 {exclusion_ratio*100:.0f}% of {duration_category} content is excluded and nothing available - triggering reset")
-            
-            if should_reset:
-                # RESET!
-                logger.warning(f"🔄 RESETTING exclusions for {duration_category} content to allow reuse")
-                logger.warning(f"   Removing {len(excluded_category_assets)} {duration_category} items from exclusion list")
-                
-                # Create a new exclude list without this category's assets
-                reset_exclude_ids = [aid for aid in exclude_ids if aid not in excluded_category_assets]
-                
-                # Also reset the scheduled times for this category's assets to allow immediate reuse
-                if scheduled_asset_times:
-                    for asset_id in excluded_category_assets:
-                        if asset_id in scheduled_asset_times:
-                            # Clear all scheduled times for this asset
-                            scheduled_asset_times[asset_id] = []
-                            logger.debug(f"   Reset scheduled times for asset {asset_id}")
-                
-                # CRITICAL: Reset the last_scheduled_date in the database for this category
-                # This is what actually makes the content available again
-                if self._reset_category_delays(duration_category, list(excluded_category_assets)):
-                    logger.info(f"✅ Successfully reset database delays for {len(excluded_category_assets)} {duration_category} assets")
-                else:
-                    logger.error(f"❌ Failed to reset database delays for {duration_category} assets")
-                
-                # Try again with reset exclusions and no delays
-                available_content = self.get_available_content(
-                    duration_category,
-                    exclude_ids=reset_exclude_ids,
-                    ignore_delays=True,  # Use no delays after reset
-                    schedule_date=schedule_date,
-                    scheduled_asset_times=scheduled_asset_times
-                )
-                
-                if available_content:
-                    logger.info(f"✅ After reset: Found {len(available_content)} items for {duration_category}")
-                    for item in available_content:
-                        item['_delay_factor_used'] = 0.0
-                        item['_was_reset'] = True
-                    
-                    # Update the original exclude_ids list to reflect the reset
-                    # This is important so the calling function knows about the reset
-                    exclude_ids[:] = reset_exclude_ids
-                    
-                    return available_content
-                else:
-                    logger.error(f"❌ Still no content available for {duration_category} even after reset")
-            
         except Exception as e:
-            logger.error(f"Error during category reset check: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error checking content availability: {str(e)}")
         finally:
             db_manager._put_connection(conn)
         
         return []
-    
-    def _reset_category_delays(self, duration_category: str, asset_ids: List[int]) -> bool:
-        """Reset last_scheduled_date for assets in a category to allow immediate reuse
-        
-        This is called when no content is available for a category even with all
-        delay restrictions removed. It clears the last_scheduled_date in the database
-        for the specified assets, making them immediately available for scheduling.
-        """
-        if not asset_ids:
-            return False
-            
-        conn = db_manager._get_connection()
-        try:
-            cursor = conn.cursor()
-            
-            # Reset last_scheduled_date to NULL for these assets
-            # This makes them appear as if they've never been scheduled
-            cursor.execute("""
-                UPDATE scheduling_metadata
-                SET last_scheduled_date = NULL
-                WHERE asset_id = ANY(%s)
-            """, (asset_ids,))
-            
-            affected_rows = cursor.rowcount
-            conn.commit()
-            cursor.close()
-            
-            logger.warning(f"🔄 Reset last_scheduled_date for {affected_rows} {duration_category} assets")
-            return True
-            
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Error resetting category delays: {str(e)}")
-            return False
-        finally:
-            db_manager._put_connection(conn)
     
     def _check_delay_constraint(self, asset_id: int, proposed_time: float, scheduled_times: dict, 
                                delay_hours: float) -> bool:
@@ -297,62 +190,51 @@ class PostgreSQLScheduler:
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
-            # Calculate dates in Python to avoid INTERVAL issues
-            if schedule_date:
-                try:
-                    compare_date = datetime.strptime(schedule_date, '%Y-%m-%d')
-                except ValueError:
-                    logger.warning(f"Invalid schedule_date format: {schedule_date}, using current time")
-                    compare_date = datetime.now()
+            # Get replay delay configuration - use defaults if config loading fails
+            base_delay = 24  # Default 24 hours
+            additional_delay = 2  # Default 2 hours per airing
+            
+            # If ignore_delays is True, set delays to 0
+            if ignore_delays:
+                base_delay = 0
+                additional_delay = 0
+                if delay_reduction_factor < 1.0:
+                    logger.info(f"Ignoring delays for {duration_category} (reduction factor would have been {delay_reduction_factor})")
             else:
-                compare_date = datetime.now()
-            
-            # Pre-calculate all date values we'll need
-            default_expiry_date = compare_date + timedelta(days=365)
-            epoch_start = datetime(1970, 1, 1)
-            date_minus_1 = compare_date - timedelta(days=1)
-            date_minus_3 = compare_date - timedelta(days=3)
-            date_minus_7 = compare_date - timedelta(days=7)
-            date_minus_14 = compare_date - timedelta(days=14)
-            date_minus_30 = compare_date - timedelta(days=30)
-            
-            # Get delay configuration
-            base_delay = 0
-            additional_delay = 0
-            
-            if not ignore_delays:
-                if delay_reduction_factor == 0.0:
-                    base_delay = 0
-                    additional_delay = 0
+                try:
+                    from config_manager import ConfigManager
+                    config_mgr = ConfigManager()
+                    scheduling_config = config_mgr.get_scheduling_settings()
+                    replay_delays = scheduling_config.get('replay_delays', {})
+                    additional_delays = scheduling_config.get('additional_delay_per_airing', {})
+                    
+                    # Get base delay and additional delay for this category
+                    base_delay = replay_delays.get(duration_category, 24)
+                    additional_delay = additional_delays.get(duration_category, 2)
+                    
+                    # Apply delay reduction factor if less than 1.0
                     if delay_reduction_factor < 1.0:
-                        logger.info(f"Ignoring delays for {duration_category} (reduction factor would have been {delay_reduction_factor})")
-                else:
-                    try:
-                        from config_manager import ConfigManager
-                        config_mgr = ConfigManager()
-                        scheduling_config = config_mgr.get_scheduling_settings()
-                        replay_delays = scheduling_config.get('replay_delays', {})
-                        additional_delays = scheduling_config.get('additional_delay_per_airing', {})
-                        
-                        base_delay = replay_delays.get(duration_category, 24)
-                        additional_delay = additional_delays.get(duration_category, 2)
-                        
-                        if delay_reduction_factor < 1.0:
-                            original_base = base_delay
-                            original_additional = additional_delay
-                            base_delay = base_delay * delay_reduction_factor
-                            additional_delay = additional_delay * delay_reduction_factor
-                            logger.info(f"Reducing delays for {duration_category} by factor {delay_reduction_factor}: "
-                                      f"base {original_base}h -> {base_delay}h, additional {original_additional}h -> {additional_delay}h")
-                    except Exception as e:
-                        logger.warning(f"Could not load replay delay config, using defaults: {e}")
+                        original_base = base_delay
+                        original_additional = additional_delay
+                        base_delay = base_delay * delay_reduction_factor
+                        additional_delay = additional_delay * delay_reduction_factor
+                        logger.info(f"Reducing delays for {duration_category} by factor {delay_reduction_factor}: "
+                                  f"base {original_base}h -> {base_delay}h, additional {original_additional}h -> {additional_delay}h")
+                except Exception as e:
+                    logger.warning(f"Could not load replay delay config, using defaults: {e}")
             
             # Determine if we're filtering by duration category or content type
             duration_categories = ['id', 'spots', 'short_form', 'long_form']
             is_duration_category = duration_category in duration_categories
             
-            # Build query using only positional parameters
-            query_parts = ["""
+            # Build the appropriate filter condition
+            if is_duration_category:
+                filter_condition = "a.duration_category = %(duration_category)s"
+            else:
+                filter_condition = "a.content_type = %(duration_category)s"
+            
+            # Build query to get available content
+            query = f"""
                 SELECT 
                     a.id as asset_id,
                     a.guid,
@@ -368,82 +250,83 @@ class PostgreSQLScheduler:
                     i.encoded_date,
                     sm.last_scheduled_date,
                     sm.total_airings,
-                    COALESCE(sm.content_expiry_date, %s) as content_expiry_date,
-                    (%s + (COALESCE(sm.total_airings, 0) * %s)) as required_delay_hours,
-                    EXTRACT(EPOCH FROM (%s - COALESCE(sm.last_scheduled_date, %s))) / 3600 as hours_since_last_scheduled
+                    COALESCE(sm.content_expiry_date, DATE_TRUNC('day', %(compare_date)s::timestamp) + INTERVAL '365 days') as content_expiry_date,
+                    -- Calculate required delay based on total airings
+                    (%(base_delay)s + (COALESCE(sm.total_airings, 0) * %(additional_delay)s)) as required_delay_hours,
+                    -- Calculate hours since last scheduled
+                    EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - COALESCE(sm.last_scheduled_date, %(epoch_start)s::timestamp))) / 3600 as hours_since_last_scheduled
                 FROM assets a
                 JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
                 WHERE 
                     a.analysis_completed = TRUE
-            """]
-            
-            # Parameters for the main query
-            params = [
-                default_expiry_date,  # for COALESCE in SELECT
-                base_delay,           # for required_delay_hours
-                additional_delay,     # for required_delay_hours
-                compare_date,         # for hours_since_last_scheduled
-                epoch_start,          # for hours_since_last_scheduled fallback
-            ]
-            
-            # Add category filter
-            if is_duration_category:
-                query_parts.append(" AND a.duration_category = %s")
-            else:
-                query_parts.append(" AND a.content_type = %s")
-            params.append(duration_category)
-            
-            # Add remaining filters
-            query_parts.append("""
-                AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
-                AND COALESCE(sm.content_expiry_date, %s) > %s
-                AND NOT (i.file_path LIKE %s)
-            """)
-            params.extend([default_expiry_date, compare_date, '%FILL%'])
-            
-            # Add replay delay check if not ignoring
-            if not ignore_delays:
-                query_parts.append("""
+                    AND {filter_condition}
+                    AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
+                    -- IMPORTANT: Filter out content that will be expired on the scheduled date
+                    -- If no schedule_date provided, use current timestamp
+                    -- Content with NULL expiry_date defaults to 1 year from schedule date (non-expiring)
+                    AND COALESCE(sm.content_expiry_date, DATE_TRUNC('day', %(compare_date)s::timestamp) + INTERVAL '365 days') > %(compare_date)s::timestamp
+                    AND NOT (i.file_path LIKE %(fill_pattern)s)
+                    -- Check replay delay: either never scheduled OR enough time has passed
+                    -- Use scheduled date instead of current timestamp for accurate delay checking
                     AND (
                         sm.last_scheduled_date IS NULL 
-                        OR EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= (%s + (COALESCE(sm.total_airings, 0) * %s))
+                        OR EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= (%(base_delay)s + (COALESCE(sm.total_airings, 0) * %(additional_delay)s))
                     )
-                """)
-                params.extend([compare_date, base_delay, additional_delay])
-            
-            # Add existence check
-            query_parts.append("""
-                AND NOT EXISTS (
-                    SELECT 1 FROM scheduled_items si
-                    WHERE si.asset_id = a.id
+                    -- Exclude assets that are disabled in any schedule
+                    AND NOT EXISTS (
+                        SELECT 1 FROM scheduled_items si
+                        WHERE si.asset_id = a.id
                         AND si.available_for_scheduling = FALSE
-                )
-            """)
+                    )
+            """
             
-            # Handle exclude_ids
+            # Determine the date to compare expiration against
+            if schedule_date:
+                # Parse the schedule date
+                try:
+                    compare_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+                except ValueError:
+                    logger.warning(f"Invalid schedule_date format: {schedule_date}, using current time")
+                    compare_date = datetime.now()
+            else:
+                compare_date = datetime.now()
+            
+            params = {
+                'base_delay': base_delay,
+                'additional_delay': additional_delay,
+                'duration_category': duration_category,
+                'fill_pattern': '%FILL%',
+                'compare_date': compare_date,
+                'epoch_start': '1970-01-01'
+            }
+            
+            # Exclude already scheduled items
             if exclude_ids and len(exclude_ids) > 0:
-                placeholders = ','.join(['%s'] * len(exclude_ids))
-                query_parts.append(f" AND a.id NOT IN ({placeholders})")
-                params.extend(exclude_ids)
+                query += " AND a.id != ALL(%(exclude_ids)s)"
+                params['exclude_ids'] = exclude_ids
             
-            # Add complex ordering with pre-calculated dates
-            query_parts.append("""
+            # Order by multi-factor scoring system
+            query += """
                 ORDER BY 
+                    -- Multi-factor content score calculation
                     (
+                        -- Freshness Score (35% weight)
                         CASE 
                             WHEN i.encoded_date IS NULL THEN 0
-                            WHEN i.encoded_date >= %s THEN 100
-                            WHEN i.encoded_date >= %s THEN 90
-                            WHEN i.encoded_date >= %s THEN 80
-                            WHEN i.encoded_date >= %s THEN 60
-                            WHEN i.encoded_date >= %s THEN 40
-                            WHEN i.encoded_date >= %s THEN 20
+                            WHEN i.encoded_date >= %(compare_date)s::date THEN 100
+                            WHEN i.encoded_date >= (%(compare_date)s::date - INTERVAL '1 days') THEN 90
+                            WHEN i.encoded_date >= (%(compare_date)s::date - INTERVAL '3 days') THEN 80
+                            WHEN i.encoded_date >= (%(compare_date)s::date - INTERVAL '7 days') THEN 60
+                            WHEN i.encoded_date >= (%(compare_date)s::date - INTERVAL '14 days') THEN 40
+                            WHEN i.encoded_date >= (%(compare_date)s::date - INTERVAL '30 days') THEN 20
                             ELSE 10
                         END * 0.35
                         
+                        -- Engagement Score (25% weight)
                         + COALESCE(a.engagement_score, 50) * 0.25
                         
+                        -- Replay Efficiency (20% weight) - inverse of recent plays
                         + CASE
                             WHEN sm.total_airings IS NULL OR sm.total_airings = 0 THEN 100
                             WHEN sm.total_airings <= 2 THEN 80
@@ -453,42 +336,25 @@ class PostgreSQLScheduler:
                             ELSE 10
                         END * 0.20
                         
+                        -- Time Since Last Play Bonus (20% weight)
                         + CASE
                             WHEN sm.last_scheduled_date IS NULL THEN 100
-                            WHEN EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 24 THEN 100
-                            WHEN EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 12 THEN 80
-                            WHEN EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 6 THEN 60
-                            WHEN EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 3 THEN 40
-                            WHEN EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 1 THEN 20
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 24 THEN 100
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 12 THEN 80
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 6 THEN 60
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 3 THEN 40
+                            WHEN EXTRACT(EPOCH FROM (%(compare_date)s::timestamp - sm.last_scheduled_date)) / 3600 >= 1 THEN 20
                             ELSE 0
                         END * 0.20
                     ) DESC,
                     
+                    -- Tiebreakers
                     sm.last_scheduled_date ASC NULLS FIRST,
                     sm.total_airings ASC NULLS FIRST,
                     i.encoded_date DESC NULLS LAST
                 LIMIT 100
-            """)
+            """
             
-            # Add date parameters for ORDER BY
-            params.extend([
-                compare_date,     # for freshness score comparisons
-                date_minus_1,
-                date_minus_3,
-                date_minus_7,
-                date_minus_14,
-                date_minus_30,
-                compare_date,     # for time since last play calculations
-                compare_date,
-                compare_date,
-                compare_date,
-                compare_date
-            ])
-            
-            # Combine query parts
-            query = ''.join(query_parts)
-            
-            # Execute query
             cursor.execute(query, params)
             results = cursor.fetchall()
             cursor.close()
@@ -574,24 +440,13 @@ class PostgreSQLScheduler:
                 'reduced_75': 0,        # 75% delays
                 'reduced_50': 0,        # 50% delays
                 'reduced_25': 0,        # 25% delays
-                'no_delays': 0,         # 0% delays
-                'resets': 0             # Category resets
-            }
-            
-            # Track category-specific resets
-            category_reset_counts = {
-                'id': 0,
-                'spots': 0,
-                'short_form': 0,
-                'long_form': 0
+                'no_delays': 0          # 0% delays
             }
             
             # Infinite loop detection
             last_progress_duration = 0
             no_progress_iterations = 0
             max_no_progress = 50  # Allow max 50 iterations without progress
-            consecutive_no_content_cycles = 0  # Track cycles where all categories fail
-            max_no_content_cycles = 3  # Max full rotation cycles with no content
             
             while total_duration < self.target_duration_seconds:
                 # Get next duration category
@@ -610,25 +465,7 @@ class PostgreSQLScheduler:
                     consecutive_errors += 1
                     total_errors += 1
                     
-                    # Track if we've cycled through all categories without finding content
-                    if self.rotation_index == 0:  # We've completed a full rotation cycle
-                        consecutive_no_content_cycles += 1
-                        logger.warning(f"⚠️ Completed full rotation cycle #{consecutive_no_content_cycles} with no available content")
-                        
-                        if consecutive_no_content_cycles >= max_no_content_cycles:
-                            logger.error(f"❌ Infinite loop detected: {consecutive_no_content_cycles} full rotation cycles with no available content")
-                            # Delete the partially created schedule
-                            self.delete_schedule(schedule_id)
-                            return {
-                                'success': False,
-                                'message': f'Schedule creation failed: No content available after {consecutive_no_content_cycles} complete rotation cycles. '
-                                         f'All content is blocked by replay delays. Please add more content or reduce replay delay settings.',
-                                'error': 'infinite_loop_all_blocked',
-                                'stopped_at_hours': total_duration / 3600,
-                                'rotation_cycles_failed': consecutive_no_content_cycles
-                            }
-                    
-                    # Check for infinite loop (no progress at all)
+                    # Check for infinite loop
                     if total_duration == last_progress_duration:
                         no_progress_iterations += 1
                         if no_progress_iterations >= max_no_progress:
@@ -748,12 +585,6 @@ class PostgreSQLScheduler:
                         delay_reduction_stats['reduced_25'] += 1
                     elif delay_factor == 0.0:
                         delay_reduction_stats['no_delays'] += 1
-                    
-                    # Check if this was a reset
-                    if content.get('_was_reset', False):
-                        delay_reduction_stats['resets'] += 1
-                        category_reset_counts[duration_category] += 1
-                        logger.warning(f"🔄 Using RESET content for {duration_category} (reset #{category_reset_counts[duration_category]})")
                 
                 consecutive_errors = 0  # Reset consecutive error counter
                 
@@ -840,7 +671,6 @@ class PostgreSQLScheduler:
                 # Reset no-progress counter since we made progress
                 no_progress_iterations = 0
                 last_progress_duration = total_duration
-                consecutive_no_content_cycles = 0  # Reset cycle counter on successful scheduling
             
             # Save all scheduled items
             saved_count = self._save_scheduled_items(scheduled_items)
@@ -862,11 +692,6 @@ class PostgreSQLScheduler:
                     logger.warning(f"⚠️ Reduced to 25%: {delay_reduction_stats['reduced_25']} ({delay_reduction_stats['reduced_25']/total_delay_stats*100:.1f}%)")
                 if delay_reduction_stats['no_delays'] > 0:
                     logger.error(f"❌ No delays (0%): {delay_reduction_stats['no_delays']} ({delay_reduction_stats['no_delays']/total_delay_stats*100:.1f}%)")
-                if delay_reduction_stats['resets'] > 0:
-                    logger.warning(f"🔄 Category resets: {delay_reduction_stats['resets']} ({delay_reduction_stats['resets']/total_delay_stats*100:.1f}%)")
-                    for cat, count in category_reset_counts.items():
-                        if count > 0:
-                            logger.warning(f"   - {cat}: {count} resets")
             
             logger.info(f"Created schedule with {saved_count} items, total duration: {total_duration/3600:.2f} hours")
             
@@ -876,8 +701,7 @@ class PostgreSQLScheduler:
                 'schedule_id': schedule_id,
                 'total_items': saved_count,
                 'total_duration_hours': total_duration / 3600,
-                'delay_reduction_stats': delay_reduction_stats,
-                'category_reset_counts': category_reset_counts
+                'delay_reduction_stats': delay_reduction_stats
             }
             
         except Exception as e:
@@ -1892,24 +1716,13 @@ class PostgreSQLScheduler:
                 'reduced_75': 0,        # 75% delays
                 'reduced_50': 0,        # 50% delays
                 'reduced_25': 0,        # 25% delays
-                'no_delays': 0,         # 0% delays
-                'resets': 0             # Category resets
-            }
-            
-            # Track category-specific resets
-            category_reset_counts = {
-                'id': 0,
-                'spots': 0,
-                'short_form': 0,
-                'long_form': 0
+                'no_delays': 0          # 0% delays
             }
             
             # Infinite loop detection
             last_progress_duration = 0
             no_progress_iterations = 0
             max_no_progress = 50  # Allow max 50 iterations without progress
-            consecutive_no_content_cycles = 0  # Track cycles where all categories fail
-            max_no_content_cycles = 3  # Max full rotation cycles with no content
             
             # Generate content for each day
             days_completed = 0
@@ -1938,7 +1751,7 @@ class PostgreSQLScheduler:
                         duration_category, 
                         exclude_ids=day_scheduled_asset_ids,
                         schedule_date=current_day.strftime('%Y-%m-%d'),
-                        scheduled_asset_times=None
+                        scheduled_asset_times=scheduled_asset_times
                     )
                     
                     if not available_content:
@@ -1948,27 +1761,7 @@ class PostgreSQLScheduler:
                         consecutive_errors += 1
                         total_errors += 1
                         
-                        # Track if we've cycled through all categories without finding content
-                        if self.rotation_index == 0:  # We've completed a full rotation cycle
-                            consecutive_no_content_cycles += 1
-                            logger.warning(f"⚠️ Completed full rotation cycle #{consecutive_no_content_cycles} with no available content on {day_name}")
-                            
-                            if consecutive_no_content_cycles >= max_no_content_cycles:
-                                logger.error(f"❌ Infinite loop detected: {consecutive_no_content_cycles} full rotation cycles with no available content")
-                                # Delete the partially created schedule
-                                self.delete_schedule(schedule_id)
-                                return {
-                                    'success': False,
-                                    'message': f'Schedule creation failed: No content available after {consecutive_no_content_cycles} complete rotation cycles. '
-                                             f'All content is blocked by replay delays. Please add more content or reduce replay delay settings.',
-                                    'error': 'infinite_loop_all_blocked',
-                                    'stopped_at_hours': total_duration / 3600,
-                                    'stopped_at_day': day_name,
-                                    'days_completed': days_completed,
-                                    'rotation_cycles_failed': consecutive_no_content_cycles
-                                }
-                        
-                        # Check for infinite loop (no progress at all)
+                        # Check for infinite loop
                         if total_duration == last_progress_duration:
                             no_progress_iterations += 1
                             if no_progress_iterations >= max_no_progress:
@@ -2091,12 +1884,6 @@ class PostgreSQLScheduler:
                         elif delay_factor == 0.0:
                             delay_reduction_stats['no_delays'] += 1
                     
-                    # Check if this was a reset
-                    if content.get('_was_reset', False):
-                        delay_reduction_stats['resets'] += 1
-                        category_reset_counts[duration_category] += 1
-                        logger.warning(f"🔄 Using RESET content for {duration_category} (reset #{category_reset_counts[duration_category]})")
-                    
                     consecutive_errors = 0  # Reset consecutive error counter
                     
                     # Check if this content would cross into the next day
@@ -2187,7 +1974,6 @@ class PostgreSQLScheduler:
                     # Reset no-progress counter since we made progress
                     no_progress_iterations = 0
                     last_progress_duration = total_duration
-                    consecutive_no_content_cycles = 0  # Reset cycle counter on successful scheduling
                     
                     # Stop if we've filled the current day
                     if total_duration >= day_target_seconds:
@@ -2370,13 +2156,6 @@ class PostgreSQLScheduler:
             # Track recent plays for fatigue prevention (asset_id -> list of scheduled times)
             recent_plays = {}
             
-            # Infinite loop detection
-            last_progress_duration = 0
-            no_progress_iterations = 0
-            max_no_progress = 50  # Allow max 50 iterations without progress
-            consecutive_no_content_cycles = 0  # Track cycles where all categories fail
-            max_no_content_cycles = 3  # Max full rotation cycles with no content
-            
             # Generate content for each day of the month
             for day in range(1, days_in_month + 1):
                 current_date = datetime(year, month, day)
@@ -2402,7 +2181,7 @@ class PostgreSQLScheduler:
                         duration_category, 
                         exclude_ids=day_scheduled_asset_ids,
                         schedule_date=current_day.strftime('%Y-%m-%d'),
-                        scheduled_asset_times=None
+                        scheduled_asset_times=scheduled_asset_times
                     )
                     
                     if not available_content:

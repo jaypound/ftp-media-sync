@@ -2482,4 +2482,134 @@ body.dark-mode .status {
     border-color: var(--primary-color);
 }
 
+/* Optimization Controls */
+.optimization-controls {
+    margin: 20px 0;
+    padding: 15px;
+    background: var(--bg-secondary, #f5f5f5);
+    border-radius: 5px;
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+
+.optimization-controls h4 {
+    margin-top: 0;
+    color: var(--text-primary);
+}
+
+.optimization-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin: 15px 0;
+}
+
+.optimization-controls-row label {
+    color: var(--text-primary);
+}
+
+.config-select {
+    flex: 1;
+    padding: 5px;
+    background: var(--card-background, #fff);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.optimization-results {
+    margin-top: 15px;
+    padding: 10px;
+    background: var(--bg-tertiary, #e8f4f8);
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+}
+
+.optimization-results-title {
+    margin-top: 0;
+    color: var(--primary-color, #2c5282);
+}
+
+.optimization-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.optimization-table th,
+.optimization-table td {
+    padding: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.optimization-table th {
+    background: var(--bg-secondary, #e2e8f0);
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.optimization-table td {
+    background: var(--card-background);
+    color: var(--text-primary);
+}
+
+.optimization-table .category-name {
+    font-weight: bold;
+}
+
+.optimization-table .text-center {
+    text-align: center;
+}
+
+.optimization-table .optimal-value {
+    color: var(--primary-color, #2b6cb6);
+    font-weight: bold;
+}
+
+.optimization-actions {
+    margin-top: 15px;
+    display: flex;
+    gap: 10px;
+}
+
+.config-button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.config-button.primary {
+    background: var(--primary-color, #2b6cb6);
+    color: white;
+}
+
+.config-button.primary:hover {
+    background: var(--primary-hover, #245a8a);
+}
+
+.config-button.secondary {
+    background: var(--bg-tertiary, #718096);
+    color: white;
+}
+
+.config-button.secondary:hover {
+    background: var(--bg-quaternary, #5a6b7d);
+}
+
+/* Dark mode specific */
+.dark-mode .optimization-controls {
+    background: var(--bg-secondary, #2d2d2d);
+    border-color: var(--border-color, #404040);
+}
+
+.dark-mode .optimization-results {
+    background: var(--bg-tertiary, #3a3a3a);
+}
+
+.dark-mode .config-select option {
+    background: var(--bg-secondary, #2d2d2d);
+    color: var(--text-primary);
+}
+
 /* End of styles */

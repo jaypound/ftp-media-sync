@@ -1383,6 +1383,59 @@ def delete_content_entry(content_id):
             'message': f'Delete content entry failed: {str(e)}'
         })
 
+@app.route('/api/content-counts-by-category', methods=['GET'])
+def get_content_counts_by_category():
+    """Get count of content items by duration category"""
+    logger.info("=== GET CONTENT COUNTS BY CATEGORY REQUEST ===")
+    try:
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Get counts of active content by duration category
+            cursor.execute("""
+                SELECT 
+                    a.duration_category,
+                    COUNT(*) as count
+                FROM assets a
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE (sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP)
+                    AND a.duration_category IS NOT NULL
+                GROUP BY a.duration_category
+                ORDER BY a.duration_category
+            """)
+            
+            results = cursor.fetchall()
+            
+            # Convert to dict format
+            counts = {}
+            for row in results:
+                if row['duration_category']:
+                    counts[row['duration_category']] = row['count']
+            
+            # Ensure all categories are present
+            for category in ['id', 'spots', 'short_form', 'long_form']:
+                if category not in counts:
+                    counts[category] = 0
+            
+            logger.info(f"Content counts by category: {counts}")
+            
+            return jsonify({
+                'success': True,
+                'counts': counts
+            })
+            
+        finally:
+            cursor.close()
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"Get content counts error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to get content counts: {str(e)}'
+        })
+
 @app.route('/api/rename-content', methods=['POST'])
 def rename_content():
     """Rename content file only"""
@@ -4822,32 +4875,42 @@ def fill_template_gaps():
                 if not category_content:
                     logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, blocked_by_expiry={blocked_by_expiry}, no_expiry_date={no_expiry_date}, total_available={len(content_by_id)}")
                 
-                # If no content due to delays, try with reduced delays only as last resort
-                if not category_content and blocked_by_delay > 0 and total_cycles_without_content >= 2:
-                    logger.info(f"Trying category {duration_category} with reduced replay delays (50% of configured)")
-                    # Try again with reduced delays (50% of configured delay)
-                    reduced_delay_seconds = replay_delay_seconds * 0.5
+                # If no content due to delays, try with progressively reduced delays
+                if not category_content and blocked_by_delay > 0:
+                    # Try progressive delay reduction: 75%, 50%, 25%, 0%
+                    delay_factors = [0.75, 0.5, 0.25, 0.0]
                     
-                    for content_id, content in content_by_id.items():
-                        if content.get('duration_category') == duration_category:
-                            # Check with reduced delay
-                            if content_id in asset_schedule_times:
-                                last_times = asset_schedule_times[content_id]
-                                can_schedule = True
-                                
-                                for last_time in last_times:
-                                    time_since_last = current_position - last_time
-                                    if time_since_last < reduced_delay_seconds:
-                                        can_schedule = False
-                                        break
-                                
-                                if can_schedule:
-                                    category_content.append(content)
-                            else:
-                                category_content.append(content)
-                    
-                    if category_content:
-                        logger.info(f"Found {len(category_content)} items with reduced delay restrictions ({reduced_delay_seconds/3600:.1f} hours)")
+                    for factor in delay_factors:
+                        if factor == 0.0:
+                            logger.info(f"Trying category {duration_category} with NO replay delays")
+                        else:
+                            logger.info(f"Trying category {duration_category} with reduced replay delays ({factor*100:.0f}% of configured)")
+                        
+                        reduced_delay_seconds = replay_delay_seconds * factor
+                        temp_category_content = []
+                        
+                        for content_id, content in content_by_id.items():
+                            if content.get('duration_category') == duration_category:
+                                # Check with reduced delay
+                                if content_id in asset_schedule_times:
+                                    last_times = asset_schedule_times[content_id]
+                                    can_schedule = True
+                                    
+                                    for last_time in last_times:
+                                        time_since_last = current_position - last_time
+                                        if time_since_last < reduced_delay_seconds:
+                                            can_schedule = False
+                                            break
+                                    
+                                    if can_schedule:
+                                        temp_category_content.append(content)
+                                else:
+                                    temp_category_content.append(content)
+                        
+                        if temp_category_content:
+                            category_content = temp_category_content
+                            logger.info(f"Found {len(category_content)} items with {factor*100:.0f}% delay restrictions ({reduced_delay_seconds/3600:.1f} hours)")
+                            break  # Found content, stop trying further reductions
                 
                 if not category_content:
                     # Try next category if no content available
@@ -4859,6 +4922,8 @@ def fill_template_gaps():
                         total_cycles_without_content += 1
                         if total_cycles_without_content >= max_cycles:
                             logger.error(f"Aborting fill gaps: cycled through all categories {total_cycles_without_content} times without finding content")
+                            # NOTE: For critical scheduling where content must be found, use scheduler_postgres.create_daily_schedule()
+                            # which includes database delay resets when all content is exhausted
                             break
                     
                     # Advance rotation to try next category
