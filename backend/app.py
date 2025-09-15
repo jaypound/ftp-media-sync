@@ -5760,7 +5760,97 @@ def get_meeting_recordings():
                                     })
                     except Exception as list_error:
                         logger.error(f"Error changing to or listing directory {path}: {str(list_error)}")
-                        return
+                        
+                        # If it's a broken pipe error, try to reconnect
+                        if "Broken pipe" in str(list_error) or "32" in str(list_error):
+                            logger.info("Detected broken pipe, attempting to reconnect...")
+                            try:
+                                ftp_manager.disconnect()
+                                ftp_manager.connect()
+                                logger.info("Reconnected successfully, retrying directory scan...")
+                                
+                                # Retry the operation
+                                ftp_manager.ftp.cwd(path)
+                                raw_listing = []
+                                ftp_manager.ftp.retrlines('LIST', raw_listing.append)
+                                logger.info(f"Found {len(raw_listing)} items in {path} after reconnect")
+                                
+                                # Process the listing (continue with the rest of the logic)
+                                for line in raw_listing:
+                                    parts = line.split(None, 8)
+                                    if len(parts) >= 9:
+                                        permissions = parts[0]
+                                        filename = parts[8]
+                                        
+                                        # Skip . and ..
+                                        if filename in ['.', '..']:
+                                            continue
+                                        
+                                        # If it's a directory, scan it recursively
+                                        if permissions.startswith('d'):
+                                            subdir_path = os.path.join(path, filename)
+                                            logger.info(f"Found subdirectory: {filename}, scanning {subdir_path}")
+                                            scan_ftp_directory(ftp_manager, subdir_path)
+                                        # If it's a recording (any MP4 file)
+                                        elif filename.endswith('.mp4'):
+                                            logger.info(f"Found meeting recording: {filename}")
+                                            file_path = os.path.join(path, filename)
+                                            
+                                            # Parse filename to create standardized trimmed name
+                                            # Example: "2025-08-04 at 080000 250804 Mayor Back to School.mp4"
+                                            trimmed_name = filename
+                                            
+                                            # Try to extract date and meeting name
+                                            if filename.startswith('20'):  # Starts with year
+                                                try:
+                                                    # Extract date part (YYYY-MM-DD)
+                                                    date_part = filename[:10]
+                                                    # Convert to YYMMDD format
+                                                    from datetime import datetime
+                                                    dt = datetime.strptime(date_part, '%Y-%m-%d')
+                                                    yymmdd = dt.strftime('%y%m%d')
+                                                    
+                                                    # Find meeting name after the date and time
+                                                    # Look for pattern "YYMMDD " in the filename
+                                                    name_match = filename.find(yymmdd + ' ')
+                                                    if name_match != -1:
+                                                        meeting_name = filename[name_match + 7:].replace('.mp4', '')
+                                                        trimmed_name = f"{yymmdd}_{meeting_name}.mp4"
+                                                except:
+                                                    pass
+                                            elif filename.startswith('250'):
+                                                # Already in YYMMDD format
+                                                pass  # Keep original trimmed_name
+                                            
+                                            # Check if trimmed file exists
+                                            is_trimmed = False
+                                            try:
+                                                trimmed_files = ftp_manager.list_files(trimmed_path)
+                                                is_trimmed = any(f['name'] == trimmed_name for f in trimmed_files)
+                                            except:
+                                                pass
+                                            
+                                            # Get file size from listing
+                                            size = 0
+                                            if len(parts) >= 5 and parts[4].isdigit():
+                                                size = int(parts[4])
+                                            
+                                            # Get relative path for display
+                                            rel_path = os.path.relpath(file_path, recordings_path)
+                                            
+                                            recordings.append({
+                                                'filename': filename,
+                                                'path': file_path,
+                                                'relative_path': rel_path,
+                                                'trimmed_name': trimmed_name,
+                                                'is_trimmed': is_trimmed,
+                                                'size': size
+                                            })
+                            except Exception as reconnect_error:
+                                logger.error(f"Failed to reconnect and retry: {str(reconnect_error)}")
+                                return
+                        else:
+                            return
                 except Exception as e:
                     logger.error(f"Error scanning FTP directory {path}: {str(e)}")
             
