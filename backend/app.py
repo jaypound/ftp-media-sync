@@ -5806,7 +5806,6 @@ def get_meeting_recordings():
                                                     # Extract date part (YYYY-MM-DD)
                                                     date_part = filename[:10]
                                                     # Convert to YYMMDD format
-                                                    from datetime import datetime
                                                     dt = datetime.strptime(date_part, '%Y-%m-%d')
                                                     yymmdd = dt.strftime('%y%m%d')
                                                     
@@ -5844,7 +5843,8 @@ def get_meeting_recordings():
                                                 'relative_path': rel_path,
                                                 'trimmed_name': trimmed_name,
                                                 'is_trimmed': is_trimmed,
-                                                'size': size
+                                                'size': size,
+                                                'server': server
                                             })
                             except Exception as reconnect_error:
                                 logger.error(f"Failed to reconnect and retry: {str(reconnect_error)}")
