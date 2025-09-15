@@ -56,6 +56,130 @@ class PostgreSQLScheduler:
         """Reset the rotation index"""
         self.rotation_index = 0
     
+    def _should_schedule_featured_content(self, total_duration: float, last_featured_time: float, featured_delay: float) -> bool:
+        """Check if it's time to schedule featured content
+        
+        Args:
+            total_duration: Current total duration in seconds
+            last_featured_time: Time when featured content was last scheduled (in seconds)
+            featured_delay: Configured delay between featured content (in hours)
+            
+        Returns:
+            True if featured content should be scheduled next
+        """
+        if last_featured_time is None:
+            # No featured content scheduled yet, schedule immediately
+            return True
+        
+        # Convert featured_delay from hours to seconds
+        featured_delay_seconds = featured_delay * 3600
+        
+        # Check if enough time has passed since last featured content
+        time_since_last_featured = total_duration - last_featured_time
+        
+        return time_since_last_featured >= featured_delay_seconds
+    
+    def get_featured_content(self, exclude_ids: List[int] = None, schedule_date: str = None) -> List[Dict[str, Any]]:
+        """Get available featured content
+        
+        Args:
+            exclude_ids: List of asset IDs to exclude
+            schedule_date: Date being scheduled (YYYY-MM-DD format)
+            
+        Returns:
+            List of featured content items
+        """
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Parameters for the query
+            params = []
+            
+            # Build query to get featured content
+            query = """
+                SELECT 
+                    a.id as asset_id,
+                    a.guid,
+                    a.content_type,
+                    a.content_title,
+                    a.duration_seconds,
+                    a.duration_category,
+                    a.engagement_score,
+                    a.theme,
+                    i.id as instance_id,
+                    i.file_name,
+                    i.file_path,
+                    i.encoded_date,
+                    sm.last_scheduled_date,
+                    sm.total_airings,
+                    CASE 
+                        WHEN EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'scheduling_metadata' 
+                            AND column_name = 'featured'
+                        ) THEN COALESCE(sm.featured, FALSE)
+                        ELSE FALSE
+                    END as featured,
+                    sm.content_expiry_date
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE 
+                    a.analysis_completed = TRUE
+                    AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
+                    AND NOT (i.file_path LIKE %s)
+            """
+            params.append('%FILL%')
+            
+            # Add featured filter - only if column exists
+            query += """
+                AND CASE 
+                    WHEN EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'scheduling_metadata' 
+                        AND column_name = 'featured'
+                    ) THEN COALESCE(sm.featured, FALSE) = TRUE
+                    ELSE FALSE
+                END
+            """
+            
+            # Add expiry date check
+            if schedule_date:
+                query += " AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > %s::date)"
+                params.append(schedule_date)
+            else:
+                query += " AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP)"
+            
+            # Handle exclude_ids
+            if exclude_ids and len(exclude_ids) > 0:
+                placeholders = ','.join(['%s'] * len(exclude_ids))
+                query += f" AND a.id NOT IN ({placeholders})"
+                params.extend(exclude_ids)
+            
+            # Order by last scheduled date and engagement score
+            query += """
+                ORDER BY 
+                    sm.last_scheduled_date ASC NULLS FIRST,
+                    a.engagement_score DESC NULLS LAST,
+                    RANDOM()
+            """
+            
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            cursor.close()
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error getting featured content: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            db_manager._put_connection(conn)
+        
+        return []
+    
     def _get_content_with_progressive_delays(self, duration_category: str, exclude_ids: List[int], 
                                             schedule_date: str, scheduled_asset_times: dict = None) -> List[Dict[str, Any]]:
         """Get available content, progressively relaxing delay requirements if needed
@@ -359,6 +483,7 @@ class PostgreSQLScheduler:
                         scheduling_config = config_mgr.get_scheduling_settings()
                         replay_delays = scheduling_config.get('replay_delays', {})
                         additional_delays = scheduling_config.get('additional_delay_per_airing', {})
+                        featured_delay = scheduling_config.get('featured_delay', 1.5)
                         
                         base_delay = replay_delays.get(duration_category, 24)
                         additional_delay = additional_delays.get(duration_category, 2)
@@ -394,8 +519,23 @@ class PostgreSQLScheduler:
                     i.encoded_date,
                     sm.last_scheduled_date,
                     sm.total_airings,
+                    CASE 
+                        WHEN EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'scheduling_metadata' 
+                            AND column_name = 'featured'
+                        ) THEN COALESCE(sm.featured, FALSE)
+                        ELSE FALSE
+                    END as featured,
                     COALESCE(sm.content_expiry_date, %s) as content_expiry_date,
-                    (%s + (COALESCE(sm.total_airings, 0) * %s)) as required_delay_hours,
+                    CASE 
+                        WHEN EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'scheduling_metadata' 
+                            AND column_name = 'featured'
+                        ) AND COALESCE(sm.featured, FALSE) = TRUE THEN %s
+                        ELSE (%s + (COALESCE(sm.total_airings, 0) * %s))
+                    END as required_delay_hours,
                     EXTRACT(EPOCH FROM (%s - COALESCE(sm.last_scheduled_date, %s))) / 3600 as hours_since_last_scheduled
                 FROM assets a
                 JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
@@ -407,8 +547,9 @@ class PostgreSQLScheduler:
             # Parameters for the main query
             params = [
                 default_expiry_date,  # for COALESCE in SELECT
-                base_delay,           # for required_delay_hours
-                additional_delay,     # for required_delay_hours
+                featured_delay,       # for required_delay_hours CASE featured
+                base_delay,           # for required_delay_hours CASE normal
+                additional_delay,     # for required_delay_hours CASE normal
                 compare_date,         # for hours_since_last_scheduled
                 epoch_start,          # for hours_since_last_scheduled fallback
             ]
@@ -433,19 +574,21 @@ class PostgreSQLScheduler:
                 query_parts.append("""
                     AND (
                         sm.last_scheduled_date IS NULL 
-                        OR EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= (%s + (COALESCE(sm.total_airings, 0) * %s))
+                        OR EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 
+                            CASE 
+                                WHEN EXISTS (
+                                    SELECT 1 FROM information_schema.columns 
+                                    WHERE table_name = 'scheduling_metadata' 
+                                    AND column_name = 'featured'
+                                ) AND COALESCE(sm.featured, FALSE) = TRUE THEN %s
+                                ELSE (%s + (COALESCE(sm.total_airings, 0) * %s))
+                            END
                     )
                 """)
-                params.extend([compare_date, base_delay, additional_delay])
+                params.extend([compare_date, featured_delay, base_delay, additional_delay])
             
-            # Add existence check
-            query_parts.append("""
-                AND NOT EXISTS (
-                    SELECT 1 FROM scheduled_items si
-                    WHERE si.asset_id = a.id
-                        AND si.available_for_scheduling = FALSE
-                )
-            """)
+            # Remove invalid existence check - scheduled_items doesn't have available_for_scheduling column
+            # The available_for_scheduling check is already done via scheduling_metadata table above
             
             # Handle exclude_ids
             if exclude_ids and len(exclude_ids) > 0:
@@ -619,17 +762,57 @@ class PostgreSQLScheduler:
             consecutive_no_content_cycles = 0  # Track cycles where all categories fail
             max_no_content_cycles = 3  # Max full rotation cycles with no content
             
-            while total_duration < self.target_duration_seconds:
-                # Get next duration category
-                duration_category = self._get_next_duration_category()
+            # Track featured content scheduling
+            last_featured_time = None
+            featured_content_index = 0  # Track which featured content to use next
+            
+            # Get featured delay from config
+            try:
+                from config_manager import ConfigManager
+                config_mgr = ConfigManager()
+                scheduling_config = config_mgr.get_scheduling_settings()
+                featured_delay = scheduling_config.get('featured_delay', 1.5)
+            except:
+                featured_delay = 1.5
                 
-                # Get available content with progressive delay relaxation
-                available_content = self._get_content_with_progressive_delays(
-                    duration_category, 
-                    exclude_ids=scheduled_asset_ids,
-                    schedule_date=schedule_date,
-                    scheduled_asset_times=scheduled_asset_times
-                )
+            while total_duration < self.target_duration_seconds:
+                # Check if we should schedule featured content
+                if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
+                    # Try to get featured content
+                    # Don't exclude already scheduled IDs for featured content - they should repeat!
+                    featured_content = self.get_featured_content(
+                        exclude_ids=[],
+                        schedule_date=schedule_date
+                    )
+                    
+                    if featured_content:
+                        # Use round-robin selection of featured content
+                        content = featured_content[featured_content_index % len(featured_content)]
+                        featured_content_index += 1
+                        
+                        logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} at {total_duration/3600:.2f} hours")
+                        
+                        # Skip regular rotation for this iteration
+                        available_content = [content]
+                    else:
+                        # No featured content available, continue with regular rotation
+                        logger.debug("No featured content available, continuing with regular rotation")
+                        duration_category = self._get_next_duration_category()
+                        available_content = self._get_content_with_progressive_delays(
+                            duration_category, 
+                            exclude_ids=scheduled_asset_ids,
+                            schedule_date=schedule_date,
+                            scheduled_asset_times=scheduled_asset_times
+                        )
+                else:
+                    # Regular rotation
+                    duration_category = self._get_next_duration_category()
+                    available_content = self._get_content_with_progressive_delays(
+                        duration_category, 
+                        exclude_ids=scheduled_asset_ids,
+                        schedule_date=schedule_date,
+                        scheduled_asset_times=scheduled_asset_times
+                    )
                 
                 if not available_content:
                     logger.warning(f"No available content for category: {duration_category} even without delays")
@@ -686,62 +869,72 @@ class PostgreSQLScheduler:
                 content = None
                 best_score = -1
                 
-                # Always check theme conflicts for IDs and spots regardless of content type
-                # These short durations are typically PSAs/announcements that shouldn't repeat themes
-                
-                # Score and rank all available content
-                for candidate in available_content:
-                    asset_id = candidate['asset_id']
-                    current_category = candidate.get('duration_category', '')
-                    current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
+                # If we have featured content selected, use it directly without scoring
+                if available_content and len(available_content) == 1 and available_content[0].get('featured'):
+                    content = available_content[0]
+                    logger.debug(f"Using featured content directly: {content.get('content_title', 'Unknown')}")
+                else:
+                    # Always check theme conflicts for IDs and spots regardless of content type
+                    # These short durations are typically PSAs/announcements that shouldn't repeat themes
                     
-                    # Start with base score from SQL query (already calculated)
-                    score = 100  # Base score
+                    # Score and rank all available content
+                    for candidate in available_content:
+                        asset_id = candidate['asset_id']
+                        current_category = candidate.get('duration_category', '')
+                        current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
                     
-                    # Apply fatigue penalty based on recent plays within this schedule
-                    if asset_id in recent_plays:
-                        plays = recent_plays[asset_id]
-                        for play_time in plays:
-                            time_gap = (total_duration - play_time) / 3600  # Hours since last play
+                        # Start with base score from SQL query (already calculated)
+                        score = 100  # Base score
+                    
+                        # Boost score for featured content
+                        if candidate.get('featured', False):
+                            score += 150  # Significant boost for featured content
+                            logger.debug(f"Featured content boost for '{candidate.get('content_title', 'Unknown')}'")
+                    
+                        # Apply fatigue penalty based on recent plays within this schedule
+                        if asset_id in recent_plays:
+                            plays = recent_plays[asset_id]
+                            for play_time in plays:
+                                time_gap = (total_duration - play_time) / 3600  # Hours since last play
+                                
+                                if time_gap < 1:
+                                    score -= 100  # Heavy penalty for content played within 1 hour
+                                elif time_gap < 2:
+                                    score -= 50   # Medium penalty for 1-2 hours
+                                elif time_gap < 4:
+                                    score -= 25   # Light penalty for 2-4 hours
+                                elif time_gap < 6:
+                                    score -= 10   # Very light penalty for 4-6 hours
                             
-                            if time_gap < 1:
-                                score -= 100  # Heavy penalty for content played within 1 hour
-                            elif time_gap < 2:
-                                score -= 50   # Medium penalty for 1-2 hours
-                            elif time_gap < 4:
-                                score -= 25   # Light penalty for 2-4 hours
-                            elif time_gap < 6:
-                                score -= 10   # Very light penalty for 4-6 hours
-                        
-                        # Additional penalty for multiple plays
-                        if len(plays) >= 3:
-                            score -= 50 * (len(plays) - 2)  # Heavy penalty for 3+ plays
+                            # Additional penalty for multiple plays
+                            if len(plays) >= 3:
+                                score -= 50 * (len(plays) - 2)  # Heavy penalty for 3+ plays
                     
-                    # Special handling for IDs - stronger rotation requirements
-                    if current_category == 'id':
-                        if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
-                            last_play = recent_plays[asset_id][-1]
-                            time_gap = (total_duration - last_play) / 3600
-                            if time_gap < 2:
-                                score -= 300  # Very heavy penalty for IDs within 2 hours
-                        
-                        # Bonus for IDs not recently played
-                        if asset_id not in recent_plays:
-                            score += 50
+                        # Special handling for IDs - stronger rotation requirements
+                        if current_category == 'id':
+                            if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
+                                last_play = recent_plays[asset_id][-1]
+                                time_gap = (total_duration - last_play) / 3600
+                                if time_gap < 2:
+                                    score -= 300  # Very heavy penalty for IDs within 2 hours
+                            
+                            # Bonus for IDs not recently played
+                            if asset_id not in recent_plays:
+                                score += 50
                     
-                    # Theme conflict penalty for IDs and spots (regardless of content type)
-                    # These short-form content should never have the same theme back-to-back
-                    if (last_scheduled_category in ['id', 'spots'] and 
-                        current_category in ['id', 'spots'] and
-                        current_theme and last_scheduled_theme and
-                        current_theme.lower() == last_scheduled_theme.lower()):
-                        score -= 200  # Heavy penalty for same theme
-                        logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
+                        # Theme conflict penalty for IDs and spots (regardless of content type)
+                        # These short-form content should never have the same theme back-to-back
+                        if (last_scheduled_category in ['id', 'spots'] and 
+                            current_category in ['id', 'spots'] and
+                            current_theme and last_scheduled_theme and
+                            current_theme.lower() == last_scheduled_theme.lower()):
+                            score -= 200  # Heavy penalty for same theme
+                            logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
                     
-                    # Track best scoring content
-                    if score > best_score:
-                        best_score = score
-                        content = candidate
+                        # Track best scoring content
+                        if score > best_score:
+                            best_score = score
+                            content = candidate
                 
                 # If no good content found (all have very negative scores), use the first available
                 if not content and available_content:
@@ -852,11 +1045,18 @@ class PostgreSQLScheduler:
                 sequence_number += 1
                 
                 # Advance rotation after successfully scheduling content
-                self._advance_rotation()
+                # BUT NOT for featured content - it should not affect the rotation
+                if not content.get('featured'):
+                    self._advance_rotation()
                 
                 # Update theme tracking for next iteration
                 last_scheduled_theme = content.get('theme', '').strip() if content.get('theme') else None
                 last_scheduled_category = content.get('duration_category', '')
+                
+                # Update featured content tracking if we just scheduled a featured item
+                if content.get('featured'):
+                    last_featured_time = total_duration
+                    logger.info(f"✨ Featured content scheduled at {total_duration/3600:.2f} hours, next featured at ~{(total_duration + featured_delay * 3600)/3600:.2f} hours")
                 
                 # Calculate actual air time for this item
                 # The item starts at (total_duration - content_duration) seconds from schedule start
@@ -1943,6 +2143,19 @@ class PostgreSQLScheduler:
             consecutive_no_content_cycles = 0  # Track cycles where all categories fail
             max_no_content_cycles = 3  # Max full rotation cycles with no content
             
+            # Track featured content scheduling
+            last_featured_time = None
+            featured_content_index = 0  # Track which featured content to use next
+            
+            # Get featured delay from config
+            try:
+                from config_manager import ConfigManager
+                config_mgr = ConfigManager()
+                scheduling_config = config_mgr.get_scheduling_settings()
+                featured_delay = scheduling_config.get('featured_delay', 1.5)
+            except:
+                featured_delay = 1.5
+            
             # Generate content for each day
             days_completed = 0
             for day_offset in range(7):
@@ -1962,16 +2175,43 @@ class PostgreSQLScheduler:
                 day_start_time = total_duration  # Track where this day started
                 
                 while total_duration < day_target_seconds:
-                    # Get next duration category
-                    duration_category = self._get_next_duration_category()
-                    
-                    # Get available content with progressive delay relaxation
-                    available_content = self._get_content_with_progressive_delays(
-                        duration_category, 
-                        exclude_ids=day_scheduled_asset_ids,
-                        schedule_date=current_day.strftime('%Y-%m-%d'),
-                        scheduled_asset_times=None
-                    )
+                    # Check if we should schedule featured content
+                    if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
+                        # Try to get featured content
+                        # Don't exclude already scheduled IDs for featured content - they should repeat!
+                        featured_content = self.get_featured_content(
+                            exclude_ids=[],
+                            schedule_date=current_day.strftime('%Y-%m-%d')
+                        )
+                        
+                        if featured_content:
+                            # Use round-robin selection of featured content
+                            content = featured_content[featured_content_index % len(featured_content)]
+                            featured_content_index += 1
+                            
+                            logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} at {total_duration/3600:.2f} hours on {day_name}")
+                            
+                            # Skip regular rotation for this iteration
+                            available_content = [content]
+                        else:
+                            # No featured content available, continue with regular rotation
+                            logger.debug("No featured content available, continuing with regular rotation")
+                            duration_category = self._get_next_duration_category()
+                            available_content = self._get_content_with_progressive_delays(
+                                duration_category, 
+                                exclude_ids=day_scheduled_asset_ids,
+                                schedule_date=current_day.strftime('%Y-%m-%d'),
+                                scheduled_asset_times=None
+                            )
+                    else:
+                        # Regular rotation
+                        duration_category = self._get_next_duration_category()
+                        available_content = self._get_content_with_progressive_delays(
+                            duration_category, 
+                            exclude_ids=day_scheduled_asset_ids,
+                            schedule_date=current_day.strftime('%Y-%m-%d'),
+                            scheduled_asset_times=None
+                        )
                     
                     if not available_content:
                         current_time_str = self._seconds_to_time(total_duration % (24 * 60 * 60))
@@ -2034,17 +2274,27 @@ class PostgreSQLScheduler:
                     content = None
                     best_score = -1
                     
-                    # Always check theme conflicts for IDs and spots regardless of content type
-                    # These short durations are typically PSAs/announcements that shouldn't repeat themes
-                    
-                    # Score and rank all available content
-                    for candidate in available_content:
-                        asset_id = candidate['asset_id']
-                        current_category = candidate.get('duration_category', '')
-                        current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
+                    # If we have featured content selected, use it directly without scoring
+                    if available_content and len(available_content) == 1 and available_content[0].get('featured'):
+                        content = available_content[0]
+                        logger.debug(f"Using featured content directly: {content.get('content_title', 'Unknown')}")
+                    else:
+                        # Always check theme conflicts for IDs and spots regardless of content type
+                        # These short durations are typically PSAs/announcements that shouldn't repeat themes
+                        
+                        # Score and rank all available content
+                        for candidate in available_content:
+                            asset_id = candidate['asset_id']
+                            current_category = candidate.get('duration_category', '')
+                            current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
                         
                         # Start with base score from SQL query (already calculated)
                         score = 100  # Base score
+                        
+                        # Boost score for featured content
+                        if candidate.get('featured', False):
+                            score += 150  # Significant boost for featured content
+                            logger.debug(f"Featured content boost for '{candidate.get('content_title', 'Unknown')}'")
                         
                         # Apply fatigue penalty based on recent plays within this schedule
                         if asset_id in recent_plays:
@@ -2209,11 +2459,18 @@ class PostgreSQLScheduler:
                     sequence_number += 1
                     
                     # Advance rotation after successfully scheduling content
-                    self._advance_rotation()
+                    # BUT NOT for featured content - it should not affect the rotation
+                    if not content.get('featured'):
+                        self._advance_rotation()
                     
                     # Update theme tracking for next iteration
                     last_scheduled_theme = content.get('theme', '').strip() if content.get('theme') else None
                     last_scheduled_category = content.get('duration_category', '')
+                    
+                    # Update featured content tracking if we just scheduled a featured item
+                    if content.get('featured'):
+                        last_featured_time = total_duration
+                        logger.info(f"✨ Featured content scheduled at {total_duration/3600:.2f} hours on {day_name}, next featured at ~{(total_duration + featured_delay * 3600)/3600:.2f} hours")
                     
                     # Calculate actual air time for this item
                     # The item starts at (total_duration - content_duration) seconds from schedule start
@@ -2415,6 +2672,19 @@ class PostgreSQLScheduler:
             consecutive_no_content_cycles = 0  # Track cycles where all categories fail
             max_no_content_cycles = 3  # Max full rotation cycles with no content
             
+            # Track featured content scheduling
+            last_featured_time = None
+            featured_content_index = 0  # Track which featured content to use next
+            
+            # Get featured delay from config
+            try:
+                from config_manager import ConfigManager
+                config_mgr = ConfigManager()
+                scheduling_config = config_mgr.get_scheduling_settings()
+                featured_delay = scheduling_config.get('featured_delay', 1.5)
+            except:
+                featured_delay = 1.5
+            
             # Generate content for each day of the month
             for day in range(1, days_in_month + 1):
                 current_date = datetime(year, month, day)
@@ -2432,16 +2702,43 @@ class PostgreSQLScheduler:
                 day_target_seconds = day * 24 * 60 * 60
                 
                 while total_duration < day_target_seconds:
-                    # Get next duration category
-                    duration_category = self._get_next_duration_category()
-                    
-                    # Get available content with progressive delay relaxation
-                    available_content = self._get_content_with_progressive_delays(
-                        duration_category, 
-                        exclude_ids=day_scheduled_asset_ids,
-                        schedule_date=current_day.strftime('%Y-%m-%d'),
-                        scheduled_asset_times=None
-                    )
+                    # Check if we should schedule featured content
+                    if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
+                        # Try to get featured content
+                        # Don't exclude already scheduled IDs for featured content - they should repeat!
+                        featured_content = self.get_featured_content(
+                            exclude_ids=[],
+                            schedule_date=current_date.strftime('%Y-%m-%d')
+                        )
+                        
+                        if featured_content:
+                            # Use round-robin selection of featured content
+                            content = featured_content[featured_content_index % len(featured_content)]
+                            featured_content_index += 1
+                            
+                            logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} at {total_duration/3600:.2f} hours on {current_date.strftime('%B %d')}")
+                            
+                            # Skip regular rotation for this iteration
+                            available_content = [content]
+                        else:
+                            # No featured content available, continue with regular rotation
+                            logger.debug("No featured content available, continuing with regular rotation")
+                            duration_category = self._get_next_duration_category()
+                            available_content = self._get_content_with_progressive_delays(
+                                duration_category, 
+                                exclude_ids=day_scheduled_asset_ids,
+                                schedule_date=current_date.strftime('%Y-%m-%d'),
+                                scheduled_asset_times=None
+                            )
+                    else:
+                        # Regular rotation
+                        duration_category = self._get_next_duration_category()
+                        available_content = self._get_content_with_progressive_delays(
+                            duration_category, 
+                            exclude_ids=day_scheduled_asset_ids,
+                            schedule_date=current_date.strftime('%Y-%m-%d'),
+                            scheduled_asset_times=None
+                        )
                     
                     if not available_content:
                         current_time_str = self._seconds_to_time(total_duration % (24 * 60 * 60))
@@ -2465,28 +2762,33 @@ class PostgreSQLScheduler:
                     # Select the best content, avoiding same theme back-to-back for PSAs, spots, and IDs
                     content = None
                     
-                    # Try to find content that doesn't have the same theme for IDs and spots
-                    for candidate in available_content:
-                        current_category = candidate.get('duration_category', '')
-                        current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
-                        
-                        # Theme conflict check for IDs and spots (regardless of content type)
-                        if (last_scheduled_category in ['id', 'spots'] and 
-                            current_category in ['id', 'spots'] and
-                            current_theme and last_scheduled_theme and
-                            current_theme.lower() == last_scheduled_theme.lower()):
-                            logger.info(f"Skipping content with same theme '{current_theme}' as previous item "
-                                      f"({last_scheduled_category} -> {current_category})")
-                            continue
-                        
-                        # This content is acceptable
-                        content = candidate
-                        break
-                    
-                    # If no content found without theme conflict, use the first available
-                    if not content and available_content:
+                    # If we have featured content selected, use it directly without theme checking
+                    if available_content and len(available_content) == 1 and available_content[0].get('featured'):
                         content = available_content[0]
-                        logger.warning(f"No content available without theme conflict, using first available")
+                        logger.debug(f"Using featured content directly: {content.get('content_title', 'Unknown')}")
+                    else:
+                        # Try to find content that doesn't have the same theme for IDs and spots
+                        for candidate in available_content:
+                            current_category = candidate.get('duration_category', '')
+                            current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
+                            
+                            # Theme conflict check for IDs and spots (regardless of content type)
+                            if (last_scheduled_category in ['id', 'spots'] and 
+                                current_category in ['id', 'spots'] and
+                                current_theme and last_scheduled_theme and
+                                current_theme.lower() == last_scheduled_theme.lower()):
+                                logger.info(f"Skipping content with same theme '{current_theme}' as previous item "
+                                          f"({last_scheduled_category} -> {current_category})")
+                                continue
+                            
+                            # This content is acceptable
+                            content = candidate
+                            break
+                        
+                        # If no content found without theme conflict, use the first available
+                        if not content and available_content:
+                            content = available_content[0]
+                            logger.warning(f"No content available without theme conflict, using first available")
                     
                     if not content:
                         # This shouldn't happen if available_content has items
@@ -2553,11 +2855,18 @@ class PostgreSQLScheduler:
                     sequence_number += 1
                     
                     # Advance rotation after successfully scheduling content
-                    self._advance_rotation()
+                    # BUT NOT for featured content - it should not affect the rotation
+                    if not content.get('featured'):
+                        self._advance_rotation()
                     
                     # Update theme tracking for next iteration
                     last_scheduled_theme = content.get('theme', '').strip() if content.get('theme') else None
                     last_scheduled_category = content.get('duration_category', '')
+                    
+                    # Update featured content tracking if we just scheduled a featured item
+                    if content.get('featured'):
+                        last_featured_time = total_duration
+                        logger.info(f"✨ Featured content scheduled at {total_duration/3600:.2f} hours on {current_date.strftime('%B %d')}, next featured at ~{(total_duration + featured_delay * 3600)/3600:.2f} hours")
                     
                     # Calculate actual air time for this item
                     # The item starts at (total_duration - content_duration) seconds from schedule start

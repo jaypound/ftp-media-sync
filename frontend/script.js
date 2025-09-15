@@ -4727,6 +4727,11 @@ async function loadAvailableContent() {
         
         if (result.success) {
             availableContent = result.content || [];
+            // Debug: Log the first content item to see its structure
+            if (availableContent.length > 0) {
+                console.log('Sample content item structure:', availableContent[0]);
+                console.log('Featured field value:', availableContent[0].featured);
+            }
             displayAvailableContent();
             log(`✅ Loaded ${availableContent.length} available content items`);
             
@@ -4912,6 +4917,7 @@ function displayAvailableContent() {
             <span class="sort-field" data-field="expiration" onclick="sortContent('expiration')">
                 Expiration ${getSortIcon('expiration')}
             </span>
+            <span style="text-align: center;">Featured</span>
             <span style="text-align: center;">Actions</span>
         </div>
     `;
@@ -4979,6 +4985,13 @@ function displayAvailableContent() {
                 <span class="content-category">${durationCategory ? durationCategory.toUpperCase() : 'UNKNOWN'}</span>
                 <span class="content-score">${engagementScore}%</span>
                 <span class="content-expiration ${expirationClass}">${expirationDisplay}</span>
+                <div class="content-featured" style="text-align: center;">
+                    <input type="checkbox" 
+                           class="featured-checkbox" 
+                           ${content.featured ? 'checked' : ''} 
+                           onchange="updateFeaturedStatus('${contentId}', this.checked)"
+                           title="Mark as featured for heavy rotation">
+                </div>
                 <div class="content-actions">
                     <button class="button small info" onclick="syncContentExpiration('${contentId}')" title="Sync Expiration from Castus">
                         <i class="fas fa-sync"></i>
@@ -8483,6 +8496,72 @@ async function deleteContentFromDatabase(contentId) {
 }
 
 // Sync content expiration from Castus metadata
+function updateFeaturedStatus(contentId, featured) {
+    console.log(`Updating featured status for ${contentId} to ${featured}`);
+    
+    // Find the content item using the appropriate ID field
+    const content = availableContent.find(c => 
+        (c._id && c._id === contentId) || 
+        (c.id && c.id === contentId) ||
+        (c.guid && c.guid === contentId)
+    );
+    
+    if (!content) {
+        console.error('Content not found:', contentId);
+        showNotification('Content not found', 'error');
+        return;
+    }
+    
+    // Use the numeric asset_id from the content
+    const assetId = content.asset_id || content.id;
+    
+    if (!assetId) {
+        console.error('Asset ID not found for content:', content);
+        showNotification('Asset ID not found', 'error');
+        return;
+    }
+    
+    // Call API to update featured status
+    fetch('/api/update-featured-status', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+            asset_id: assetId,
+            featured: featured 
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update local data
+            if (!content.scheduling) {
+                content.scheduling = {};
+            }
+            content.scheduling.featured = featured;
+            
+            showNotification(`Content ${featured ? 'marked as featured' : 'unmarked as featured'}`, 'success');
+        } else {
+            showNotification(data.message || 'Failed to update featured status', 'error');
+            // Revert checkbox state
+            const checkbox = document.querySelector(`[data-content-id="${contentId}"] .featured-checkbox`);
+            if (checkbox) {
+                checkbox.checked = !featured;
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error updating featured status:', error);
+        showNotification('Error updating featured status', 'error');
+        // Revert checkbox state
+        const checkbox = document.querySelector(`[data-content-id="${contentId}"] .featured-checkbox`);
+        if (checkbox) {
+            checkbox.checked = !featured;
+        }
+    });
+}
+
 async function syncContentExpiration(contentId) {
     console.log('syncContentExpiration called for:', contentId);
     

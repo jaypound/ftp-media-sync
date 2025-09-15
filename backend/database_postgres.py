@@ -1048,7 +1048,15 @@ class PostgreSQLDatabaseManager:
                     sm.last_scheduled_date,
                     sm.total_airings,
                     sm.priority_score,
-                    sm.optimal_timeslots
+                    sm.optimal_timeslots,
+                    CASE 
+                        WHEN EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'scheduling_metadata' 
+                            AND column_name = 'featured'
+                        ) THEN COALESCE(sm.featured, FALSE)
+                        ELSE FALSE
+                    END as featured
                 FROM assets a
                 LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
@@ -1138,6 +1146,7 @@ class PostgreSQLDatabaseManager:
                     'topics': topics_by_asset.get(asset_id, []),  # Add topics from tags
                     'engagement_score': row['engagement_score'],
                     'analysis_completed': row['analysis_completed'],
+                    'featured': row.get('featured', False),  # Add featured field at root level
                     'scheduling': {
                         'available_for_scheduling': row.get('available_for_scheduling', True),
                         'content_expiry_date': row['content_expiry_date'],

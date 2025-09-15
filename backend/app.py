@@ -7952,6 +7952,64 @@ def update_content_expiration():
             'message': error_msg
         }), 500
 
+@app.route('/api/update-featured-status', methods=['POST'])
+def update_featured_status():
+    """Update the featured status of content"""
+    logger.info("=== UPDATE FEATURED STATUS REQUEST ===")
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        featured = data.get('featured', False)
+        
+        if not asset_id:
+            return jsonify({
+                'success': False,
+                'message': 'Missing asset_id parameter'
+            })
+        
+        logger.info(f"Setting featured status for asset {asset_id} to {featured}")
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Check if metadata record exists
+                cursor.execute("""
+                    SELECT id FROM scheduling_metadata 
+                    WHERE asset_id = %s
+                """, (asset_id,))
+                
+                if cursor.fetchone():
+                    # Update existing record
+                    cursor.execute("""
+                        UPDATE scheduling_metadata 
+                        SET featured = %s
+                        WHERE asset_id = %s
+                    """, (featured, asset_id))
+                else:
+                    # Create new record
+                    cursor.execute("""
+                        INSERT INTO scheduling_metadata (asset_id, featured)
+                        VALUES (%s, %s)
+                    """, (asset_id, featured))
+                
+                conn.commit()
+                
+                logger.info(f"Successfully updated featured status for asset {asset_id}")
+                return jsonify({
+                    'success': True,
+                    'message': 'Featured status updated successfully'
+                })
+        finally:
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        error_msg = f"Update featured status error: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        }), 500
+
 @app.route('/api/content-expiration-stats', methods=['GET'])
 def get_content_expiration_stats():
     """Get statistics about active and expired content"""
