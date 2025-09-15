@@ -239,32 +239,6 @@ class PostgreSQLScheduler:
         finally:
             db_manager._put_connection(conn)
     
-    def _has_theme_conflict(self, candidate_content: dict, last_scheduled_category: str, 
-                           last_scheduled_theme: str, current_category: str) -> bool:
-        """Check if candidate content has a theme conflict with the last scheduled item
-        
-        Args:
-            candidate_content: The content being considered
-            last_scheduled_category: Category of the last scheduled item
-            last_scheduled_theme: Theme of the last scheduled item
-            current_category: Category we're trying to schedule
-            
-        Returns:
-            True if there's a theme conflict, False otherwise
-        """
-        # Theme conflict check for IDs and spots (regardless of content type)
-        # These short-form content should never have the same theme back-to-back
-        if (last_scheduled_category in ['id', 'spots'] and 
-            current_category in ['id', 'spots']):
-            
-            candidate_theme = candidate_content.get('theme')
-            if (candidate_theme and last_scheduled_theme and
-                candidate_theme.lower() == last_scheduled_theme.lower()):
-                logger.debug(f"Theme conflict detected: '{candidate_theme}' - back-to-back {last_scheduled_category}/{current_category}")
-                return True
-        
-        return False
-    
     def _check_delay_constraint(self, asset_id: int, proposed_time: float, scheduled_times: dict, 
                                delay_hours: float) -> bool:
         """Check if scheduling an asset at proposed_time would violate delay constraints
@@ -797,13 +771,7 @@ class PostgreSQLScheduler:
                     for alt_content in available_content[1:]:  # Skip the first item we already tried
                         alt_duration = float(alt_content['duration_seconds'])
                         if alt_duration <= remaining_seconds:
-                            # Check for theme conflict before accepting this alternative
-                            if self._has_theme_conflict(alt_content, last_scheduled_category, 
-                                                       last_scheduled_theme, duration_category):
-                                logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
-                                continue
-                            
-                            # Found content that fits and has no theme conflict!
+                            # Found content that fits!
                             content = alt_content
                             content_duration = alt_duration
                             found_fitting_content = True
@@ -2142,13 +2110,7 @@ class PostgreSQLScheduler:
                         for alt_content in available_content[1:]:  # Skip the first item we already tried
                             alt_duration = float(alt_content['duration_seconds'])
                             if alt_duration <= remaining_seconds:
-                                # Check for theme conflict before accepting this alternative
-                                if self._has_theme_conflict(alt_content, last_scheduled_category, 
-                                                           last_scheduled_theme, duration_category):
-                                    logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
-                                    continue
-                                
-                                # Found content that fits and has no theme conflict!
+                                # Found content that fits!
                                 content = alt_content
                                 content_duration = alt_duration
                                 found_fitting_content = True
@@ -2506,13 +2468,6 @@ class PostgreSQLScheduler:
                         for alt_content in available_content[1:]:
                             alt_duration = float(alt_content['duration_seconds'])
                             if alt_duration <= remaining_seconds:
-                                # Check for theme conflict before accepting this alternative
-                                if self._has_theme_conflict(alt_content, last_scheduled_category, 
-                                                           last_scheduled_theme, duration_category):
-                                    logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
-                                    continue
-                                
-                                # Found content that fits and has no theme conflict!
                                 content = alt_content
                                 content_duration = alt_duration
                                 found_fitting_content = True
