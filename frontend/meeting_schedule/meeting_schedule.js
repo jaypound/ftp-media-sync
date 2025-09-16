@@ -37,6 +37,10 @@ async function meetingScheduleLoadMeetings() {
         const response = await window.API.get('/meetings');
         if (response.success) {
             meetingScheduleState.meetings = response.meetings;
+            // Debug: log the first meeting to see what fields are available
+            if (response.meetings && response.meetings.length > 0) {
+                console.log('First meeting data:', response.meetings[0]);
+            }
             meetingScheduleDisplayMeetings();
         }
     } catch (error) {

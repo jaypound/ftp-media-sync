@@ -1283,6 +1283,9 @@ class PostgreSQLDatabaseManager:
             """)
             has_end_time = cursor.fetchone() is not None
             
+            # Debug logging for end_time handling
+            logger.info(f"create_meeting: has_end_time={has_end_time}, end_time={end_time}, start_time={start_time}, duration_hours={duration_hours}")
+            
             if has_end_time and end_time:
                 cursor.execute("""
                     INSERT INTO meetings (meeting_name, meeting_date, start_time, end_time, duration_hours, room, atl26_broadcast)

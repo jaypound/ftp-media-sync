@@ -3506,6 +3506,12 @@ def parse_castus_schedule(content):
                     duration = calculate_duration_from_times(item['start_time'], item['end_time'])
                     item['duration_seconds'] = duration
                     
+                    # Debug logging for duration calculation
+                    logger.debug(f"Duration calculation for {filename}:")
+                    logger.debug(f"  Start: {item['start_time']}")
+                    logger.debug(f"  End: {item['end_time']}")
+                    logger.debug(f"  Calculated duration: {duration} seconds ({duration/60:.2f} minutes)")
+                    
                     # For weekly schedules, preserve the day prefix
                     if schedule_data['type'] == 'weekly' and ' ' in item['start_time']:
                         # Parse weekly format like "wed 12:00:15.040 am"
@@ -3578,25 +3584,30 @@ def convert_to_24hour_format(time_str):
 def calculate_duration_from_times(start_time, end_time):
     """Calculate duration in seconds from start/end time strings"""
     try:
-        # Parse times like "12:00 am", "12:30:45.123 pm"
+        # Parse times like "12:00 am", "12:30:45.123 pm", "wed 12:00:15.040 am"
         import re
+        from datetime import datetime
         
         def parse_time(time_str):
+            # Handle weekly format by removing day prefix
+            if ' ' in time_str:
+                parts = time_str.split(' ', 1)
+                # Check if first part is a day abbreviation
+                if len(parts[0]) <= 3 and parts[0].lower() in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']:
+                    time_str = parts[1]
+            
             # Extract milliseconds if present
             milliseconds_match = re.search(r'\.(\d+)', time_str)
             milliseconds = float(f"0.{milliseconds_match.group(1)}") if milliseconds_match else 0.0
             
             # Remove milliseconds for parsing
-            time_clean = re.sub(r'\.\d+', '', time_str)
-            
-            # Parse time
-            from datetime import datetime
+            time_clean = re.sub(r'\.\d+', '', time_str).strip()
             
             # Try different time formats
-            for fmt in ["%I:%M:%S %p", "%I:%M %p"]:
+            for fmt in ["%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M"]:
                 try:
                     dt = datetime.strptime(time_clean, fmt)
-                    # Add milliseconds as fractional seconds
+                    # Return datetime and milliseconds separately for precision
                     return dt, milliseconds
                 except ValueError:
                     continue
@@ -3610,11 +3621,22 @@ def calculate_duration_from_times(start_time, end_time):
         if end_dt < start_dt:
             end_dt = end_dt.replace(day=end_dt.day + 1)
         
-        # Calculate duration including milliseconds
-        duration = (end_dt - start_dt).total_seconds() + (end_ms - start_ms)
-        return duration
+        # Calculate duration with full precision
+        # Use total_seconds() for the datetime difference and add millisecond difference
+        duration_seconds = (end_dt - start_dt).total_seconds()
+        millisecond_diff = end_ms - start_ms
+        total_duration = duration_seconds + millisecond_diff
         
-    except:
+        # Log for debugging
+        logger.debug(f"Duration calculation detail:")
+        logger.debug(f"  Start: {start_dt} + {start_ms}s")
+        logger.debug(f"  End: {end_dt} + {end_ms}s")
+        logger.debug(f"  Duration: {total_duration}s ({total_duration/60:.6f} minutes)")
+        
+        return total_duration
+        
+    except Exception as e:
+        logger.error(f"Error calculating duration: {e}")
         return 0
 
 @app.route('/api/validate-template-files', methods=['POST'])
@@ -6908,6 +6930,9 @@ def get_meetings():
     """Get all meetings"""
     try:
         meetings = db_manager.get_all_meetings()
+        # Debug logging to check end_time values
+        if meetings and len(meetings) > 0:
+            logger.info(f"First meeting data returned: {meetings[0]}")
         return jsonify({
             'status': 'success',
             'meetings': meetings
@@ -6959,6 +6984,9 @@ def create_meeting():
         else:
             # Fallback to duration_hours if end_time not provided
             duration_hours = float(data.get('duration_hours', 2.0))
+        
+        # Debug logging to track end_time handling
+        logger.info(f"Creating meeting with: start_time={data.get('start_time')}, end_time={end_time}, duration_hours={duration_hours}")
         
         meeting_id = db_manager.create_meeting(
             meeting_name=data.get('meeting_name'),
@@ -7220,16 +7248,29 @@ def generate_daily_schedule_template():
             
             # Use end_time if available, otherwise calculate from duration
             if 'end_time' in meeting and meeting['end_time']:
-                end_time = meeting['end_time'].lower()
+                end_time = meeting['end_time']
+                # Ensure time has seconds for precision
+                if end_time.count(':') == 1:  # Only HH:MM format
+                    # Add seconds for precision
+                    from datetime import datetime
+                    dt = datetime.strptime(end_time, '%I:%M %p')
+                    end_time = dt.strftime('%I:%M:%S %p')
             else:
                 # Fallback to calculating from duration for backward compatibility
                 duration_hours = meeting.get('duration_hours', 2.0)
                 from datetime import datetime, timedelta
                 start_dt = datetime.strptime(start_time, '%I:%M %p')
                 end_dt = start_dt + timedelta(hours=duration_hours)
-                end_time = end_dt.strftime('%I:%M %p').lower()
+                end_time = end_dt.strftime('%I:%M:%S %p')
+            
+            # Ensure start time also has seconds
+            if start_time.count(':') == 1:  # Only HH:MM format
+                from datetime import datetime
+                dt = datetime.strptime(start_time, '%I:%M %p')
+                start_time = dt.strftime('%I:%M:%S %p')
             
             start_time_lower = start_time.lower()
+            end_time_lower = end_time.lower()
             
             # Generate a consistent GUID for the SDI input
             guid_map = {
@@ -7245,7 +7286,7 @@ def generate_daily_schedule_template():
                 '\tloop=0',
                 f'\tguid={guid}',
                 f'\tstart={start_time_lower}',
-                f'\tend={end_time}',
+                f'\tend={end_time_lower}',
                 '}'
             ])
         
@@ -7305,15 +7346,26 @@ def generate_weekly_schedule_template():
             
             # Use end_time if available, otherwise calculate from duration
             if 'end_time' in meeting and meeting['end_time']:
-                end_time = meeting['end_time'].lower()
+                end_time = meeting['end_time']
+                # Ensure time has seconds for precision
+                if end_time.count(':') == 1:  # Only HH:MM format
+                    # Add seconds for precision
+                    dt = datetime.strptime(end_time, '%I:%M %p')
+                    end_time = dt.strftime('%I:%M:%S %p')
             else:
                 # Fallback to calculating from duration for backward compatibility
                 duration_hours = meeting.get('duration_hours', 2.0)
                 start_dt = datetime.strptime(start_time, '%I:%M %p')
                 end_dt = start_dt + timedelta(hours=duration_hours)
-                end_time = end_dt.strftime('%I:%M %p').lower()
+                end_time = end_dt.strftime('%I:%M:%S %p')
+            
+            # Ensure start time also has seconds
+            if start_time.count(':') == 1:  # Only HH:MM format
+                dt = datetime.strptime(start_time, '%I:%M %p')
+                start_time = dt.strftime('%I:%M:%S %p')
             
             start_time_lower = start_time.lower()
+            end_time_lower = end_time.lower()
             
             # Generate GUID
             guid_map = {
@@ -7329,7 +7381,7 @@ def generate_weekly_schedule_template():
                 '\tloop=0',
                 f'\tguid={guid}',
                 f'\tstart={day_name} {start_time_lower}',
-                f'\tend={day_name} {end_time}',
+                f'\tend={day_name} {end_time_lower}',
                 '}'
             ])
         
@@ -7396,15 +7448,26 @@ def generate_monthly_schedule_template():
             
             # Use end_time if available, otherwise calculate from duration
             if 'end_time' in meeting and meeting['end_time']:
-                end_time = meeting['end_time'].lower()
+                end_time = meeting['end_time']
+                # Ensure time has seconds for precision
+                if end_time.count(':') == 1:  # Only HH:MM format
+                    # Add seconds for precision
+                    dt = datetime.strptime(end_time, '%I:%M %p')
+                    end_time = dt.strftime('%I:%M:%S %p')
             else:
                 # Fallback to calculating from duration for backward compatibility
                 duration_hours = meeting.get('duration_hours', 2.0)
                 start_dt = datetime.strptime(start_time, '%I:%M %p')
                 end_dt = start_dt + timedelta(hours=duration_hours)
-                end_time = end_dt.strftime('%I:%M %p').lower()
+                end_time = end_dt.strftime('%I:%M:%S %p')
+            
+            # Ensure start time also has seconds
+            if start_time.count(':') == 1:  # Only HH:MM format
+                dt = datetime.strptime(start_time, '%I:%M %p')
+                start_time = dt.strftime('%I:%M:%S %p')
             
             start_time_lower = start_time.lower()
+            end_time_lower = end_time.lower()
             
             # Generate GUID
             guid_map = {
@@ -7420,7 +7483,7 @@ def generate_monthly_schedule_template():
                 '\tloop=0',
                 f'\tguid={guid}',
                 f'\tstart=day {day_of_month} {start_time_lower}',
-                f'\tend=day {day_of_month} {end_time}',
+                f'\tend=day {day_of_month} {end_time_lower}',
                 '}'
             ])
         

@@ -65,9 +65,12 @@ function schedulingDisplayTemplate(template) {
         });
     }
     
+    // Round the total duration to avoid floating point precision issues
+    totalDuration = Math.round(totalDuration * 1000) / 1000;
+    
     const hours = Math.floor(totalDuration / 3600);
     const minutes = Math.floor((totalDuration % 3600) / 60);
-    const seconds = Math.floor(totalDuration % 60);
+    const seconds = Math.round(totalDuration % 60);
     const durationStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     
     const templateDurationEl = document.getElementById('schedulingTemplateDuration');
