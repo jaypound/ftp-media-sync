@@ -67,16 +67,14 @@ class PostgreSQLScheduler:
         Returns:
             True if featured content should be scheduled next
         """
-        if last_featured_time is None:
-            # No featured content scheduled yet, schedule immediately
-            return True
-        
         # Convert featured_delay from hours to seconds
         featured_delay_seconds = featured_delay * 3600
         
         # Check if enough time has passed since last featured content
         time_since_last_featured = total_duration - last_featured_time
         
+        # Allow featured content immediately at the start (when last_featured_time is 0 and total_duration is small)
+        # or after the delay has passed
         return time_since_last_featured >= featured_delay_seconds
     
     def get_featured_content(self, exclude_ids: List[int] = None, schedule_date: str = None) -> List[Dict[str, Any]]:
@@ -763,7 +761,7 @@ class PostgreSQLScheduler:
             max_no_content_cycles = 3  # Max full rotation cycles with no content
             
             # Track featured content scheduling
-            last_featured_time = None
+            last_featured_time = 0  # Initialize to 0 so featured content can be scheduled immediately
             featured_content_index = 0  # Track which featured content to use next
             
             # Get featured delay from config
@@ -772,31 +770,32 @@ class PostgreSQLScheduler:
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
                 featured_delay = scheduling_config.get('featured_delay', 1.5)
+                logger.info(f"Featured content delay configured: {featured_delay} hours")
             except:
                 featured_delay = 1.5
+                logger.info(f"Using default featured delay: {featured_delay} hours")
                 
             while total_duration < self.target_duration_seconds:
-                # Check if we should schedule featured content
+                # Check if we should try to schedule featured content
                 if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
-                    # Try to get featured content
-                    # Don't exclude already scheduled IDs for featured content - they should repeat!
+                    # Get all available featured content
                     featured_content = self.get_featured_content(
                         exclude_ids=[],
                         schedule_date=schedule_date
                     )
                     
                     if featured_content:
+                        # We have featured content and enough time has passed
                         # Use round-robin selection of featured content
                         content = featured_content[featured_content_index % len(featured_content)]
                         featured_content_index += 1
                         
-                        logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} at {total_duration/3600:.2f} hours")
+                        logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} "
+                                  f"at {total_duration/3600:.2f} hours")
                         
-                        # Skip regular rotation for this iteration
                         available_content = [content]
                     else:
-                        # No featured content available, continue with regular rotation
-                        logger.debug("No featured content available, continuing with regular rotation")
+                        # No featured content available, get regular content
                         duration_category = self._get_next_duration_category()
                         available_content = self._get_content_with_progressive_delays(
                             duration_category, 
@@ -805,7 +804,7 @@ class PostgreSQLScheduler:
                             scheduled_asset_times=scheduled_asset_times
                         )
                 else:
-                    # Regular rotation
+                    # Not time for featured content yet, get regular content
                     duration_category = self._get_next_duration_category()
                     available_content = self._get_content_with_progressive_delays(
                         duration_category, 
@@ -1044,8 +1043,8 @@ class PostgreSQLScheduler:
                 
                 sequence_number += 1
                 
-                # Advance rotation after successfully scheduling content
-                # BUT NOT for featured content - it should not affect the rotation
+                # Advance rotation only if this wasn't featured content
+                # Featured content doesn't participate in the rotation
                 if not content.get('featured'):
                     self._advance_rotation()
                 
@@ -2144,7 +2143,7 @@ class PostgreSQLScheduler:
             max_no_content_cycles = 3  # Max full rotation cycles with no content
             
             # Track featured content scheduling
-            last_featured_time = None
+            last_featured_time = 0  # Initialize to 0 so featured content can be scheduled immediately
             featured_content_index = 0  # Track which featured content to use next
             
             # Get featured delay from config
@@ -2153,8 +2152,10 @@ class PostgreSQLScheduler:
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
                 featured_delay = scheduling_config.get('featured_delay', 1.5)
+                logger.info(f"Featured content delay configured: {featured_delay} hours")
             except:
                 featured_delay = 1.5
+                logger.info(f"Using default featured delay: {featured_delay} hours")
             
             # Generate content for each day
             days_completed = 0
@@ -2175,27 +2176,26 @@ class PostgreSQLScheduler:
                 day_start_time = total_duration  # Track where this day started
                 
                 while total_duration < day_target_seconds:
-                    # Check if we should schedule featured content
+                    # Check if we should try to schedule featured content
                     if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
-                        # Try to get featured content
-                        # Don't exclude already scheduled IDs for featured content - they should repeat!
+                        # Get all available featured content
                         featured_content = self.get_featured_content(
                             exclude_ids=[],
                             schedule_date=current_day.strftime('%Y-%m-%d')
                         )
                         
                         if featured_content:
+                            # We have featured content and enough time has passed
                             # Use round-robin selection of featured content
                             content = featured_content[featured_content_index % len(featured_content)]
                             featured_content_index += 1
                             
-                            logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} at {total_duration/3600:.2f} hours on {day_name}")
+                            logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} "
+                                      f"at {total_duration/3600:.2f} hours on {day_name}")
                             
-                            # Skip regular rotation for this iteration
                             available_content = [content]
                         else:
-                            # No featured content available, continue with regular rotation
-                            logger.debug("No featured content available, continuing with regular rotation")
+                            # No featured content available, get regular content
                             duration_category = self._get_next_duration_category()
                             available_content = self._get_content_with_progressive_delays(
                                 duration_category, 
@@ -2204,7 +2204,7 @@ class PostgreSQLScheduler:
                                 scheduled_asset_times=None
                             )
                     else:
-                        # Regular rotation
+                        # Not time for featured content yet, get regular content
                         duration_category = self._get_next_duration_category()
                         available_content = self._get_content_with_progressive_delays(
                             duration_category, 
@@ -2458,8 +2458,8 @@ class PostgreSQLScheduler:
                     total_duration += content_duration
                     sequence_number += 1
                     
-                    # Advance rotation after successfully scheduling content
-                    # BUT NOT for featured content - it should not affect the rotation
+                    # Advance rotation only if this wasn't featured content
+                    # Featured content doesn't participate in the rotation
                     if not content.get('featured'):
                         self._advance_rotation()
                     
@@ -2673,7 +2673,7 @@ class PostgreSQLScheduler:
             max_no_content_cycles = 3  # Max full rotation cycles with no content
             
             # Track featured content scheduling
-            last_featured_time = None
+            last_featured_time = 0  # Initialize to 0 so featured content can be scheduled immediately
             featured_content_index = 0  # Track which featured content to use next
             
             # Get featured delay from config
@@ -2682,8 +2682,10 @@ class PostgreSQLScheduler:
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
                 featured_delay = scheduling_config.get('featured_delay', 1.5)
+                logger.info(f"Featured content delay configured: {featured_delay} hours")
             except:
                 featured_delay = 1.5
+                logger.info(f"Using default featured delay: {featured_delay} hours")
             
             # Generate content for each day of the month
             for day in range(1, days_in_month + 1):
@@ -2702,27 +2704,26 @@ class PostgreSQLScheduler:
                 day_target_seconds = day * 24 * 60 * 60
                 
                 while total_duration < day_target_seconds:
-                    # Check if we should schedule featured content
+                    # Check if we should try to schedule featured content
                     if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
-                        # Try to get featured content
-                        # Don't exclude already scheduled IDs for featured content - they should repeat!
+                        # Get all available featured content
                         featured_content = self.get_featured_content(
                             exclude_ids=[],
                             schedule_date=current_date.strftime('%Y-%m-%d')
                         )
                         
                         if featured_content:
+                            # We have featured content and enough time has passed
                             # Use round-robin selection of featured content
                             content = featured_content[featured_content_index % len(featured_content)]
                             featured_content_index += 1
                             
-                            logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} at {total_duration/3600:.2f} hours on {current_date.strftime('%B %d')}")
+                            logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} "
+                                      f"at {total_duration/3600:.2f} hours on {current_date.strftime('%B %d')}")
                             
-                            # Skip regular rotation for this iteration
                             available_content = [content]
                         else:
-                            # No featured content available, continue with regular rotation
-                            logger.debug("No featured content available, continuing with regular rotation")
+                            # No featured content available, get regular content
                             duration_category = self._get_next_duration_category()
                             available_content = self._get_content_with_progressive_delays(
                                 duration_category, 
@@ -2731,7 +2732,7 @@ class PostgreSQLScheduler:
                                 scheduled_asset_times=None
                             )
                     else:
-                        # Regular rotation
+                        # Not time for featured content yet, get regular content
                         duration_category = self._get_next_duration_category()
                         available_content = self._get_content_with_progressive_delays(
                             duration_category, 
@@ -2854,8 +2855,8 @@ class PostgreSQLScheduler:
                     total_duration += content_duration
                     sequence_number += 1
                     
-                    # Advance rotation after successfully scheduling content
-                    # BUT NOT for featured content - it should not affect the rotation
+                    # Advance rotation only if this wasn't featured content
+                    # Featured content doesn't participate in the rotation
                     if not content.get('featured'):
                         self._advance_rotation()
                     
