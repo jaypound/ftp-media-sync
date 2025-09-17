@@ -3503,14 +3503,21 @@ def parse_castus_schedule(content):
                 
                 # Calculate duration from start/end times if available
                 if item['start_time'] and item['end_time']:
+                    logger.info(f"Parsing template item: {filename}")
+                    logger.info(f"  Raw start_time: '{item['start_time']}'")
+                    logger.info(f"  Raw end_time: '{item['end_time']}'")
+                    
                     duration = calculate_duration_from_times(item['start_time'], item['end_time'])
                     item['duration_seconds'] = duration
                     
                     # Debug logging for duration calculation
-                    logger.debug(f"Duration calculation for {filename}:")
-                    logger.debug(f"  Start: {item['start_time']}")
-                    logger.debug(f"  End: {item['end_time']}")
-                    logger.debug(f"  Calculated duration: {duration} seconds ({duration/60:.2f} minutes)")
+                    logger.info(f"Duration calculation for {filename}:")
+                    logger.info(f"  Start: {item['start_time']}")
+                    logger.info(f"  End: {item['end_time']}")
+                    logger.info(f"  Calculated duration: {duration} seconds ({duration/60:.2f} minutes, {duration/3600:.2f} hours)")
+                    
+                    if duration > 86400:  # More than 24 hours
+                        logger.error(f"  ERROR: Duration exceeds 24 hours! This is likely a bug.")
                     
                     # For weekly schedules, preserve the day prefix
                     if schedule_data['type'] == 'weekly' and ' ' in item['start_time']:
@@ -3583,17 +3590,23 @@ def convert_to_24hour_format(time_str):
 
 def calculate_duration_from_times(start_time, end_time):
     """Calculate duration in seconds from start/end time strings"""
+    logger.debug(f"calculate_duration_from_times called with start='{start_time}', end='{end_time}'")
     try:
         # Parse times like "12:00 am", "12:30:45.123 pm", "wed 12:00:15.040 am"
         import re
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
-        def parse_time(time_str):
-            # Handle weekly format by removing day prefix
+        def parse_time_with_day(time_str):
+            """Parse time and return day index (if present), datetime, and milliseconds"""
+            day_index = None
+            day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+            
+            # Handle weekly format by extracting day prefix
             if ' ' in time_str:
                 parts = time_str.split(' ', 1)
                 # Check if first part is a day abbreviation
-                if len(parts[0]) <= 3 and parts[0].lower() in ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']:
+                if len(parts[0]) <= 3 and parts[0].lower() in day_map:
+                    day_index = day_map[parts[0].lower()]
                     time_str = parts[1]
             
             # Extract milliseconds if present
@@ -3607,19 +3620,31 @@ def calculate_duration_from_times(start_time, end_time):
             for fmt in ["%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M"]:
                 try:
                     dt = datetime.strptime(time_clean, fmt)
-                    # Return datetime and milliseconds separately for precision
-                    return dt, milliseconds
+                    # Return day index, datetime and milliseconds separately for precision
+                    return day_index, dt, milliseconds
                 except ValueError:
                     continue
             
             raise ValueError(f"Unable to parse time: {time_str}")
         
-        start_dt, start_ms = parse_time(start_time)
-        end_dt, end_ms = parse_time(end_time)
+        start_day, start_dt, start_ms = parse_time_with_day(start_time)
+        end_day, end_dt, end_ms = parse_time_with_day(end_time)
         
-        # Handle day boundary
-        if end_dt < start_dt:
-            end_dt = end_dt.replace(day=end_dt.day + 1)
+        # If we have day indices, use them to calculate the actual duration
+        if start_day is not None and end_day is not None:
+            # Calculate day difference
+            day_diff = end_day - start_day
+            if day_diff < 0:
+                day_diff += 7  # Wrap around week
+            
+            # Add the day difference to the end datetime
+            end_dt = end_dt + timedelta(days=day_diff)
+            
+            logger.debug(f"Weekly schedule: start_day={start_day}, end_day={end_day}, day_diff={day_diff}")
+        else:
+            # Handle day boundary for non-weekly schedules
+            if end_dt < start_dt:
+                end_dt = end_dt.replace(day=end_dt.day + 1)
         
         # Calculate duration with full precision
         # Use total_seconds() for the datetime difference and add millisecond difference
@@ -3629,8 +3654,8 @@ def calculate_duration_from_times(start_time, end_time):
         
         # Log for debugging
         logger.debug(f"Duration calculation detail:")
-        logger.debug(f"  Start: {start_dt} + {start_ms}s")
-        logger.debug(f"  End: {end_dt} + {end_ms}s")
+        logger.debug(f"  Start: {start_dt} + {start_ms}s (day={start_day})")
+        logger.debug(f"  End: {end_dt} + {end_ms}s (day={end_day})")
         logger.debug(f"  Duration: {total_duration}s ({total_duration/60:.6f} minutes)")
         
         return total_duration
@@ -3868,12 +3893,30 @@ def create_schedule_from_template():
                             'day_offset': day_offset
                         }
                         
+                        # Recalculate duration if we have both start and end times
+                        duration_seconds = item.get('duration_seconds', 0)
+                        if 'end_time' in item and item['end_time']:
+                            # Recalculate duration from the original times (with day prefixes)
+                            logger.debug(f"Recalculating duration for live input item {added_count}")
+                            logger.debug(f"  Original start_time: '{item.get('start_time')}'")
+                            logger.debug(f"  Original end_time: '{item.get('end_time')}'")
+                            try:
+                                recalc_duration = calculate_duration_from_times(
+                                    item.get('start_time', start_time),
+                                    item.get('end_time')
+                                )
+                                if recalc_duration > 0:
+                                    duration_seconds = recalc_duration
+                                    logger.debug(f"  Recalculated duration: {duration_seconds}s ({duration_seconds/3600:.2f}h)")
+                            except Exception as e:
+                                logger.warning(f"Failed to recalculate duration: {e}")
+                        
                         scheduler_postgres.add_item_to_schedule(
                             schedule_id,
                             0,  # Special asset_id for live inputs
                             order_index=order_index,
                             scheduled_start_time=start_time,
-                            scheduled_duration_seconds=item.get('duration_seconds', 0),
+                            scheduled_duration_seconds=duration_seconds,
                             metadata=live_metadata
                         )
                         added_count += 1
@@ -3934,13 +3977,31 @@ def create_schedule_from_template():
                             
                             logger.debug(f"Item {added_count}: final start_time for DB = '{start_time}'")
                             
+                            # Recalculate duration if we have both start and end times
+                            duration_seconds = item.get('duration_seconds', 0)
+                            if 'end_time' in item and item['end_time']:
+                                # Recalculate duration from the original times (with day prefixes)
+                                logger.debug(f"Recalculating duration for item {added_count}")
+                                logger.debug(f"  Original start_time: '{item.get('start_time')}'")
+                                logger.debug(f"  Original end_time: '{item.get('end_time')}'")
+                                try:
+                                    recalc_duration = calculate_duration_from_times(
+                                        item.get('start_time', start_time),
+                                        item.get('end_time')
+                                    )
+                                    if recalc_duration > 0:
+                                        duration_seconds = recalc_duration
+                                        logger.debug(f"  Recalculated duration: {duration_seconds}s ({duration_seconds/3600:.2f}h)")
+                                except Exception as e:
+                                    logger.warning(f"Failed to recalculate duration: {e}")
+                            
                             # Store the day prefix in metadata for the export function
                             scheduler_postgres.add_item_to_schedule(
                                 schedule_id,
                                 int(asset_id),
                                 order_index=order_index,
                                 scheduled_start_time=start_time,
-                                scheduled_duration_seconds=item.get('duration_seconds', 0),
+                                scheduled_duration_seconds=duration_seconds,
                                 metadata={'day_prefix': day_prefix, 'day_offset': day_offset}
                             )
                             added_count += 1
@@ -4019,6 +4080,19 @@ def create_schedule_from_template():
                 start_time = item.get('start_time', '00:00:00')
                 duration = item.get('duration_seconds', 0)
                 
+                # Recalculate duration if we have both start and end times
+                if 'end_time' in item and item['end_time']:
+                    try:
+                        recalc_duration = calculate_duration_from_times(
+                            item.get('start_time', start_time),
+                            item.get('end_time')
+                        )
+                        if recalc_duration > 0:
+                            duration = recalc_duration
+                            logger.debug(f"Recalculated duration for live input: {duration}s ({duration/3600:.2f}h)")
+                    except Exception as e:
+                        logger.warning(f"Failed to recalculate duration for live input: {e}")
+                
                 logger.info(f"Processing Live Input item {idx}: title='{item.get('title')}', start_time='{start_time}', duration={duration}")
                 
                 # For live inputs, we need to add them as special items
@@ -4059,12 +4133,26 @@ def create_schedule_from_template():
                     # Use the time from the template if available
                     start_time = item.get('start_time', '00:00:00')
                     
+                    # Recalculate duration if we have both start and end times
+                    duration_seconds = item.get('scheduled_duration_seconds', 0) or item.get('duration_seconds', 0)
+                    if 'end_time' in item and item['end_time']:
+                        try:
+                            recalc_duration = calculate_duration_from_times(
+                                item.get('start_time', start_time),
+                                item.get('end_time')
+                            )
+                            if recalc_duration > 0:
+                                duration_seconds = recalc_duration
+                                logger.debug(f"Recalculated duration for item {idx}: {duration_seconds}s ({duration_seconds/3600:.2f}h)")
+                        except Exception as e:
+                            logger.warning(f"Failed to recalculate duration for item {idx}: {e}")
+                    
                     scheduler_postgres.add_item_to_schedule(
                         schedule_id,
                         asset_id,
                         order_index=idx,
                         scheduled_start_time=start_time,
-                        scheduled_duration_seconds=item.get('scheduled_duration_seconds', 0) or item.get('duration_seconds', 0)
+                        scheduled_duration_seconds=duration_seconds
                     )
                     added_count += 1
                     logger.info(f"Added item {idx} with asset_id {asset_id}")
@@ -7344,20 +7432,25 @@ def generate_weekly_schedule_template():
             # Parse start time and end time
             start_time = meeting['start_time']
             
+            logger.info(f"Processing meeting '{meeting['meeting_name']}': start_time='{start_time}', end_time='{meeting.get('end_time', 'N/A')}'")
+            
             # Use end_time if available, otherwise calculate from duration
             if 'end_time' in meeting and meeting['end_time']:
                 end_time = meeting['end_time']
+                logger.info(f"  Using provided end_time: '{end_time}'")
                 # Ensure time has seconds for precision
                 if end_time.count(':') == 1:  # Only HH:MM format
                     # Add seconds for precision
                     dt = datetime.strptime(end_time, '%I:%M %p')
                     end_time = dt.strftime('%I:%M:%S %p')
+                    logger.info(f"  Added seconds to end_time: '{end_time}'")
             else:
                 # Fallback to calculating from duration for backward compatibility
                 duration_hours = meeting.get('duration_hours', 2.0)
                 start_dt = datetime.strptime(start_time, '%I:%M %p')
                 end_dt = start_dt + timedelta(hours=duration_hours)
                 end_time = end_dt.strftime('%I:%M:%S %p')
+                logger.info(f"  No end_time, calculated from duration: '{end_time}'")
             
             # Ensure start time also has seconds
             if start_time.count(':') == 1:  # Only HH:MM format
@@ -7366,6 +7459,8 @@ def generate_weekly_schedule_template():
             
             start_time_lower = start_time.lower()
             end_time_lower = end_time.lower()
+            
+            logger.info(f"  Final times for template: start='{day_name} {start_time_lower}', end='{day_name} {end_time_lower}'")
             
             # Generate GUID
             guid_map = {

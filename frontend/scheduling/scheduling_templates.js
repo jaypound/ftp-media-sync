@@ -214,7 +214,29 @@ function schedulingGenerateItemHTML(item, index) {
     const startTime = typeof formatTimeWithMilliseconds === 'function' 
         ? formatTimeWithMilliseconds(displayTime)
         : displayTime;
-    const duration = schedulingFormatDuration(item.duration_seconds || item.file_duration || 0);
+    
+    // Calculate duration from start_time and end_time if both are available
+    let durationSeconds = item.duration_seconds || item.file_duration || 0;
+    if (item.start_time && item.end_time) {
+        try {
+            // Use the calculateDurationFromTimes function if available
+            if (typeof calculateDurationFromTimes === 'function') {
+                durationSeconds = calculateDurationFromTimes(item.start_time, item.end_time);
+            } else {
+                // Fallback calculation for weekly templates
+                const startSec = parseTimeToSeconds(item.start_time, item.template_type || 'daily');
+                const endSec = parseTimeToSeconds(item.end_time, item.template_type || 'daily');
+                if (endSec >= startSec) {
+                    durationSeconds = endSec - startSec;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to calculate duration from times:', e);
+            // Fall back to stored duration
+        }
+    }
+    
+    const duration = schedulingFormatDuration(durationSeconds);
     const category = item.category || item.duration_category || 'NO CATEGORY';
     
     return `
@@ -267,11 +289,89 @@ function formatTimeWithMilliseconds(timeStr) {
     return timeStr + '.000';
 }
 
+// Calculate duration from start and end times
+function calculateDurationFromTimes(startTime, endTime) {
+    if (!startTime || !endTime) return 0;
+    
+    // Parse times for weekly format
+    const dayMap = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    let startDay = null, endDay = null;
+    let startTimeOnly = startTime;
+    let endTimeOnly = endTime;
+    
+    // Extract day prefixes if present
+    if (startTime.includes(' ')) {
+        const parts = startTime.split(' ', 1);
+        if (dayMap.hasOwnProperty(parts[0].toLowerCase())) {
+            startDay = dayMap[parts[0].toLowerCase()];
+            startTimeOnly = startTime.substring(parts[0].length + 1);
+        }
+    }
+    
+    if (endTime.includes(' ')) {
+        const parts = endTime.split(' ', 1);
+        if (dayMap.hasOwnProperty(parts[0].toLowerCase())) {
+            endDay = dayMap[parts[0].toLowerCase()];
+            endTimeOnly = endTime.substring(parts[0].length + 1);
+        }
+    }
+    
+    // Convert times to seconds
+    const startSec = parseTimeToSecondsSimple(startTimeOnly);
+    const endSec = parseTimeToSecondsSimple(endTimeOnly);
+    
+    // Calculate day difference if we have day prefixes
+    let dayDiff = 0;
+    if (startDay !== null && endDay !== null) {
+        dayDiff = endDay - startDay;
+        if (dayDiff < 0) dayDiff += 7; // Wrap around week
+    } else if (endSec < startSec) {
+        // No day prefixes but end time is before start time, assume next day
+        dayDiff = 1;
+    }
+    
+    // Calculate total duration
+    return (dayDiff * 24 * 3600) + endSec - startSec;
+}
+
+// Simple time parser for HH:MM:SS or HH:MM:SS.mmm format with AM/PM support
+function parseTimeToSecondsSimple(timeStr) {
+    if (!timeStr) return 0;
+    
+    // Handle AM/PM format
+    const isPM = timeStr.toLowerCase().includes('pm');
+    const isAM = timeStr.toLowerCase().includes('am');
+    
+    // Remove AM/PM and trim
+    let cleanTime = timeStr.replace(/\s*(am|pm)\s*/i, '').trim();
+    
+    // Split time and milliseconds
+    let milliseconds = 0;
+    if (cleanTime.includes('.')) {
+        const parts = cleanTime.split('.');
+        cleanTime = parts[0];
+        milliseconds = parseFloat('0.' + parts[1]) || 0;
+    }
+    
+    // Parse time components
+    const parts = cleanTime.split(':');
+    let hours = parseInt(parts[0]) || 0;
+    const minutes = parseInt(parts[1]) || 0;
+    const seconds = parseFloat(parts[2]) || 0;
+    
+    // Adjust for AM/PM
+    if (isPM && hours < 12) hours += 12;
+    if (isAM && hours === 12) hours = 0;
+    
+    return hours * 3600 + minutes * 60 + seconds + milliseconds;
+}
+
 // Export functions to global scope
 window.schedulingTemplatesInit = schedulingTemplatesInit;
 window.schedulingDisplayTemplate = schedulingDisplayTemplate;
 window.schedulingGenerateTemplateHTML = schedulingGenerateTemplateHTML;
 window.formatTimeWithMilliseconds = formatTimeWithMilliseconds;
+window.calculateDurationFromTimes = calculateDurationFromTimes;
 
 // Hook into global template loading
 window.addEventListener('templateLoaded', function(event) {
