@@ -4562,7 +4562,18 @@ def fill_template_gaps():
                     day_offset = (idx % 7) * 24 * 3600
                     start_seconds += day_offset
             
+            # Recalculate duration if we have both start and end times
             duration = float(item.get('duration_seconds', 0))
+            if 'end_time' in item and item['end_time'] and 'start_time' in item and item['start_time']:
+                try:
+                    # Use calculate_duration_from_times to get accurate duration
+                    recalc_duration = calculate_duration_from_times(item['start_time'], item['end_time'])
+                    if recalc_duration > 0:
+                        duration = recalc_duration
+                        logger.debug(f"Recalculated duration for item {idx}: {duration}s ({duration/3600:.2f}h)")
+                except Exception as e:
+                    logger.warning(f"Failed to recalculate duration for item {idx}: {e}")
+            
             end_seconds = start_seconds + duration
             
             # Try multiple fields for title
@@ -4588,9 +4599,51 @@ def fill_template_gaps():
         # If gaps are provided, use them. Otherwise calculate total duration
         if gaps:
             logger.info(f"Using {len(gaps)} provided gaps")
+            
+            # Validate and adjust gaps to exclude regions occupied by original items
+            adjusted_gaps = []
             for idx, gap in enumerate(gaps):
-                logger.info(f"  Gap {idx + 1}: {gap['start']/3600:.1f}h - {gap['end']/3600:.1f}h (duration: {(gap['end']-gap['start'])/3600:.1f}h)")
-            # We'll fill each gap separately
+                gap_start = gap['start']
+                gap_end = gap['end']
+                logger.info(f"  Raw Gap {idx + 1}: {gap_start/3600:.1f}h - {gap_end/3600:.1f}h (duration: {(gap_end-gap_start)/3600:.1f}h)")
+                
+                # Check if this gap overlaps with any original items
+                # and split it into sub-gaps if necessary
+                sub_gaps = [(gap_start, gap_end)]
+                
+                for orig_item in original_items:
+                    if orig_item.get('is_gap', False):
+                        continue  # Skip gap items
+                    
+                    new_sub_gaps = []
+                    for sub_start, sub_end in sub_gaps:
+                        # If original item is completely outside this sub-gap, keep the sub-gap
+                        if orig_item['end'] <= sub_start or orig_item['start'] >= sub_end:
+                            new_sub_gaps.append((sub_start, sub_end))
+                        # If original item completely covers this sub-gap, remove it
+                        elif orig_item['start'] <= sub_start and orig_item['end'] >= sub_end:
+                            # Skip this sub-gap entirely
+                            logger.debug(f"    Sub-gap {sub_start/3600:.2f}h-{sub_end/3600:.2f}h completely covered by '{orig_item['title']}'")
+                        # If original item partially overlaps, split the sub-gap
+                        else:
+                            # Add the part before the original item
+                            if sub_start < orig_item['start']:
+                                new_sub_gaps.append((sub_start, orig_item['start']))
+                            # Add the part after the original item
+                            if sub_end > orig_item['end']:
+                                new_sub_gaps.append((orig_item['end'], sub_end))
+                            logger.debug(f"    Sub-gap {sub_start/3600:.2f}h-{sub_end/3600:.2f}h split by '{orig_item['title']}' at {orig_item['start']/3600:.2f}h-{orig_item['end']/3600:.2f}h")
+                    
+                    sub_gaps = new_sub_gaps
+                
+                # Add all remaining sub-gaps to adjusted_gaps
+                for sub_start, sub_end in sub_gaps:
+                    if sub_end - sub_start > 0.1:  # Only keep gaps larger than 0.1 seconds
+                        adjusted_gaps.append({'start': sub_start, 'end': sub_end})
+                        logger.info(f"    Adjusted sub-gap: {sub_start/3600:.2f}h - {sub_end/3600:.2f}h (duration: {(sub_end-sub_start)/3600:.2f}h)")
+            
+            gaps = adjusted_gaps
+            logger.info(f"After adjustment: {len(gaps)} gaps remain")
             total_gap_seconds = sum(gap['end'] - gap['start'] for gap in gaps)
             logger.info(f"Total gap time to fill: {total_gap_seconds/3600:.1f} hours")
         else:
@@ -5353,6 +5406,11 @@ def fill_template_gaps():
                 
                 overlap_found = False
                 for orig_item in original_items:
+                    # Skip items with zero or near-zero duration
+                    if orig_item['duration'] < 0.1:  # Less than 100ms
+                        logger.debug(f"Skipping zero-duration item '{orig_item['title']}' from overlap check")
+                        continue
+                    
                     # Check if new item would overlap with original item (with tolerance)
                     if (new_item_start < orig_item['end'] - overlap_tolerance and 
                         new_item_end > orig_item['start'] + overlap_tolerance):
