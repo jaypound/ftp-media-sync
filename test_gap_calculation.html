@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Gap Calculation</title>
+</head>
+<body>
+    <h1>Test Monday Gap Calculation</h1>
+    <button onclick="testMondayGaps()">Test Monday Gap Calculation</button>
+    <pre id="output"></pre>
+
+    <script>
+    function parseTimeToSeconds(timeStr, templateType) {
+        if (!timeStr) return 0;
+        
+        if (templateType === 'weekly' && timeStr.includes(' ')) {
+            const parts = timeStr.split(' ');
+            const dayStr = parts[0];
+            const timeOnly = parts.slice(1).join(' ');
+            
+            const dayOffsets = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+            const dayOffset = dayOffsets[dayStr.toLowerCase()] || 0;
+            
+            let [time, period] = timeOnly.split(' ');
+            let [h, m, s] = time.split(':').map(x => parseFloat(x) || 0);
+            if (period && period.toLowerCase() === 'pm' && h !== 12) h += 12;
+            if (period && period.toLowerCase() === 'am' && h === 12) h = 0;
+            
+            const seconds = h * 3600 + m * 60 + s;
+            return dayOffset * 24 * 3600 + seconds;
+        }
+        
+        return 0;
+    }
+
+    function testMondayGaps() {
+        const output = document.getElementById('output');
+        
+        // Simulate Monday's schedule based on screenshots
+        const template = {
+            type: 'weekly',
+            items: [
+                // Pre-meeting content
+                { title: 'Content 1', start_time: 'mon 10:56:34 am', end_time: 'mon 10:59:24 am', duration_seconds: 170 },
+                { title: 'Content 2', start_time: 'mon 10:59:24 am', end_time: 'mon 10:59:39 am', duration_seconds: 15 },
+                { title: 'Content 3', start_time: 'mon 10:59:39 am', end_time: 'mon 10:59:55 am', duration_seconds: 16 },
+                
+                // Live meetings
+                { title: 'Live Input - Committee Room 1', start_time: 'mon 11:00:00 am', end_time: 'mon 1:00:00 pm', is_live_input: true, duration_seconds: 7200 },
+                { title: 'Live Input - Committee Room 1', start_time: 'mon 1:00:00 pm', end_time: 'mon 4:00:00 pm', is_live_input: true, duration_seconds: 10800 }
+            ]
+        };
+        
+        output.textContent = 'Original template items:\n';
+        template.items.forEach(item => {
+            const start = parseTimeToSeconds(item.start_time, 'weekly');
+            const end = item.end_time ? parseTimeToSeconds(item.end_time, 'weekly') : start + item.duration_seconds;
+            output.textContent += `- ${item.title}: ${item.start_time} to ${item.end_time} (${start/3600}h to ${end/3600}h)\n`;
+        });
+        
+        // Filter out live inputs
+        const filteredItems = template.items.filter(item => !item.is_live_input);
+        
+        output.textContent += '\nFiltered items (excluding live inputs):\n';
+        filteredItems.forEach(item => {
+            const start = parseTimeToSeconds(item.start_time, 'weekly');
+            const end = item.end_time ? parseTimeToSeconds(item.end_time, 'weekly') : start + item.duration_seconds;
+            output.textContent += `- ${item.title}: ${item.start_time} to ${item.end_time} (${start/3600}h to ${end/3600}h)\n`;
+        });
+        
+        // Calculate last item end time
+        if (filteredItems.length > 0) {
+            const lastItem = filteredItems[filteredItems.length - 1];
+            const lastStart = parseTimeToSeconds(lastItem.start_time, 'weekly');
+            const lastEnd = lastItem.end_time ? parseTimeToSeconds(lastItem.end_time, 'weekly') : lastStart + lastItem.duration_seconds;
+            
+            // Monday ends at Tuesday midnight (2 days * 86400 seconds)
+            const mondayEnd = 2 * 86400;
+            const saturdayEnd = 7 * 86400; // Full week end
+            
+            output.textContent += '\nGap calculation:\n';
+            output.textContent += `Last filtered item ends at: ${lastEnd/3600}h (${lastEnd} seconds)\n`;
+            output.textContent += `Monday ends at: ${mondayEnd/3600}h (${mondayEnd} seconds)\n`;
+            output.textContent += `Saturday ends at: ${saturdayEnd/3600}h (${saturdayEnd} seconds)\n`;
+            
+            output.textContent += '\nShould create gaps:\n';
+            if (lastEnd < mondayEnd) {
+                output.textContent += `1. Monday gap: from ${lastEnd/3600}h to ${mondayEnd/3600}h (${(mondayEnd - lastEnd)/3600} hours)\n`;
+            }
+            
+            if (lastEnd < saturdayEnd) {
+                output.textContent += `2. Final gap: from ${lastEnd/3600}h to ${saturdayEnd/3600}h (${(saturdayEnd - lastEnd)/3600} hours)\n`;
+                output.textContent += `   This is a HUGE gap because it goes from Monday morning to Saturday midnight!\n`;
+            }
+            
+            output.textContent += '\nPROBLEM IDENTIFIED:\n';
+            output.textContent += 'The last non-live-input item is at 10:59:55 AM Monday.\n';
+            output.textContent += 'The gap calculation creates ONE giant gap from there to Saturday midnight.\n';
+            output.textContent += 'This gap spans multiple days and includes the meeting times!\n';
+        }
+    }
+    </script>
+</body>
+</html></content>
+</invoke>

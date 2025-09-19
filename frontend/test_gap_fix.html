@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Gap Fix</title>
+</head>
+<body>
+    <h1>Testing Gap Fix</h1>
+    <button onclick="testGapFix()">Test Gap Calculation</button>
+    <pre id="output"></pre>
+
+    <script>
+    // Include the fixed parseTimeToSeconds function
+    function parseTimeToSeconds(timeStr, templateType) {
+        if (!timeStr) return 0;
+        
+        if (templateType === 'weekly' && timeStr.includes(' ')) {
+            // Parse weekly format: "mon 1:00:00.000 pm"
+            const parts = timeStr.split(' ');
+            const dayStr = parts[0];
+            const timeOnly = parts.slice(1).join(' ');
+            
+            // Convert day to offset
+            const dayOffsets = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+            const dayOffset = dayOffsets[dayStr.toLowerCase()] || 0;
+            
+            // Simple 12-hour to 24-hour conversion
+            let [time, period] = timeOnly.split(' ');
+            let [h, m, s] = time.split(':').map(x => parseFloat(x) || 0);
+            if (period && period.toLowerCase() === 'pm' && h !== 12) h += 12;
+            if (period && period.toLowerCase() === 'am' && h === 12) h = 0;
+            
+            const seconds = h * 3600 + m * 60 + s;
+            return dayOffset * 24 * 3600 + seconds;
+        }
+        
+        return 0;
+    }
+
+    function testGapFix() {
+        const output = document.getElementById('output');
+        
+        // Test template similar to Monday's schedule
+        const template = {
+            type: 'weekly',
+            items: [
+                { title: 'Content 1', start_time: 'mon 10:56:34 am', end_time: 'mon 10:59:24 am' },
+                { title: 'Content 2', start_time: 'mon 10:59:24 am', end_time: 'mon 10:59:39 am' },
+                { title: 'Live Input - Committee Room 1', start_time: 'mon 11:00:00 am', end_time: 'mon 1:00:00 pm', is_live_input: true },
+                { title: 'Live Input - Committee Room 1', start_time: 'mon 1:00:00 pm', end_time: 'mon 4:00:00 pm', is_live_input: true }
+            ]
+        };
+        
+        // Filter out live inputs as in the fix
+        const filteredItems = template.items.filter(item => {
+            const isLiveInput = item.is_live_input === true || 
+                              (item.title && item.title.toLowerCase().includes('live input'));
+            return !isLiveInput;
+        });
+        
+        output.textContent = 'Original items: ' + template.items.length + '\n';
+        output.textContent += 'Filtered items: ' + filteredItems.length + '\n\n';
+        
+        output.textContent += 'Original items:\n';
+        template.items.forEach(item => {
+            const start = parseTimeToSeconds(item.start_time, 'weekly');
+            output.textContent += `- ${item.title}: ${item.start_time} (${start/3600}h from Sunday)\n`;
+        });
+        
+        output.textContent += '\nFiltered items:\n';
+        filteredItems.forEach(item => {
+            const start = parseTimeToSeconds(item.start_time, 'weekly');
+            output.textContent += `- ${item.title}: ${item.start_time} (${start/3600}h from Sunday)\n`;
+        });
+        
+        // Calculate last item end time
+        if (filteredItems.length > 0) {
+            const lastItem = filteredItems[filteredItems.length - 1];
+            const lastEnd = parseTimeToSeconds(lastItem.end_time, 'weekly');
+            const mondayEnd = 2 * 24 * 3600; // Tuesday midnight
+            
+            output.textContent += '\nGap after last content:\n';
+            output.textContent += `From: ${lastItem.end_time} (${lastEnd/3600}h)\n`;
+            output.textContent += `To: Monday midnight (${mondayEnd/3600}h)\n`;
+            output.textContent += `Gap duration: ${(mondayEnd - lastEnd)/3600} hours\n`;
+        }
+    }
+    </script>
+</body>
+</html></content>
+</invoke>

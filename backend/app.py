@@ -60,6 +60,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Add file handler for debugging gap filling issues
+import logging.handlers
+debug_log_file = os.path.join(os.path.dirname(__file__), 'gap_filling_debug.log')
+file_handler = logging.handlers.RotatingFileHandler(
+    debug_log_file, 
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Create a separate logger for gap filling debug
+gap_logger = logging.getLogger('gap_filling_debug')
+gap_logger.setLevel(logging.DEBUG)
+gap_logger.addHandler(file_handler)
+gap_logger.propagate = False  # Don't also send to console
+
 # Global managers
 ftp_managers = {}
 config_manager = ConfigManager()
@@ -2630,7 +2647,7 @@ def export_schedule():
                     file_size = os.path.getsize(temp_file_path)
                     return jsonify({
                         'success': True,
-                        'message': f'Schedule exported successfully to {export_server}',
+                        'message': f'Schedule exported successfully to {export_server} at {full_path}',
                         'file_path': full_path,
                         'file_size': file_size
                     })
@@ -3013,18 +3030,21 @@ def generate_castus_schedule(schedule, items, date, format_type='daily', templat
                     time_parts = time_24.split(':')
                     db_hours = int(time_parts[0])
                     db_minutes = int(time_parts[1])
-                    db_seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                    # Round to millisecond precision to avoid floating-point errors
+                    db_seconds = round(float(time_parts[2]) * 1000) / 1000 if len(time_parts) > 2 else 0
                 else:
                     # Regular time format
                     time_parts = start_time.split(':')
                     db_hours = int(time_parts[0])
                     db_minutes = int(time_parts[1])
-                    db_seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                    # Round to millisecond precision to avoid floating-point errors
+                    db_seconds = round(float(time_parts[2]) * 1000) / 1000 if len(time_parts) > 2 else 0
             else:
                 # Handle datetime.time object from PostgreSQL
                 db_hours = start_time.hour
                 db_minutes = start_time.minute
-                db_seconds = start_time.second + start_time.microsecond / 1000000.0
+                # Round to millisecond precision to avoid floating-point errors
+                db_seconds = round((start_time.second + start_time.microsecond / 1000000.0) * 1000) / 1000
             
             # If we have day_prefix from metadata, use it
             if day_prefix:
@@ -4505,7 +4525,8 @@ def fill_template_gaps():
                                     # Remove any remaining am/pm text from seconds
                                     sec_str = time_parts[2].replace('am', '').replace('pm', '').strip()
                                     try:
-                                        seconds = float(sec_str)
+                                        # Round to millisecond precision to avoid floating-point errors
+                                        seconds = round(float(sec_str) * 1000) / 1000
                                     except ValueError:
                                         logger.warning(f"Could not parse seconds from '{time_parts[2]}', defaulting to 0")
                                         seconds = 0
@@ -4534,7 +4555,8 @@ def fill_template_gaps():
                         try:
                             hours = int(time_parts[0])
                             minutes = int(time_parts[1])
-                            seconds = float(time_parts[2])
+                            # Round to millisecond precision to avoid floating-point errors
+                            seconds = round(float(time_parts[2]) * 1000) / 1000
                             start_seconds = (hours * 3600) + (minutes * 60) + seconds
                             logger.debug(f"Parsed 24-hour format to {start_seconds} seconds")
                         except ValueError as e:
@@ -4574,14 +4596,15 @@ def fill_template_gaps():
                 except Exception as e:
                     logger.warning(f"Failed to recalculate duration for item {idx}: {e}")
             
-            end_seconds = start_seconds + duration
+            # Round to millisecond precision to avoid floating-point errors
+            end_seconds = round((start_seconds + duration) * 1000) / 1000
             
             # Try multiple fields for title
             title = item.get('title') or item.get('content_title') or item.get('file_name') or 'Unknown'
             
             original_items.append({
                 'title': title,
-                'start': start_seconds,
+                'start': round(start_seconds * 1000) / 1000,  # Also round the start
                 'end': end_seconds,
                 'start_time': item['start_time'],
                 'duration': duration,
@@ -4600,12 +4623,95 @@ def fill_template_gaps():
         if gaps:
             logger.info(f"Using {len(gaps)} provided gaps")
             
+            # Log the raw gaps received from frontend
+            logger.info("=== RAW GAPS FROM FRONTEND ===")
+            for i, gap in enumerate(gaps):
+                gap_day = int(gap['start'] // 86400) if schedule_type == 'weekly' else 0
+                day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                day_name = day_names[gap_day] if schedule_type == 'weekly' else 'Daily'
+                logger.info(f"  Gap {i+1} ({day_name}): {gap['start']/3600:.2f}h to {gap['end']/3600:.2f}h (duration: {(gap['end']-gap['start'])/3600:.2f}h)")
+                if gap['end'] > 86400 and schedule_type == 'weekly':
+                    logger.warning(f"    WARNING: Gap crosses day boundary! End time is {gap['end']/86400:.2f} days from start of week")
+            logger.info("=== END RAW GAPS ===")
+            
+            # For weekly schedules, ensure gaps don't cross day boundaries
+            if schedule_type == 'weekly':
+                day_split_gaps = []
+                for gap_idx, gap in enumerate(gaps):
+                    gap_start = gap['start']
+                    gap_end = gap['end']
+                    
+                    # Calculate which days this gap spans
+                    start_day = int(gap_start // 86400)
+                    end_day = int((gap_end - 0.001) // 86400)
+                    
+                    if start_day == end_day:
+                        # Gap is within a single day
+                        day_split_gaps.append(gap)
+                    else:
+                        # Gap spans multiple days, split at day boundaries
+                        day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                        logger.warning(f"Gap {gap_idx + 1} spans from {day_names[start_day]} to {day_names[end_day]} ({gap_start/3600:.2f}h to {gap_end/3600:.2f}h)")
+                        logger.info(f"  Splitting gap into day-bounded segments...")
+                        current_start = gap_start
+                        
+                        for day in range(start_day, end_day + 1):
+                            day_end_seconds = min((day + 1) * 86400, gap_end)
+                            
+                            if current_start < day_end_seconds:
+                                day_split_gaps.append({
+                                    'start': current_start,
+                                    'end': day_end_seconds
+                                })
+                                logger.info(f"  Created {day_names[day]} gap: {current_start/3600:.2f}h to {day_end_seconds/3600:.2f}h (duration: {(day_end_seconds-current_start)/3600:.2f}h)")
+                            
+                            current_start = day_end_seconds
+                
+                if len(day_split_gaps) != len(gaps):
+                    logger.info(f"Split {len(gaps)} gaps into {len(day_split_gaps)} day-bounded gaps")
+                    gaps = day_split_gaps
+                    
+                    # Log the final split gaps
+                    logger.info("=== GAPS AFTER DAY BOUNDARY SPLITTING ===")
+                    for i, gap in enumerate(gaps):
+                        gap_day = int(gap['start'] // 86400)
+                        day_name = day_names[gap_day] if gap_day < 7 else f'Day{gap_day}'
+                        logger.info(f"  Gap {i+1} ({day_name}): {gap['start']/3600:.2f}h to {gap['end']/3600:.2f}h (duration: {(gap['end']-gap['start'])/3600:.2f}h)")
+            
+            gap_logger.info(f"=== STARTING GAP ADJUSTMENT PROCESS ===")
+            gap_logger.info(f"Total gaps provided: {len(gaps)}")
+            gap_logger.info(f"Original items to avoid: {len(original_items)}")
+            
+            # Log all original items with exact times
+            gap_logger.info("Original items (to avoid overlapping):")
+            for i, item in enumerate(original_items):
+                gap_logger.info(f"  Item {i}: '{item['title']}'")
+                gap_logger.info(f"    Start: {item['start']}s ({item['start']/3600:.6f}h) = '{item['start_time']}'")
+                gap_logger.info(f"    End: {item['end']}s ({item['end']/3600:.6f}h)")
+                gap_logger.info(f"    Duration: {item['duration']}s")
+                if 'SDI' in item['title'] or 'Live Input' in item['title']:
+                    gap_logger.info(f"    *** THIS IS A LIVE INPUT ITEM ***")
+            
             # Validate and adjust gaps to exclude regions occupied by original items
             adjusted_gaps = []
             for idx, gap in enumerate(gaps):
                 gap_start = gap['start']
                 gap_end = gap['end']
                 logger.info(f"  Raw Gap {idx + 1}: {gap_start/3600:.1f}h - {gap_end/3600:.1f}h (duration: {(gap_end-gap_start)/3600:.1f}h)")
+                gap_logger.info(f"\nProcessing Gap {idx + 1}:")
+                gap_logger.info(f"  Original gap: {gap_start}s to {gap_end}s ({gap_start/3600:.6f}h to {gap_end/3600:.6f}h)")
+                
+                # Note if this gap starts at the exact time a Live Input starts
+                # but don't skip it - we'll handle it by splitting around Live Inputs
+                gap_starts_at_live_input = False
+                for orig_item in original_items:
+                    if 'Live Input' in orig_item.get('title', '') or 'SDI' in orig_item.get('title', ''):
+                        # Check if gap starts at the exact time (within 1 second tolerance) as Live Input
+                        if abs(gap_start - orig_item['start']) < 1.0:
+                            gap_logger.info(f"  NOTE: Gap starts at exact time as Live Input '{orig_item['title']}' at {orig_item['start']}s")
+                            gap_logger.info(f"  This gap will be split to exclude the Live Input times.")
+                            gap_starts_at_live_input = True
+                            break
                 
                 # Check if this gap overlaps with any original items
                 # and split it into sub-gaps if necessary
@@ -4615,8 +4721,15 @@ def fill_template_gaps():
                     if orig_item.get('is_gap', False):
                         continue  # Skip gap items
                     
+                    # Log live input items specially
+                    if 'SDI' in orig_item['title'] or 'Live Input' in orig_item['title']:
+                        logger.info(f"    Checking gap against live input: '{orig_item['title']}' at {orig_item['start']/3600:.2f}h-{orig_item['end']/3600:.2f}h")
+                        gap_logger.info(f"    Checking against LIVE INPUT: '{orig_item['title']}'")
+                        gap_logger.info(f"      Live input exact times: start={orig_item['start']}s, end={orig_item['end']}s")
+                    
                     new_sub_gaps = []
                     for sub_start, sub_end in sub_gaps:
+                        gap_logger.debug(f"      Checking sub-gap {sub_start}s-{sub_end}s against item {orig_item['start']}s-{orig_item['end']}s")
                         # If original item is completely outside this sub-gap, keep the sub-gap
                         if orig_item['end'] <= sub_start or orig_item['start'] >= sub_end:
                             new_sub_gaps.append((sub_start, sub_end))
@@ -4626,24 +4739,38 @@ def fill_template_gaps():
                             logger.debug(f"    Sub-gap {sub_start/3600:.2f}h-{sub_end/3600:.2f}h completely covered by '{orig_item['title']}'")
                         # If original item partially overlaps, split the sub-gap
                         else:
+                            gap_logger.info(f"      SPLITTING SUB-GAP: {sub_start}s-{sub_end}s around item at {orig_item['start']}s-{orig_item['end']}s")
                             # Add the part before the original item
                             if sub_start < orig_item['start']:
-                                new_sub_gaps.append((sub_start, orig_item['start']))
+                                before_gap = (sub_start, orig_item['start'])
+                                new_sub_gaps.append(before_gap)
+                                gap_logger.info(f"        Created gap BEFORE: {before_gap[0]}s-{before_gap[1]}s")
                             # Add the part after the original item
                             if sub_end > orig_item['end']:
-                                new_sub_gaps.append((orig_item['end'], sub_end))
+                                # Round to nearest millisecond to avoid floating-point precision errors
+                                gap_start = round(orig_item['end'] * 1000) / 1000
+                                gap_end = round(sub_end * 1000) / 1000
+                                after_gap = (gap_start, gap_end)
+                                new_sub_gaps.append(after_gap)
+                                gap_logger.info(f"        Created gap AFTER: {after_gap[0]}s-{after_gap[1]}s ({after_gap[0]/3600:.6f}h-{after_gap[1]/3600:.6f}h)")
+                                gap_logger.info(f"        Gap starts at exactly: {after_gap[0]} seconds (orig_item['end']={orig_item['end']}, rounded={gap_start})")
                             logger.debug(f"    Sub-gap {sub_start/3600:.2f}h-{sub_end/3600:.2f}h split by '{orig_item['title']}' at {orig_item['start']/3600:.2f}h-{orig_item['end']/3600:.2f}h")
                     
                     sub_gaps = new_sub_gaps
                 
                 # Add all remaining sub-gaps to adjusted_gaps
                 for sub_start, sub_end in sub_gaps:
-                    if sub_end - sub_start > 0.1:  # Only keep gaps larger than 0.1 seconds
+                    if sub_end - sub_start > 0:  # Keep all gaps with positive duration
                         adjusted_gaps.append({'start': sub_start, 'end': sub_end})
                         logger.info(f"    Adjusted sub-gap: {sub_start/3600:.2f}h - {sub_end/3600:.2f}h (duration: {(sub_end-sub_start)/3600:.2f}h)")
             
             gaps = adjusted_gaps
             logger.info(f"After adjustment: {len(gaps)} gaps remain")
+            gap_logger.info(f"\n=== FINAL ADJUSTED GAPS ===")
+            gap_logger.info(f"Total adjusted gaps: {len(gaps)}")
+            for i, gap in enumerate(gaps):
+                gap_logger.info(f"  Gap {i+1}: {gap['start']}s to {gap['end']}s ({gap['start']/3600:.6f}h to {gap['end']/3600:.6f}h)")
+                gap_logger.info(f"           Duration: {gap['end'] - gap['start']}s")
             total_gap_seconds = sum(gap['end'] - gap['start'] for gap in gaps)
             logger.info(f"Total gap time to fill: {total_gap_seconds/3600:.1f} hours")
         else:
@@ -4706,6 +4833,19 @@ def fill_template_gaps():
         
         try:
             for content in available_content:
+                # Skip Live Input Placeholder and zero-duration content
+                content_title = content.get('content_title', content.get('title', ''))
+                # Check both duration_seconds and file_duration fields
+                content_duration = float(content.get('duration_seconds', content.get('file_duration', 0)))
+                
+                if 'Live Input Placeholder' in content_title:
+                    logger.info(f"Skipping Live Input Placeholder from available content")
+                    continue
+                    
+                if content_duration <= 0:
+                    logger.info(f"Skipping zero-duration content: '{content_title}' (duration_seconds={content.get('duration_seconds')}, file_duration={content.get('file_duration')})")
+                    continue
+                
                 # Check if this content is from Recordings folder
                 file_path = content.get('file_path', '')
                 if file_path and '/mnt/main/Recordings' in file_path:
@@ -4866,7 +5006,8 @@ def fill_template_gaps():
                         if len(time_parts) >= 3:
                             hours = int(time_parts[0])
                             minutes = int(time_parts[1])
-                            seconds = float(time_parts[2])
+                            # Round to millisecond precision to avoid floating-point errors
+                            seconds = round(float(time_parts[2]) * 1000) / 1000
                             time_in_seconds = (hours * 3600) + (minutes * 60) + seconds
                         elif len(time_parts) == 2:
                             hours = int(time_parts[0])
@@ -4878,6 +5019,21 @@ def fill_template_gaps():
                 asset_schedule_times[asset_id].append(time_in_seconds)
         
         logger.info(f"Assets already scheduled in template: {len(asset_schedule_times)}")
+        
+        # Create content grouped by category for efficient access
+        available_content_by_category = {
+            'id': [],
+            'spots': [],
+            'short_form': [],
+            'long_form': []
+        }
+        
+        for content_id, content in content_by_id.items():
+            category = content.get('duration_category')
+            if category in available_content_by_category:
+                available_content_by_category[category].append(content)
+        
+        logger.info(f"Content organized by category: {', '.join(f'{cat}: {len(items)}' for cat, items in available_content_by_category.items())}")
         
         # Load replay delay configuration
         try:
@@ -4910,10 +5066,19 @@ def fill_template_gaps():
         logger.info(f"Using rotation order: {scheduler.duration_rotation}")
         
         # Process each gap individually
-        for gap in gaps:
+        logger.info(f"\n=== PROCESSING {len(gaps)} GAPS ===")
+        for gap_idx, gap in enumerate(gaps):
             gap_start = gap['start']
             gap_end = gap['end']
             gap_duration = gap_end - gap_start
+            
+            # Log day information for weekly schedules
+            if schedule_type == 'weekly':
+                gap_day = int(gap_start // 86400)
+                day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                logger.info(f"\n--- Processing Gap {gap_idx + 1}/{len(gaps)} on {day_names[gap_day]} ---")
+            else:
+                logger.info(f"\n--- Processing Gap {gap_idx + 1}/{len(gaps)} ---")
             
             # Skip very small gaps (less than 10 seconds)
             if gap_duration < 10:
@@ -4942,6 +5107,7 @@ def fill_template_gaps():
                 if current_hour >= 22 and duration_category == 'long_form':
                     logger.info(f"Skipping long-form content after 10 PM (current hour: {current_hour:.1f})")
                     scheduler._advance_rotation()
+                    # Don't count this as an error - we're intentionally skipping
                     continue
                 
                 # Filter available content by category and replay delays
@@ -5236,9 +5402,9 @@ def fill_template_gaps():
                                 is_end_of_day = gap_end >= 86400 - end_of_day_threshold  # Within 2 hours of midnight
                             else:
                                 # For weekly schedules, check if gap ends near any midnight
-                                # Days are 0-6, so check if we're near any day boundary
-                                seconds_in_week = gap_end % (7 * 86400)
-                                seconds_in_day = seconds_in_week % 86400
+                                # Check if we're near the end of ANY day (not just the overall gap end)
+                                seconds_in_day = current_position % 86400
+                                # Check if current position is within threshold of midnight
                                 is_end_of_day = seconds_in_day >= 86400 - end_of_day_threshold  # Within 2 hours of midnight
                             
                             # Check if gap is too small to fill (less than 10 seconds)
@@ -5247,22 +5413,18 @@ def fill_template_gaps():
                                 break
                             
                             if is_end_of_day:
-                                # For end-of-day gaps, be more aggressive about filling
-                                # Accept larger gaps the closer we are to midnight
-                                time_to_midnight = 86400 - (gap_end % 86400)
+                                # For end-of-day gaps, try to fill as much as possible
+                                # Calculate time to midnight from current position
+                                time_to_midnight = 86400 - (current_position % 86400)
                                 
-                                # Be more aggressive - target 10 minutes or less for end-of-day gaps
-                                target_end_gap = 600  # 10 minutes target
-                                
-                                # Only accept gaps if they're at or below our target
-                                if remaining <= target_end_gap:
-                                    logger.info(f"End-of-day gap detected ({remaining/60:.1f} min remaining, {time_to_midnight/60:.1f} min to midnight). Accepting unfilled time.")
+                                # Only accept unfilled time if we're very close to midnight
+                                # and have tried enough times
+                                if time_to_midnight <= 300 and consecutive_errors >= 5:  # Within 5 minutes of midnight
+                                    logger.info(f"Very close to midnight ({time_to_midnight/60:.1f} min) and tried {consecutive_errors} times. Accepting remaining gap of {remaining/60:.1f} min.")
                                     break
                                     
-                                # Prevent infinite loops - if we've tried too many times, accept the gap
-                                if consecutive_errors >= 10:
-                                    logger.warning(f"End-of-day gap: tried {consecutive_errors} times without success. Accepting gap of {remaining/60:.1f} minutes to prevent infinite loop.")
-                                    break
+                                # Log but continue trying to fill
+                                logger.info(f"End-of-day: {time_to_midnight/60:.1f} min to midnight, {remaining/60:.1f} min remaining in gap. Continuing to fill...")
                                 
                                 # Try shorter content categories first for end-of-day gaps
                                 logger.info(f"End-of-day gap of {remaining/60:.1f} min. Trying shorter content categories...")
@@ -5405,62 +5567,159 @@ def fill_template_gaps():
                 overlap_tolerance = 0.01  # 10ms tolerance
                 
                 overlap_found = False
+                skip_amount = 0
+                
                 for orig_item in original_items:
-                    # Skip items with zero or near-zero duration
-                    if orig_item['duration'] < 0.1:  # Less than 100ms
-                        logger.debug(f"Skipping zero-duration item '{orig_item['title']}' from overlap check")
-                        continue
+                    # Don't skip any items - even zero-duration placeholders need to be respected
                     
                     # Check if new item would overlap with original item (with tolerance)
                     if (new_item_start < orig_item['end'] - overlap_tolerance and 
                         new_item_end > orig_item['start'] + overlap_tolerance):
                         overlap_found = True
-                        logger.error(f"OVERLAP DETECTED! New item '{selected.get('content_title', selected.get('file_name'))}' " +
-                                   f"({new_item_start/3600:.2f}h-{new_item_end/3600:.2f}h) would overlap with " +
-                                   f"original item '{orig_item['title']}' ({orig_item['start']/3600:.2f}h-{orig_item['end']/3600:.2f}h)")
-                        logger.error(f"Gap was supposed to be {gap_start/3600:.2f}h-{gap_end/3600:.2f}h")
-                        logger.error(f"Exact values: new_start={new_item_start}s, new_end={new_item_end}s, " +
-                                   f"orig_start={orig_item['start']}s, orig_end={orig_item['end']}s")
-                        logger.error("ABORTING FILL OPERATION TO PRESERVE ORIGINAL ITEMS")
                         
-                        return jsonify({
-                            'success': False,
-                            'message': f"Overlap detected! Attempted to place content from {new_item_start/3600:.2f}h to {new_item_end/3600:.2f}h " +
-                                     f"which overlaps with original item '{orig_item['title']}' at {orig_item['start_time']}. " +
-                                     f"Gap calculation may be incorrect.",
-                            'overlap_details': {
-                                'new_item': {
-                                    'title': selected.get('content_title', selected.get('file_name')),
-                                    'start_hours': new_item_start/3600,
-                                    'end_hours': new_item_end/3600
-                                },
-                                'original_item': {
-                                    'title': orig_item['title'],
-                                    'start_hours': orig_item['start']/3600,
-                                    'end_hours': orig_item['end']/3600,
-                                    'start_time': orig_item['start_time']
-                                },
-                                'gap': {
-                                    'start_hours': gap_start/3600,
-                                    'end_hours': gap_end/3600
-                                }
-                            }
-                        })
+                        # Calculate how much we need to skip
+                        skip_to = orig_item['end']
+                        skip_amount = skip_to - new_item_start
+                        
+                        logger.warning(f"OVERLAP DETECTED! Item '{selected.get('content_title', selected.get('file_name'))}' " +
+                                     f"would overlap with '{orig_item['title']}' at {orig_item['start_time']}")
+                        logger.warning(f"  Would place at: {new_item_start/3600:.2f}h-{new_item_end/3600:.2f}h")
+                        logger.warning(f"  Original item: {orig_item['start']/3600:.2f}h-{orig_item['end']/3600:.2f}h")
+                        logger.warning(f"  Skipping to position after original item: {skip_to/3600:.2f}h")
+                        
+                        gap_logger.warning(f"OVERLAP PROTECTION: Skipping over '{orig_item['title']}'")
+                        gap_logger.warning(f"  Item would have been at: {new_item_start}s-{new_item_end}s")
+                        gap_logger.warning(f"  Original item occupies: {orig_item['start']}s-{orig_item['end']}s")
+                        gap_logger.warning(f"  Moving position from {current_position}s to {skip_to}s")
+                        
+                        break  # We found an overlap, no need to check more
                 
-                if not overlap_found:
+                if overlap_found:
+                    # Skip ahead to after the overlapping item
+                    current_position += skip_amount
+                    gap_logger.info(f"  Skipped {skip_amount}s ({skip_amount/3600:.2f}h) to avoid overlap")
+                    
+                    # Check if we've exceeded the gap
+                    if current_position >= gap_end:
+                        logger.info(f"After skipping overlap, position {current_position/3600:.2f}h exceeds gap end {gap_end/3600:.2f}h")
+                        break  # Move to next gap
+                    
+                    # Try to place the same item at the new position
+                    # But first check if there's enough room
+                    if current_position + duration > gap_end:
+                        logger.info(f"After skipping, not enough room for {duration}s item in remaining gap")
+                        # Don't advance rotation - we couldn't place this item
+                        continue  # Try next item in rotation
+                    
+                    # Re-check for overlaps at the new position
+                    new_item_start = current_position
+                    new_item_end = current_position + duration
+                    
+                    # Check again for any other overlaps
+                    another_overlap = False
+                    for orig_item in original_items:
+                        if (new_item_start < orig_item['end'] - overlap_tolerance and 
+                            new_item_end > orig_item['start'] + overlap_tolerance):
+                            another_overlap = True
+                            logger.warning(f"  After skip, still overlaps with '{orig_item['title']}' at {orig_item['start_time']}")
+                            break
+                    
+                    if another_overlap:
+                        # This position also has an overlap, skip this content
+                        logger.warning(f"  Multiple overlaps detected, skipping this content item")
+                        continue
+                    
+                    # If we get here, the new position is clear
+                    gap_logger.info(f"  New position {current_position}s is clear, placing content")
+                
+                if not overlap_found or (overlap_found and current_position < gap_end):
+                    # Update item positions if we skipped
+                    if overlap_found:
+                        new_item_start = current_position
+                        new_item_end = current_position + duration
+                    
+                    gap_logger.info(f"  PLACING CONTENT: '{selected.get('content_title', selected.get('file_name'))}'")
+                    gap_logger.info(f"    Position: {current_position}s ({current_position/3600:.6f}h)")
+                    gap_logger.info(f"    Duration: {duration}s")
+                    gap_logger.info(f"    Will occupy: {new_item_start}s to {new_item_end}s")
+                    
+                    # Calculate start_time and end_time based on template type
+                    if template.get('type') == 'weekly':
+                        # Convert seconds to day and time for weekly schedule
+                        day_index = int(current_position // (24 * 3600))
+                        day_seconds = current_position % (24 * 3600)
+                        days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+                        day_name = days[day_index] if day_index < 7 else 'sun'
+                        
+                        # Format time as HH:MM:SS.mmm
+                        hours = int(day_seconds // 3600)
+                        minutes = int((day_seconds % 3600) // 60)
+                        seconds = day_seconds % 60
+                        
+                        # Handle 12-hour format with proper AM/PM
+                        if hours == 0:
+                            time_str = f"12:{minutes:02d}:{seconds:06.3f} am"
+                        elif hours < 12:
+                            time_str = f"{hours}:{minutes:02d}:{seconds:06.3f} am"
+                        elif hours == 12:
+                            time_str = f"12:{minutes:02d}:{seconds:06.3f} pm"
+                        else:
+                            time_str = f"{hours-12}:{minutes:02d}:{seconds:06.3f} pm"
+                        
+                        start_time = f"{day_name} {time_str}"
+                        
+                        # Calculate end time
+                        end_position = current_position + duration
+                        end_day_index = int(end_position // (24 * 3600))
+                        end_day_seconds = end_position % (24 * 3600)
+                        end_day_name = days[end_day_index] if end_day_index < 7 else 'sun'
+                        
+                        end_hours = int(end_day_seconds // 3600)
+                        end_minutes = int((end_day_seconds % 3600) // 60)
+                        end_seconds = end_day_seconds % 60
+                        
+                        if end_hours == 0:
+                            end_time_str = f"12:{end_minutes:02d}:{end_seconds:06.3f} am"
+                        elif end_hours < 12:
+                            end_time_str = f"{end_hours}:{end_minutes:02d}:{end_seconds:06.3f} am"
+                        elif end_hours == 12:
+                            end_time_str = f"12:{end_minutes:02d}:{end_seconds:06.3f} pm"
+                        else:
+                            end_time_str = f"{end_hours-12}:{end_minutes:02d}:{end_seconds:06.3f} pm"
+                        
+                        end_time = f"{end_day_name} {end_time_str}"
+                    else:
+                        # Daily schedule - format as HH:MM:SS.mmm
+                        hours = int(current_position // 3600)
+                        minutes = int((current_position % 3600) // 60)
+                        seconds = current_position % 60
+                        start_time = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+                        
+                        end_position = current_position + duration
+                        end_hours = int(end_position // 3600)
+                        end_minutes = int((end_position % 3600) // 60)
+                        end_seconds = end_position % 60
+                        end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
+                    
                     # Add to template (file already validated during pre-processing)
                     new_item = {
+                        'id': selected.get('id'),  # Changed from asset_id to id for consistency
                         'asset_id': selected.get('id'),
                         'content_id': selected.get('id'),
                         'title': selected.get('content_title', selected.get('file_name')),
+                        'content_title': selected.get('content_title'),  # Add content_title field
                         'file_name': selected.get('file_name'),
                         'file_path': selected.get('file_path'),
                         'duration_seconds': duration,
                         'duration_category': selected.get('duration_category'),
                         'content_type': selected.get('content_type'),
-                        'guid': selected.get('guid', '')
-                        # Don't set start_time and end_time - let frontend calculate them
+                        'guid': selected.get('guid', ''),
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'is_fixed_time': True  # Mark as fixed time so frontend won't rearrange it
                     }
+                    
+                    gap_logger.info(f"  Placed content '{new_item['title']}' at {start_time} ({current_position}s)")
                     
                     items_added.append(new_item)
                     # Track when this asset was scheduled for replay delay checking
@@ -5477,10 +5736,39 @@ def fill_template_gaps():
                 # Log progress every 10 items to prevent timeout appearance
                 if len(items_added) % 10 == 0:
                     logger.info(f"Fill gaps progress: {len(items_added)} items added, current gap: {current_position/3600:.1f}h of {gap_end/3600:.1f}h")
+            
+            # Log gap completion when we exit the while loop
+            filled_in_gap = current_position - gap_start
+            remaining_in_gap = gap_end - current_position
+            if schedule_type == 'weekly':
+                gap_day = int(gap_start // 86400)
+                day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                logger.info(f"Completed {day_names[gap_day]} Gap {gap_idx + 1}: Filled {filled_in_gap/3600:.2f}h of {gap_duration/3600:.2f}h, {remaining_in_gap/3600:.2f}h unfilled")
+            else:
+                logger.info(f"Completed Gap {gap_idx + 1}: Filled {filled_in_gap/3600:.2f}h of {gap_duration/3600:.2f}h, {remaining_in_gap/3600:.2f}h unfilled")
         
         # Calculate total filled duration
         total_filled_seconds = sum(item['duration_seconds'] for item in items_added)
         logger.info(f"Fill gaps completed: {len(items_added)} total items added, {total_filled_seconds/3600:.1f} hours total")
+        
+        # Log summary of which days had gaps filled
+        if schedule_type == 'weekly' and items_added:
+            days_with_content = {}
+            for item in items_added:
+                # Parse the start time to get the day
+                start_time = item['start_time']
+                if ' ' in start_time:
+                    day_part = start_time.split(' ')[0]
+                    if day_part not in days_with_content:
+                        days_with_content[day_part] = 0
+                    days_with_content[day_part] += 1
+            
+            logger.info("=== CONTENT ADDED BY DAY ===")
+            day_order = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+            for day in day_order:
+                if day in days_with_content:
+                    logger.info(f"  {day.capitalize()}: {days_with_content[day]} items added")
+            logger.info("===========================")
         
         # FINAL VERIFICATION: Check that all original items would still be preserved
         logger.info("=== FINAL VERIFICATION: Checking if all original items are preserved ===")
@@ -5578,6 +5866,10 @@ def fill_template_gaps():
             })
         
         logger.info("VERIFICATION PASSED: All original items preserved, no overlaps detected")
+        gap_logger.info(f"\n=== FILL GAPS COMPLETED SUCCESSFULLY ===")
+        gap_logger.info(f"Total items added: {len(items_added)}")
+        gap_logger.info(f"Debug log saved to: {debug_log_file}")
+        logger.info(f"Gap filling debug information saved to: {debug_log_file}")
         
         return jsonify({
             'success': True,
@@ -5654,7 +5946,8 @@ def export_template():
                     time_parts = time_24.split(':')
                     hours = int(time_parts[0])
                     minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
-                    seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                    # Round to millisecond precision to avoid floating-point errors
+                    seconds = round(float(time_parts[2]) * 1000) / 1000 if len(time_parts) > 2 else 0
                     
                     current_seconds = (day_index * 24 * 3600) + (hours * 3600) + (minutes * 60) + seconds
                 else:
@@ -5681,7 +5974,8 @@ def export_template():
                         if time_parts:
                             hours = int(time_parts[0])
                             minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
-                            seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                            # Round to millisecond precision to avoid floating-point errors
+                            seconds = round(float(time_parts[2]) * 1000) / 1000 if len(time_parts) > 2 else 0
                             
                             # Format as 12-hour time
                             period = 'am' if hours < 12 else 'pm'
@@ -5778,7 +6072,7 @@ def export_template():
                 file_size = os.path.getsize(temp_file_path)
                 return jsonify({
                     'success': True,
-                    'message': f'Template exported successfully to {export_server}',
+                    'message': f'Template exported successfully to {export_server} at {full_path}',
                     'file_path': full_path,
                     'file_size': file_size
                 })

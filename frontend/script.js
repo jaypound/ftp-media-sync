@@ -9370,7 +9370,7 @@ async function fillScheduleGaps() {
                 // Debug: Show all items in cleanTemplate before gap calculation
                 console.log('Items in cleanTemplate before gap calculation:');
                 cleanTemplate.items.forEach((item, idx) => {
-                    const startSeconds = currentTemplate.type === 'weekly' && item.start_time.includes(' ') 
+                    const startSeconds = currentTemplate.type === 'weekly' && item.start_time && item.start_time.includes(' ') 
                         ? parseWeeklyTimeToSeconds(item.start_time) 
                         : parseTimeToSeconds(item.start_time);
                     const isGap = item.is_gap ? ' [GAP ITEM]' : '';
@@ -9406,7 +9406,13 @@ async function fillScheduleGaps() {
                 });
                 console.log(`Gap items in template: ${gapItems.length}`);
                 gapItems.forEach(gapItem => {
-                    const gapStart = parseTimeToSeconds(gapItem.start_time);
+                    // Parse time correctly for weekly templates
+                    let gapStart;
+                    if (cleanTemplate.type === 'weekly' && gapItem.start_time && gapItem.start_time.includes(' ')) {
+                        gapStart = parseWeeklyTimeToSeconds(gapItem.start_time);
+                    } else {
+                        gapStart = parseTimeToSeconds(gapItem.start_time);
+                    }
                     const gapEnd = gapStart + parseFloat(gapItem.duration_seconds || 0);
                     console.log(`  Gap item: "${gapItem.title}" at ${(gapStart/3600).toFixed(2)}h - ${(gapEnd/3600).toFixed(2)}h, is_gap=${gapItem.is_gap}`);
                     
@@ -9446,7 +9452,17 @@ async function fillScheduleGaps() {
                             return;
                         }
                         
-                        const itemStart = currentTemplate.type === 'weekly' && item.start_time.includes(' ')
+                        // Also skip Live Input items
+                        const isLiveInput = item.is_live_input === true || 
+                                          title.includes('live input') || 
+                                          title.includes('sdi') ||
+                                          (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
+                        if (isLiveInput) {
+                            console.log(`Skipping live input item in validation: "${item.title || item.content_title}"`);
+                            return;
+                        }
+                        
+                        const itemStart = currentTemplate.type === 'weekly' && item.start_time && item.start_time.includes(' ')
                             ? parseWeeklyTimeToSeconds(item.start_time)
                             : parseTimeToSeconds(item.start_time);
                         
@@ -9472,12 +9488,24 @@ async function fillScheduleGaps() {
                 gaps.forEach((gap, idx) => {
                     console.log(`Checking gap ${idx + 1}: ${(gap.start/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h`);
                     
-                    // Find ALL gap items that fall within this gap
+                    // Find ALL non-fillable items (gap items and live inputs) that fall within this gap
                     const gapItemsInRange = [];
                     cleanTemplate.items.forEach(item => {
                         const title = (item.title || item.content_title || '').toLowerCase();
-                        if (item.is_gap === true || title.includes('schedule gap') || title.includes('transition')) {
-                            const itemStart = parseTimeToSeconds(item.start_time);
+                        const isGapItem = item.is_gap === true || title.includes('schedule gap') || title.includes('transition');
+                        const isLiveInput = item.is_live_input === true || 
+                                          title.includes('live input') || 
+                                          title.includes('sdi') ||
+                                          (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
+                        
+                        if (isGapItem || isLiveInput) {
+                            // Parse time correctly for weekly templates
+                            let itemStart;
+                            if (cleanTemplate.type === 'weekly' && item.start_time && item.start_time.includes(' ')) {
+                                itemStart = parseWeeklyTimeToSeconds(item.start_time);
+                            } else {
+                                itemStart = parseTimeToSeconds(item.start_time);
+                            }
                             const itemEnd = itemStart + parseFloat(item.duration_seconds || 0);
                             
                             if (itemStart >= gap.start && itemStart < gap.end) {
@@ -9486,34 +9514,45 @@ async function fillScheduleGaps() {
                                     end: itemEnd,
                                     title: item.title || item.content_title
                                 });
-                                console.log(`  Found gap item within: "${item.title || item.content_title}" at ${(itemStart/3600).toFixed(2)}h`);
+                                const itemType = isLiveInput ? 'live input' : 'gap item';
+                                console.log(`  Found ${itemType} within: "${item.title || item.content_title}" at ${(itemStart/3600).toFixed(2)}h`);
                             }
                         }
                     });
                     
-                    // If no gap items in this gap, keep it as-is
+                    // If no non-fillable items in this gap, keep it as-is
                     if (gapItemsInRange.length === 0) {
                         manuallySplitGaps.push(gap);
-                        console.log(`  No gap items found, keeping gap as-is`);
+                        console.log(`  No non-fillable items found, keeping gap as-is`);
                     } else {
-                        // Sort gap items by start time
+                        // Sort non-fillable items by start time
                         gapItemsInRange.sort((a, b) => a.start - b.start);
                         
-                        // Split the gap around each gap item
+                        // Split the gap around each non-fillable item
                         let currentStart = gap.start;
                         
                         gapItemsInRange.forEach(gapItem => {
                             if (currentStart < gapItem.start) {
-                                manuallySplitGaps.push({
-                                    start: currentStart,
-                                    end: gapItem.start
-                                });
-                                console.log(`  Created split gap: ${(currentStart/3600).toFixed(2)}h - ${(gapItem.start/3600).toFixed(2)}h`);
+                                // Add 1-second buffer before Live Input items to prevent overlap
+                                const gapEnd = gapItem.title && gapItem.title.toLowerCase().includes('live input') 
+                                    ? gapItem.start - 1 
+                                    : gapItem.start;
+                                
+                                if (currentStart < gapEnd) {
+                                    manuallySplitGaps.push({
+                                        start: currentStart,
+                                        end: gapEnd
+                                    });
+                                    console.log(`  Created split gap: ${(currentStart/3600).toFixed(2)}h - ${(gapEnd/3600).toFixed(2)}h`);
+                                    if (gapEnd < gapItem.start) {
+                                        console.log(`    Added 1-second buffer before Live Input`);
+                                    }
+                                }
                             }
                             currentStart = gapItem.end;
                         });
                         
-                        // Add remaining gap after last gap item
+                        // Add remaining gap after last non-fillable item
                         if (currentStart < gap.end) {
                             manuallySplitGaps.push({
                                 start: currentStart,
@@ -9529,6 +9568,132 @@ async function fillScheduleGaps() {
                     console.log(`  Final gap ${idx + 1}: ${(gap.start/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h`);
                 });
                 console.log('=== END MANUAL SPLIT ===');
+                
+                // SPLIT GAPS AT DAY BOUNDARIES
+                // For weekly templates, gaps should not span across day boundaries
+                if (cleanTemplate.type === 'weekly') {
+                    console.log('=== SPLITTING GAPS AT DAY BOUNDARIES ===');
+                    const dayBoundarySplitGaps = [];
+                    
+                    manuallySplitGaps.forEach((gap, idx) => {
+                        // Calculate which days this gap spans
+                        const startDay = Math.floor(gap.start / 86400); // 86400 seconds per day
+                        const endDay = Math.floor((gap.end - 0.001) / 86400); // Subtract small amount to handle exact day boundaries
+                        
+                        if (startDay === endDay) {
+                            // Gap is within a single day, keep as-is
+                            dayBoundarySplitGaps.push(gap);
+                        } else {
+                            // Gap spans multiple days, split at day boundaries
+                            console.log(`  Gap ${idx + 1} spans from day ${startDay} to day ${endDay}, splitting...`);
+                            
+                            let currentStart = gap.start;
+                            for (let day = startDay; day <= endDay; day++) {
+                                const dayEnd = Math.min((day + 1) * 86400, gap.end);
+                                
+                                if (currentStart < dayEnd) {
+                                    dayBoundarySplitGaps.push({
+                                        start: currentStart,
+                                        end: dayEnd
+                                    });
+                                    console.log(`    Created day ${day} gap: ${(currentStart/3600).toFixed(2)}h - ${(dayEnd/3600).toFixed(2)}h`);
+                                }
+                                
+                                currentStart = dayEnd;
+                            }
+                        }
+                    });
+                    
+                    // Replace the gaps with day-boundary-split gaps
+                    manuallySplitGaps.length = 0;
+                    manuallySplitGaps.push(...dayBoundarySplitGaps);
+                    
+                    console.log(`Gaps after day boundary splitting: ${manuallySplitGaps.length} gaps`);
+                    manuallySplitGaps.forEach((gap, idx) => {
+                        const day = Math.floor(gap.start / 86400);
+                        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        console.log(`  Gap ${idx + 1} (${dayNames[day]}): ${(gap.start/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h`);
+                    });
+                    console.log('=== END DAY BOUNDARY SPLIT ===');
+                }
+                
+                // Debug: Log Monday-specific gaps
+                if (cleanTemplate.type === 'weekly') {
+                    console.log('=== MONDAY GAP CHECK ===');
+                    const mondayGaps = manuallySplitGaps.filter(gap => {
+                        const dayNum = Math.floor(gap.start / 86400);
+                        return dayNum === 1; // Monday
+                    });
+                    console.log(`Found ${mondayGaps.length} gaps on Monday:`);
+                    mondayGaps.forEach((gap, idx) => {
+                        const startHour = (gap.start % 86400) / 3600;
+                        const endHour = (gap.end % 86400) / 3600;
+                        console.log(`  Monday Gap ${idx + 1}: ${startHour.toFixed(2)}h to ${endHour.toFixed(2)}h (${((gap.end - gap.start)/3600).toFixed(2)} hours)`);
+                        console.log(`    Raw seconds: ${gap.start} to ${gap.end}`);
+                    });
+                    
+                    // Also check if there are any Monday items in the template
+                    const mondayItems = cleanTemplate.items.filter(item => {
+                        const start = item.start_time && item.start_time.includes(' ') 
+                            ? parseWeeklyTimeToSeconds(item.start_time)
+                            : parseTimeToSeconds(item.start_time);
+                        const dayNum = Math.floor(start / 86400);
+                        return dayNum === 1;
+                    });
+                    console.log(`Monday has ${mondayItems.length} items total`);
+                    
+                    const mondayNonGapItems = mondayItems.filter(item => {
+                        const title = (item.title || item.content_title || '').toLowerCase();
+                        const isGapItem = item.is_gap === true || title.includes('schedule gap');
+                        const isLiveInput = item.is_live_input === true || title.includes('live input');
+                        return !isGapItem && !isLiveInput;
+                    });
+                    console.log(`Monday has ${mondayNonGapItems.length} non-gap, non-live-input items`);
+                    
+                    // Warn if Monday appears to be completely empty of content
+                    if (mondayNonGapItems.length === 0 && mondayItems.length > 0) {
+                        console.warn('WARNING: Monday has meetings but NO scheduled content items!');
+                        console.warn('This suggests the template only contains meetings, not the full schedule.');
+                        console.warn('To properly fill gaps, load a template that includes existing scheduled content.');
+                    }
+                    console.log('=== END MONDAY GAP CHECK ===');
+                }
+                
+                // ADJUST GAPS THAT END AT LIVE INPUT TIMES
+                // To prevent frame-level overlaps, trim gaps that end exactly where Live Inputs begin
+                console.log('=== CHECKING FOR GAPS ENDING AT LIVE INPUTS ===');
+                const frameGap = 0.033; // One frame at 30fps
+                
+                manuallySplitGaps.forEach((gap, idx) => {
+                    // Check if any Live Input starts exactly where this gap ends
+                    const liveInputAtEnd = cleanTemplate.items.find(item => {
+                        if (!item.start_time) return false;
+                        const title = (item.title || item.content_title || '').toLowerCase();
+                        const isLiveInput = item.is_live_input === true || 
+                                           title.includes('live input') || 
+                                           title.includes('sdi') ||
+                                           (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
+                        if (!isLiveInput) return false;
+                        
+                        // Parse time correctly for weekly templates
+                        let itemStart;
+                        if (cleanTemplate.type === 'weekly' && item.start_time && item.start_time.includes(' ')) {
+                            itemStart = parseWeeklyTimeToSeconds(item.start_time);
+                        } else {
+                            itemStart = parseTimeToSeconds(item.start_time);
+                        }
+                        
+                        // Check if Live Input starts exactly where gap ends (within 1ms tolerance)
+                        return Math.abs(itemStart - gap.end) < 0.001;
+                    });
+                    
+                    if (liveInputAtEnd) {
+                        console.log(`  Gap ${idx + 1} ends at Live Input "${liveInputAtEnd.title}" at ${gap.end}s`);
+                        console.log(`    Trimming gap by ${frameGap}s to prevent overlap`);
+                        gap.end = gap.end - frameGap;
+                    }
+                });
+                console.log('=== END LIVE INPUT CHECK ===');
                 
                 // Use the schedule date we collected earlier
                 // scheduleDate is already set from the prompt above
@@ -9997,38 +10162,59 @@ function calculateScheduleGaps(template) {
         // Check is_gap flag first
         const hasGapFlag = item.is_gap === true;
         
-        // Fallback: check if title indicates it's a gap
+        // Check if title indicates it's a gap
         const title = (item.title || item.content_title || item.file_name || '').toLowerCase();
         const isGapByTitle = title.includes('schedule gap') || title.includes('transition');
         
+        // Check if it's a Live Input item (should also be excluded from fillable gaps)
+        const isLiveInput = item.is_live_input === true || 
+                           title.includes('live input') || 
+                           title.includes('sdi') ||
+                           (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
+        
         // Debug each item
-        console.log(`  Checking: "${item.title || item.content_title || item.file_name}" - is_gap=${item.is_gap}, title_match=${isGapByTitle}`);
+        console.log(`  Checking: "${item.title || item.content_title || item.file_name}" - is_gap=${item.is_gap}, title_match=${isGapByTitle}, is_live_input=${isLiveInput}`);
         
         if (isGapByTitle && !hasGapFlag) {
             console.log(`    >>> IMPORTANT: Found gap item by title but is_gap=${item.is_gap}: "${item.title || item.content_title}"`);
         }
         
-        return hasGapFlag || isGapByTitle;
+        if (isLiveInput) {
+            console.log(`    >>> LIVE INPUT ITEM DETECTED: "${item.title || item.content_title}"`);
+        }
+        
+        // Return true for gap items AND live input items (both should split gaps)
+        return hasGapFlag || isGapByTitle || isLiveInput;
     });
     
-    console.log(`=== FOUND ${gapItems.length} GAP ITEMS ===`);
-    console.log(`Found ${gapItems.length} gap items to exclude from gaps:`, gapItems.map(g => ({
-        title: g.title || g.content_title,
-        start_time: g.start_time,
-        duration: g.duration_seconds,
-        is_gap: g.is_gap,
-        detected_by: g.is_gap === true ? 'is_gap flag' : 'title match'
-    })));
+    console.log(`=== FOUND ${gapItems.length} NON-FILLABLE ITEMS (gaps and live inputs) ===`);
+    console.log(`Found ${gapItems.length} non-fillable items to exclude from gaps:`, gapItems.map(g => {
+        const title = (g.title || g.content_title || g.file_name || '').toLowerCase();
+        let detected_by = 'unknown';
+        if (g.is_gap === true) detected_by = 'is_gap flag';
+        else if (title.includes('schedule gap') || title.includes('transition')) detected_by = 'gap title match';
+        else if (g.is_live_input === true) detected_by = 'is_live_input flag';
+        else if (title.includes('live input') || title.includes('sdi')) detected_by = 'live input title match';
+        else if (g.file_path && g.file_path.includes('/mnt/main/tv/inputs/')) detected_by = 'live input file path';
+        
+        return {
+            title: g.title || g.content_title,
+            start_time: g.start_time,
+            duration: g.duration_seconds,
+            is_gap: g.is_gap,
+            is_live_input: g.is_live_input,
+            detected_by: detected_by
+        };
+    }));
     const processedGaps = [];
     
     gaps.forEach((gap, idx) => {
         console.log(`  Gap ${idx + 1}: ${gap.start/3600}h - ${gap.end/3600}h`);
         
-        // Check if any gap items fall within this gap
+        // Check if any non-fillable items (gaps or live inputs) fall within this gap
         let currentGapStart = gap.start;
-        let gapWasSplit = false;
         
-        // Sort gap items by start time within this gap
+        // Sort non-fillable items by start time within this gap
         const gapItemsInRange = gapItems.filter(item => {
             let itemStart;
             if (isWeekly && item.start_time && item.start_time.toString().includes(' ')) {
@@ -10041,41 +10227,40 @@ function calculateScheduleGaps(template) {
             // Check if gap item overlaps with this gap
             return itemStart < gap.end && itemEnd > gap.start;
         }).sort((a, b) => {
-            const aStart = isWeekly && a.start_time.toString().includes(' ') 
+            const aStart = cleanTemplate.type === 'weekly' && a.start_time.toString().includes(' ') 
                 ? parseWeeklyTimeToSeconds(a.start_time) 
                 : parseTimeToSeconds(a.start_time);
-            const bStart = isWeekly && b.start_time.toString().includes(' ') 
+            const bStart = cleanTemplate.type === 'weekly' && b.start_time.toString().includes(' ') 
                 ? parseWeeklyTimeToSeconds(b.start_time) 
                 : parseTimeToSeconds(b.start_time);
             return aStart - bStart;
         });
         
         if (gapItemsInRange.length > 0) {
-            console.log(`  Gap contains ${gapItemsInRange.length} gap item(s)`);
+            console.log(`  Gap contains ${gapItemsInRange.length} non-fillable item(s)`);
             
             gapItemsInRange.forEach(gapItem => {
-                const itemStart = isWeekly && gapItem.start_time.toString().includes(' ') 
+                const itemStart = cleanTemplate.type === 'weekly' && gapItem.start_time.toString().includes(' ') 
                     ? parseWeeklyTimeToSeconds(gapItem.start_time) 
                     : parseTimeToSeconds(gapItem.start_time);
                 const itemEnd = itemStart + parseFloat(gapItem.duration_seconds || 0);
                 
-                console.log(`    Gap item "${gapItem.title}" at ${itemStart/3600}h-${itemEnd/3600}h`);
+                console.log(`    Non-fillable item "${gapItem.title}" at ${itemStart/3600}h-${itemEnd/3600}h`);
                 
-                // If there's a gap before the gap item, add it
+                // If there's a gap before the non-fillable item, add it
                 if (currentGapStart < itemStart) {
                     processedGaps.push({
                         start: currentGapStart,
                         end: itemStart
                     });
                     console.log(`    Created sub-gap: ${currentGapStart/3600}h-${itemStart/3600}h`);
-                    gapWasSplit = true;
                 }
                 
-                // Move past the gap item
+                // Move past the non-fillable item
                 currentGapStart = itemEnd;
             });
             
-            // If there's remaining gap after the last gap item
+            // If there's remaining gap after the last non-fillable item
             if (currentGapStart < gap.end) {
                 processedGaps.push({
                     start: currentGapStart,
@@ -10084,12 +10269,12 @@ function calculateScheduleGaps(template) {
                 console.log(`    Created sub-gap: ${currentGapStart/3600}h-${gap.end/3600}h`);
             }
         } else {
-            // No gap items in this gap, keep it as-is
+            // No non-fillable items in this gap, keep it as-is
             processedGaps.push(gap);
         }
     });
     
-    console.log(`Processed gaps: ${processedGaps.length} fillable gaps after excluding gap items`);
+    console.log(`Processed gaps: ${processedGaps.length} fillable gaps after excluding non-fillable items`);
     processedGaps.forEach((gap, idx) => {
         console.log(`  Fillable gap ${idx + 1}: ${gap.start/3600}h - ${gap.end/3600}h (${(gap.end-gap.start)/3600}h)`);
     });
@@ -10126,8 +10311,20 @@ function fillGapsWithProperTimes() {
             item.is_gap === true ||
             item.title?.toLowerCase().includes('schedule gap')) {
             // This is a fixed-time item (imported meeting, live event, gap item, etc) - MUST preserve it
-            existingItems.push({item: item, originalIndex: index});
-            console.log('✓ Fixed-time item:', item.title || item.file_name, 'at', item.start_time);
+            // Calculate start and end times in seconds for overlap checking
+            const startSeconds = isWeekly && item.start_time && item.start_time.includes(' ') 
+                ? parseWeeklyTimeToSeconds(item.start_time) 
+                : parseTimeToSeconds(item.start_time);
+            const duration = parseFloat(item.duration_seconds || item.file_duration || 0);
+            const endSeconds = startSeconds + duration;
+            
+            existingItems.push({
+                item: item, 
+                originalIndex: index,
+                startSeconds: startSeconds,
+                endSeconds: endSeconds
+            });
+            console.log('✓ Fixed-time item:', item.title || item.file_name, 'at', item.start_time, `(${startSeconds}s - ${endSeconds}s)`);
         } else if (!item.start_time || 
                    item.start_time === "00:00:00:00" || 
                    item.start_time === "00:00:00" || 
@@ -10207,6 +10404,18 @@ function fillWeeklyGapsPreservingExisting(existingItems, newItemsToAdd, finalIte
             return timeA - timeB;
         });
         
+        // Log Live Inputs on this day for debugging
+        const liveInputsToday = dayExistingItems.filter(wrapper => {
+            const title = (wrapper.item.title || '').toLowerCase();
+            return title.includes('live input') || title.includes('sdi');
+        });
+        if (liveInputsToday.length > 0) {
+            console.log(`🔴 ${dayName.toUpperCase()} has ${liveInputsToday.length} Live Input(s):`);
+            liveInputsToday.forEach(wrapper => {
+                console.log(`   - "${wrapper.item.title}" at ${wrapper.item.start_time} (${wrapper.startSeconds}s - ${wrapper.endSeconds}s)`);
+            });
+        }
+        
         // Process each existing item for this day
         for (let i = 0; i < dayExistingItems.length; i++) {
             const existingItem = dayExistingItems[i].item;
@@ -10224,11 +10433,42 @@ function fillWeeklyGapsPreservingExisting(existingItems, newItemsToAdd, finalIte
                     const duration = parseFloat(newItem.duration_seconds || newItem.file_duration || 0);
                     
                     // Check if this item fits in the remaining gap (with frame gap)
-                    if (currentDayTime + duration + frameGap <= gapEndTime) {
+                    // But don't add frame gap if it would push us past a Live Input
+                    const wouldOverlapLiveInput = dayExistingItems.some(existingWrapper => {
+                        const title = (existingWrapper.item.title || '').toLowerCase();
+                        if (!title.includes('live input') && !title.includes('sdi')) return false;
+                        
+                        // Get the Live Input's time on this day only (not weekly seconds)
+                        const liveInputDayTime = extractTimeFromWeeklyTime(existingWrapper.item.start_time);
+                        const itemEndTime = currentDayTime + duration;
+                        const itemEndWithFrameGap = itemEndTime + frameGap;
+                        
+                        // Check if adding frame gap would push us past the Live Input start
+                        const wouldOverlap = itemEndTime <= liveInputDayTime && itemEndWithFrameGap > liveInputDayTime - 0.001;
+                        
+                        if (wouldOverlap) {
+                            console.log(`⚠️ Frame gap would cause overlap with Live Input "${existingWrapper.item.title}"`);
+                            console.log(`   Live Input starts at: ${liveInputDayTime}s (day time)`);
+                            console.log(`   Current position: ${currentDayTime}s, duration: ${duration}s`);
+                            console.log(`   Would end at: ${itemEndTime}s, with frame gap: ${itemEndWithFrameGap}s`);
+                            console.log(`   Overlap detected: ${itemEndWithFrameGap}s > ${liveInputDayTime - 0.001}s`);
+                        }
+                        return wouldOverlap;
+                    });
+                    
+                    const effectiveFrameGap = wouldOverlapLiveInput ? 0 : frameGap;
+                    
+                    if (currentDayTime + duration + effectiveFrameGap <= gapEndTime) {
                         newItem.start_time = formatWeeklyTime(dayName, currentDayTime);
                         newItem.end_time = formatWeeklyTime(dayName, currentDayTime + duration);
+                        
+                        if (wouldOverlapLiveInput) {
+                            console.log(`🟡 Placing item "${newItem.title || newItem.file_name}" WITHOUT frame gap to avoid Live Input overlap`);
+                            console.log(`   Start: ${newItem.start_time}, End: ${newItem.end_time}`);
+                        }
+                        
                         finalItemsArray.push(newItem);
-                        currentDayTime += duration + frameGap;
+                        currentDayTime += duration + effectiveFrameGap;
                         
                         // Remove this item from the array by swapping with newItemIndex and incrementing
                         if (j !== newItemIndex) {
@@ -11803,6 +12043,7 @@ async function fillGapsWithContent(template, gapSeconds, availableContent) {
 
 // Find gaps in a schedule template
 function findScheduleGaps(template) {
+    console.log('=== findScheduleGaps called ===');
     const gaps = [];
     
     if (!template || !template.items || template.items.length === 0) {
@@ -11818,14 +12059,69 @@ function findScheduleGaps(template) {
         return gaps;
     }
     
-    // Sort ALL items by start time (including gaps)
-    // We need gaps to properly calculate time ranges
+    // Sort ALL items by start time
+    // Filter out items that should not create gaps (gap items and live inputs)
+    console.log(`Total items in template: ${template.items.length}`);
+    
     const sortedItems = [...template.items]
+        .filter(item => {
+            // Keep all non-gap, non-live-input items
+            if (item.is_gap === true) {
+                console.log(`Filtering out gap item: "${item.title || item.content_title || item.file_name}"`);
+                return false;
+            }
+            
+            // Check if it's a Live Input item
+            const title = (item.title || item.content_title || item.file_name || '').toLowerCase();
+            const isLiveInput = item.is_live_input === true || 
+                              title.includes('live input') || 
+                              title.includes('sdi') ||
+                              (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
+            if (isLiveInput) {
+                const startSeconds = parseTimeToSeconds(item.start_time, template.type);
+                console.log(`Filtering out Live Input: "${item.title || item.content_title || item.file_name}" at ${item.start_time} (${startSeconds/3600}h)`);
+                return false;
+            }
+            
+            // Check if title indicates it's a gap
+            const isGapByTitle = title.includes('schedule gap') || title.includes('transition');
+            if (isGapByTitle) {
+                console.log(`Filtering out gap by title: "${item.title || item.content_title || item.file_name}"`);
+                return false;
+            }
+            
+            return true;
+        })
         .sort((a, b) => {
             const aSeconds = parseTimeToSeconds(a.start_time, template.type);
             const bSeconds = parseTimeToSeconds(b.start_time, template.type);
             return aSeconds - bSeconds;
         });
+    
+    console.log(`After filtering, have ${sortedItems.length} items to check for gaps`);
+    
+    // Log Monday items specifically
+    if (template.type === 'weekly') {
+        const mondayItems = sortedItems.filter(item => {
+            const start = parseTimeToSeconds(item.start_time, template.type);
+            const dayNum = Math.floor(start / 86400);
+            return dayNum === 1; // Monday is day 1
+        });
+        console.log(`Monday has ${mondayItems.length} non-gap, non-live-input items:`);
+        mondayItems.forEach(item => {
+            const start = parseTimeToSeconds(item.start_time, template.type);
+            const end = item.end_time ? parseTimeToSeconds(item.end_time, template.type) : start + parseFloat(item.duration_seconds || 0);
+            console.log(`  - "${item.title || item.file_name}" at ${item.start_time} (${start/3600}h to ${end/3600}h)`);
+        });
+        
+        // Also log if Monday has any items after 16:00 (4 PM)
+        const mondayItemsAfter4PM = mondayItems.filter(item => {
+            const start = parseTimeToSeconds(item.start_time, template.type);
+            const hourOfDay = (start % 86400) / 3600;
+            return hourOfDay >= 16; // 4 PM or later
+        });
+        console.log(`Monday has ${mondayItemsAfter4PM.length} items after 4 PM`);
+    }
     
     // If all items are gaps, treat as empty schedule
     if (sortedItems.length === 0) {
@@ -11874,99 +12170,105 @@ function findScheduleGaps(template) {
         }
     }
     
-    // Check for gap at the end
-    const lastItem = sortedItems[sortedItems.length - 1];
-    const lastItemStart = parseTimeToSeconds(lastItem.start_time, template.type);
-    const lastItemDuration = parseFloat(lastItem.duration_seconds || 0);
-    const lastItemEnd = lastItem.end_time 
-        ? parseTimeToSeconds(lastItem.end_time, template.type)
-        : lastItemStart + lastItemDuration;
-    const scheduleEnd = template.type === 'weekly' ? 7 * 24 * 3600 : 24 * 3600;
-    
-    if (lastItemEnd < scheduleEnd) {
-        gaps.push({
-            startTime: lastItem.end_time || formatTimeFromSeconds(lastItemEnd, template.type),
-            endTime: template.type === 'weekly' ? 'sat 11:59:59.999 pm' : '23:59:59',
-            startSeconds: lastItemEnd,
-            endSeconds: scheduleEnd,
-            duration: scheduleEnd - lastItemEnd
+    // For weekly schedules, we need to calculate gaps per day
+    if (template.type === 'weekly') {
+        // Group items by day
+        const itemsByDay = {};
+        for (let day = 0; day < 7; day++) {
+            itemsByDay[day] = [];
+        }
+        
+        sortedItems.forEach(item => {
+            const start = parseTimeToSeconds(item.start_time, template.type);
+            const dayNum = Math.floor(start / 86400);
+            if (dayNum >= 0 && dayNum < 7) {
+                itemsByDay[dayNum].push(item);
+            }
         });
+        
+        // Check for gaps at the end of each day
+        for (let day = 0; day < 7; day++) {
+            const dayStart = day * 86400;
+            const dayEnd = (day + 1) * 86400;
+            const dayItems = itemsByDay[day];
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            
+            if (dayItems.length === 0) {
+                // No items on this day, but we already added gaps between items
+                // Check if we need a gap for the entire day
+                const hasPreviousGap = gaps.some(gap => gap.startSeconds <= dayStart && gap.endSeconds >= dayEnd);
+                if (!hasPreviousGap) {
+                    // Check if there's an item before this day that might create a gap
+                    let lastItemBeforeDay = null;
+                    for (let i = sortedItems.length - 1; i >= 0; i--) {
+                        const itemStart = parseTimeToSeconds(sortedItems[i].start_time, template.type);
+                        if (itemStart < dayStart) {
+                            lastItemBeforeDay = sortedItems[i];
+                            break;
+                        }
+                    }
+                    
+                    if (lastItemBeforeDay) {
+                        const itemStart = parseTimeToSeconds(lastItemBeforeDay.start_time, template.type);
+                        const itemEnd = lastItemBeforeDay.end_time 
+                            ? parseTimeToSeconds(lastItemBeforeDay.end_time, template.type)
+                            : itemStart + parseFloat(lastItemBeforeDay.duration_seconds || 0);
+                        
+                        if (itemEnd < dayStart) {
+                            // There's a gap between the last item and this day
+                            // This gap should have been added by the between-items logic
+                        }
+                    }
+                }
+            } else {
+                // Check if the last item on this day ends before midnight
+                const lastDayItem = dayItems[dayItems.length - 1];
+                const itemStart = parseTimeToSeconds(lastDayItem.start_time, template.type);
+                const itemEnd = lastDayItem.end_time 
+                    ? parseTimeToSeconds(lastDayItem.end_time, template.type)
+                    : itemStart + parseFloat(lastDayItem.duration_seconds || 0);
+                
+                if (itemEnd < dayEnd) {
+                    console.log(`${dayNames[day]} last item ends at ${itemEnd/3600}h, day ends at ${dayEnd/3600}h`);
+                    gaps.push({
+                        startTime: lastDayItem.end_time || formatTimeFromSeconds(itemEnd, template.type),
+                        endTime: formatTimeFromSeconds(dayEnd - 0.001, template.type), // Just before midnight
+                        startSeconds: itemEnd,
+                        endSeconds: dayEnd,
+                        duration: dayEnd - itemEnd
+                    });
+                    console.log(`Added ${dayNames[day]} end-of-day gap from ${itemEnd/3600}h to ${dayEnd/3600}h`);
+                }
+            }
+        }
+    } else {
+        // For daily schedules, check for gap at the end
+        const lastItem = sortedItems[sortedItems.length - 1];
+        const lastItemStart = parseTimeToSeconds(lastItem.start_time, template.type);
+        const lastItemDuration = parseFloat(lastItem.duration_seconds || 0);
+        const lastItemEnd = lastItem.end_time 
+            ? parseTimeToSeconds(lastItem.end_time, template.type)
+            : lastItemStart + lastItemDuration;
+        const scheduleEnd = 24 * 3600;
+        
+        if (lastItemEnd < scheduleEnd) {
+            gaps.push({
+                startTime: lastItem.end_time || formatTimeFromSeconds(lastItemEnd, template.type),
+                endTime: '23:59:59',
+                startSeconds: lastItemEnd,
+                endSeconds: scheduleEnd,
+                duration: scheduleEnd - lastItemEnd
+            });
+        }
     }
     
-    // Post-process gaps to exclude any time occupied by gap items
-    // Also check for items that look like gaps based on title/content_title
-    const gapItems = sortedItems.filter(item => {
-        // Check is_gap flag first
-        if (item.is_gap === true) return true;
-        
-        // Fallback: check if title indicates it's a gap
-        const title = (item.title || item.content_title || '').toLowerCase();
-        const isGapByTitle = title.includes('schedule gap') || title.includes('transition');
-        
-        return isGapByTitle;
+    // Return the calculated gaps - no need for post-processing since we already
+    // filtered out gap items and live inputs at the beginning
+    console.log(`=== Calculated ${gaps.length} gaps ===`);
+    gaps.forEach((gap, idx) => {
+        console.log(`Gap ${idx + 1}: ${gap.startSeconds/3600}h to ${gap.endSeconds/3600}h (${gap.duration/3600}h) - ${gap.startTime} to ${gap.endTime}`);
     });
-    const processedGaps = [];
-    
-    gaps.forEach(gap => {
-        let currentGapStart = gap.startSeconds;
-        
-        // Find gap items within this gap
-        const gapItemsInRange = gapItems.filter(item => {
-            const itemStart = parseTimeToSeconds(item.start_time, template.type);
-            const itemDuration = parseFloat(item.duration_seconds || 0);
-            const itemEnd = itemStart + itemDuration;
-            return itemStart < gap.endSeconds && itemEnd > gap.startSeconds;
-        }).sort((a, b) => {
-            const aStart = parseTimeToSeconds(a.start_time, template.type);
-            const bStart = parseTimeToSeconds(b.start_time, template.type);
-            return aStart - bStart;
-        });
-        
-        if (gapItemsInRange.length > 0) {
-            gapItemsInRange.forEach(gapItem => {
-                const itemStart = parseTimeToSeconds(gapItem.start_time, template.type);
-                const itemDuration = parseFloat(gapItem.duration_seconds || 0);
-                const itemEnd = itemStart + itemDuration;
-                
-                // If there's a gap before the gap item, add it
-                if (currentGapStart < itemStart) {
-                    processedGaps.push({
-                        startTime: gap.startTime,
-                        endTime: gapItem.start_time,
-                        startSeconds: currentGapStart,
-                        endSeconds: itemStart,
-                        duration: itemStart - currentGapStart
-                    });
-                }
-                
-                // Move past the gap item
-                currentGapStart = itemEnd;
-            });
-            
-            // If there's remaining gap after the last gap item
-            if (currentGapStart < gap.endSeconds) {
-                processedGaps.push({
-                    startTime: sortedItems.find(i => {
-                        const itemStart = parseTimeToSeconds(i.start_time, template.type);
-                        const itemDuration = parseFloat(i.duration_seconds || 0);
-                        const itemEnd = i.end_time 
-                            ? parseTimeToSeconds(i.end_time, template.type)
-                            : itemStart + itemDuration;
-                        return itemEnd === currentGapStart;
-                    })?.end_time || formatTimeFromSeconds(currentGapStart, template.type),
-                    endTime: gap.endTime,
-                    startSeconds: currentGapStart,
-                    endSeconds: gap.endSeconds,
-                    duration: gap.endSeconds - currentGapStart
-                });
-            }
-        } else {
-            // No gap items in this gap, keep it as-is
-            processedGaps.push(gap);
-        }
-    });
-    
-    return processedGaps;
+    return gaps;
 }
 
 // Parse time to seconds, handling weekly format
@@ -12385,6 +12687,7 @@ async function startAutomation() {
         const minutes = now.getMinutes().toString().padStart(2, '0');
         const filename = `${year}_${month}_${day}_${hours}_${minutes}_weekly.sch`;
         
+        const exportedPaths = [];
         for (const server of exportServers) {
             const exportResponse = await fetch('/api/export-template', {
                 method: 'POST',
@@ -12401,14 +12704,25 @@ async function startAutomation() {
             
             const exportResult = await exportResponse.json();
             if (exportResult.success) {
-                log(`Schedule exported to ${server} server: ${exportPath}/${filename}`, 'success');
+                const fullPath = exportResult.file_path || `${exportPath}/${filename}`;
+                log(`Schedule exported to ${server} server: ${fullPath}`, 'success');
+                exportedPaths.push(`${server}: ${fullPath}`);
             } else {
                 log(`Failed to export to ${server}: ${exportResult.message}`, 'error');
             }
         }
         
         log('Automation process completed successfully!', 'success');
-        alert('Automation completed!\n\nSchedule has been updated and exported to both Castus servers.');
+        
+        // Create detailed success message
+        let successMessage = 'Automation completed!\n\nSchedule has been updated and exported to both Castus servers.';
+        if (exportedPaths.length > 0) {
+            successMessage += '\n\nExported files:';
+            exportedPaths.forEach(path => {
+                successMessage += `\n• ${path}`;
+            });
+        }
+        alert(successMessage);
         
         // Refresh the template display
         if (updatedTemplate && updatedTemplate.items) {
