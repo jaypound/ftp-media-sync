@@ -5,3 +5,4 @@ backend/postgres_backups
 backend/backups
 backend/*.log
 backend/gap_filling_debug.log.*
+.DS_Store

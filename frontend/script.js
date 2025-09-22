@@ -9390,12 +9390,17 @@ async function fillScheduleGaps() {
                     console.log(`Item ${idx}: "${item.title || item.content_title || item.file_name}" at ${item.start_time} (${(itemStart/3600).toFixed(2)}h), is_gap=${item.is_gap}`);
                 });
                 
-                const gaps = calculateScheduleGaps(cleanTemplate);
-                console.log('Raw gaps from calculateScheduleGaps:', JSON.stringify(gaps));
+                // OLD LOGIC - DO NOT USE - Use findScheduleGaps instead
+                // const gaps = calculateScheduleGaps(cleanTemplate);
+                // console.log('Raw gaps from calculateScheduleGaps:', JSON.stringify(gaps));
+                
+                // NEW LOGIC - Use findScheduleGaps which properly handles Live Input items
+                const gaps = findScheduleGaps(cleanTemplate, cleanTemplate.schedule_type);
+                console.log('Raw gaps from findScheduleGaps:', JSON.stringify(gaps));
                 console.log('Calculated gaps to fill:', gaps);
                 console.log('Gap details:');
                 gaps.forEach((gap, idx) => {
-                    console.log(`  Gap ${idx + 1}: ${(gap.start/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h (${((gap.end - gap.start)/3600).toFixed(2)}h)`);
+                    console.log(`  Gap ${idx + 1}: ${(gap.startSeconds/3600).toFixed(2)}h - ${(gap.endSeconds/3600).toFixed(2)}h (${((gap.endSeconds - gap.startSeconds)/3600).toFixed(2)}h)`);
                 });
                 
                 // Debug: Check if there are any gap items that should split these gaps
@@ -9486,7 +9491,7 @@ async function fillScheduleGaps() {
                 const manuallySplitGaps = [];
                 
                 gaps.forEach((gap, idx) => {
-                    console.log(`Checking gap ${idx + 1}: ${(gap.start/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h`);
+                    console.log(`Checking gap ${idx + 1}: ${(gap.startSeconds/3600).toFixed(2)}h - ${(gap.endSeconds/3600).toFixed(2)}h`);
                     
                     // Find ALL non-fillable items (gap items and live inputs) that fall within this gap
                     const gapItemsInRange = [];
@@ -9522,14 +9527,18 @@ async function fillScheduleGaps() {
                     
                     // If no non-fillable items in this gap, keep it as-is
                     if (gapItemsInRange.length === 0) {
-                        manuallySplitGaps.push(gap);
+                        // Convert to the format expected by backend
+                        manuallySplitGaps.push({
+                            start: gap.startSeconds,
+                            end: gap.endSeconds
+                        });
                         console.log(`  No non-fillable items found, keeping gap as-is`);
                     } else {
                         // Sort non-fillable items by start time
                         gapItemsInRange.sort((a, b) => a.start - b.start);
                         
                         // Split the gap around each non-fillable item
-                        let currentStart = gap.start;
+                        let currentStart = gap.startSeconds;
                         
                         gapItemsInRange.forEach(gapItem => {
                             if (currentStart < gapItem.start) {
@@ -9553,12 +9562,12 @@ async function fillScheduleGaps() {
                         });
                         
                         // Add remaining gap after last non-fillable item
-                        if (currentStart < gap.end) {
+                        if (currentStart < gap.endSeconds) {
                             manuallySplitGaps.push({
                                 start: currentStart,
-                                end: gap.end
+                                end: gap.endSeconds
                             });
-                            console.log(`  Created split gap: ${(currentStart/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h`);
+                            console.log(`  Created split gap: ${(currentStart/3600).toFixed(2)}h - ${(gap.endSeconds/3600).toFixed(2)}h`);
                         }
                     }
                 });
@@ -9975,8 +9984,11 @@ async function loadSelectedTemplate() {
     }
 }
 
+// OLD LOGIC - DO NOT USE THIS FUNCTION
+// This function doesn't properly handle Live Input items
+// Use findScheduleGaps instead which has Live Input awareness
 function calculateScheduleGaps(template) {
-    console.log('calculateScheduleGaps: Starting gap calculation');
+    console.log('calculateScheduleGaps: Starting gap calculation - OLD FUNCTION, SHOULD USE findScheduleGaps');
     
     if (!template || !template.items || template.items.length === 0) {
         // No items, entire week is a gap
@@ -12060,45 +12072,56 @@ function findScheduleGaps(template) {
     }
     
     // Sort ALL items by start time
-    // Filter out items that should not create gaps (gap items and live inputs)
+    // First, separate live inputs from content items
     console.log(`Total items in template: ${template.items.length}`);
     
-    const sortedItems = [...template.items]
-        .filter(item => {
-            // Keep all non-gap, non-live-input items
-            if (item.is_gap === true) {
-                console.log(`Filtering out gap item: "${item.title || item.content_title || item.file_name}"`);
-                return false;
-            }
-            
-            // Check if it's a Live Input item
-            const title = (item.title || item.content_title || item.file_name || '').toLowerCase();
-            const isLiveInput = item.is_live_input === true || 
-                              title.includes('live input') || 
-                              title.includes('sdi') ||
-                              (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
-            if (isLiveInput) {
-                const startSeconds = parseTimeToSeconds(item.start_time, template.type);
-                console.log(`Filtering out Live Input: "${item.title || item.content_title || item.file_name}" at ${item.start_time} (${startSeconds/3600}h)`);
-                return false;
-            }
-            
+    const liveInputItems = [];
+    const contentItems = [];
+    
+    [...template.items].forEach(item => {
+        // Check if it's a gap item
+        if (item.is_gap === true) {
+            console.log(`Filtering out gap item: "${item.title || item.content_title || item.file_name}"`);
+            return;
+        }
+        
+        // Check if it's a Live Input item
+        const title = (item.title || item.content_title || item.file_name || '').toLowerCase();
+        const isLiveInput = item.is_live_input === true || 
+                          title.includes('live input') || 
+                          title.includes('sdi') ||
+                          (item.file_path && item.file_path.includes('/mnt/main/tv/inputs/'));
+        
+        if (isLiveInput) {
+            const startSeconds = parseTimeToSeconds(item.start_time, template.type);
+            console.log(`Found Live Input: "${item.title || item.content_title || item.file_name}" at ${item.start_time} (${startSeconds/3600}h)`);
+            liveInputItems.push(item);
+        } else {
             // Check if title indicates it's a gap
             const isGapByTitle = title.includes('schedule gap') || title.includes('transition');
-            if (isGapByTitle) {
+            if (!isGapByTitle) {
+                contentItems.push(item);
+            } else {
                 console.log(`Filtering out gap by title: "${item.title || item.content_title || item.file_name}"`);
-                return false;
             }
-            
-            return true;
-        })
-        .sort((a, b) => {
+        }
+    });
+    
+    // Sort both arrays by start time
+    const sortedItems = contentItems.sort((a, b) => {
             const aSeconds = parseTimeToSeconds(a.start_time, template.type);
             const bSeconds = parseTimeToSeconds(b.start_time, template.type);
             return aSeconds - bSeconds;
         });
     
-    console.log(`After filtering, have ${sortedItems.length} items to check for gaps`);
+    const sortedLiveInputs = liveInputItems.sort((a, b) => {
+        const aSeconds = parseTimeToSeconds(a.start_time, template.type);
+        const bSeconds = parseTimeToSeconds(b.start_time, template.type);
+        return aSeconds - bSeconds;
+    });
+    
+    console.log(`After filtering, have ${sortedItems.length} content items to check for gaps`);
+    console.log(`Live Input items: ${sortedLiveInputs.length}`);
     
     // Log Monday items specifically
     if (template.type === 'weekly') {
@@ -12123,8 +12146,18 @@ function findScheduleGaps(template) {
         console.log(`Monday has ${mondayItemsAfter4PM.length} items after 4 PM`);
     }
     
-    // If all items are gaps, treat as empty schedule
-    if (sortedItems.length === 0) {
+    // For gap calculation, we need to consider ALL items (content + live inputs)
+    // to create gaps BETWEEN them, not over them
+    const allItemsForGaps = [...sortedItems, ...sortedLiveInputs].sort((a, b) => {
+        const aSeconds = parseTimeToSeconds(a.start_time, template.type);
+        const bSeconds = parseTimeToSeconds(b.start_time, template.type);
+        return aSeconds - bSeconds;
+    });
+    
+    console.log(`Using ${allItemsForGaps.length} total items (content + live) for gap calculation`);
+    
+    // If no items at all, entire schedule is a gap
+    if (allItemsForGaps.length === 0) {
         const totalDuration = template.type === 'weekly' ? 7 * 24 * 3600 : 24 * 3600;
         gaps.push({
             startTime: template.type === 'weekly' ? 'sun 12:00:00.000 am' : '00:00:00',
@@ -12137,11 +12170,11 @@ function findScheduleGaps(template) {
     }
     
     // Check for gap at the beginning
-    const firstItemStart = parseTimeToSeconds(sortedItems[0].start_time, template.type);
+    const firstItemStart = parseTimeToSeconds(allItemsForGaps[0].start_time, template.type);
     if (firstItemStart > 0) {
         gaps.push({
             startTime: template.type === 'weekly' ? 'sun 12:00:00.000 am' : '00:00:00',
-            endTime: sortedItems[0].start_time,
+            endTime: allItemsForGaps[0].start_time,
             startSeconds: 0,
             endSeconds: firstItemStart,
             duration: firstItemStart
@@ -12149,20 +12182,20 @@ function findScheduleGaps(template) {
     }
     
     // Check for gaps between items
-    for (let i = 0; i < sortedItems.length - 1; i++) {
+    for (let i = 0; i < allItemsForGaps.length - 1; i++) {
         // Calculate end time (gap items don't have end_time property)
-        const currentItem = sortedItems[i];
+        const currentItem = allItemsForGaps[i];
         const currentStart = parseTimeToSeconds(currentItem.start_time, template.type);
         const currentDuration = parseFloat(currentItem.duration_seconds || 0);
         const currentEnd = currentItem.end_time 
             ? parseTimeToSeconds(currentItem.end_time, template.type)
             : currentStart + currentDuration;
-        const nextStart = parseTimeToSeconds(sortedItems[i + 1].start_time, template.type);
+        const nextStart = parseTimeToSeconds(allItemsForGaps[i + 1].start_time, template.type);
         
         if (nextStart > currentEnd) {
             gaps.push({
                 startTime: currentItem.end_time || formatTimeFromSeconds(currentEnd, template.type),
-                endTime: sortedItems[i + 1].start_time,
+                endTime: allItemsForGaps[i + 1].start_time,
                 startSeconds: currentEnd,
                 endSeconds: nextStart,
                 duration: nextStart - currentEnd
@@ -12178,7 +12211,7 @@ function findScheduleGaps(template) {
             itemsByDay[day] = [];
         }
         
-        sortedItems.forEach(item => {
+        allItemsForGaps.forEach(item => {
             const start = parseTimeToSeconds(item.start_time, template.type);
             const dayNum = Math.floor(start / 86400);
             if (dayNum >= 0 && dayNum < 7) {
@@ -12200,10 +12233,10 @@ function findScheduleGaps(template) {
                 if (!hasPreviousGap) {
                     // Check if there's an item before this day that might create a gap
                     let lastItemBeforeDay = null;
-                    for (let i = sortedItems.length - 1; i >= 0; i--) {
-                        const itemStart = parseTimeToSeconds(sortedItems[i].start_time, template.type);
+                    for (let i = allItemsForGaps.length - 1; i >= 0; i--) {
+                        const itemStart = parseTimeToSeconds(allItemsForGaps[i].start_time, template.type);
                         if (itemStart < dayStart) {
-                            lastItemBeforeDay = sortedItems[i];
+                            lastItemBeforeDay = allItemsForGaps[i];
                             break;
                         }
                     }
@@ -12228,22 +12261,102 @@ function findScheduleGaps(template) {
                     ? parseTimeToSeconds(lastDayItem.end_time, template.type)
                     : itemStart + parseFloat(lastDayItem.duration_seconds || 0);
                 
+                if (day === 1) { // Monday
+                    console.log(`MONDAY: Last content item: "${lastDayItem.title || lastDayItem.file_name}" ends at ${itemEnd/3600}h`);
+                    console.log(`MONDAY: Day ends at ${dayEnd/3600}h (midnight)`);
+                }
+                
                 if (itemEnd < dayEnd) {
-                    console.log(`${dayNames[day]} last item ends at ${itemEnd/3600}h, day ends at ${dayEnd/3600}h`);
+                    // Check for Live Inputs that might limit this gap
+                    let gapEnd = dayEnd;
+                    
+                    // Find the first Live Input after itemEnd on the same day
+                    for (const liveInput of sortedLiveInputs) {
+                        const liveStart = parseTimeToSeconds(liveInput.start_time, template.type);
+                        const liveDayNum = Math.floor(liveStart / 86400);
+                        
+                        if (liveDayNum === day && liveStart > itemEnd) {
+                            gapEnd = liveStart;
+                            console.log(`${dayNames[day]}: Found Live Input "${liveInput.title}" at ${liveStart/3600}h, limiting gap end`);
+                            if (day === 1) {
+                                console.log(`MONDAY: Gap will be from ${itemEnd/3600}h to ${gapEnd/3600}h (Live Input start)`);
+                            }
+                            break;
+                        }
+                    }
+                    
+                    console.log(`${dayNames[day]} last item ends at ${itemEnd/3600}h, gap will end at ${gapEnd/3600}h`);
                     gaps.push({
                         startTime: lastDayItem.end_time || formatTimeFromSeconds(itemEnd, template.type),
-                        endTime: formatTimeFromSeconds(dayEnd - 0.001, template.type), // Just before midnight
+                        endTime: formatTimeFromSeconds(gapEnd - 0.001, template.type),
                         startSeconds: itemEnd,
-                        endSeconds: dayEnd,
-                        duration: dayEnd - itemEnd
+                        endSeconds: gapEnd,
+                        duration: gapEnd - itemEnd
                     });
-                    console.log(`Added ${dayNames[day]} end-of-day gap from ${itemEnd/3600}h to ${dayEnd/3600}h`);
+                    console.log(`Added ${dayNames[day]} gap from ${itemEnd/3600}h to ${gapEnd/3600}h`);
+                }
+            }
+            
+            // Also check for gaps after Live Inputs end
+            for (const liveInput of sortedLiveInputs) {
+                const liveStart = parseTimeToSeconds(liveInput.start_time, template.type);
+                const liveDayNum = Math.floor(liveStart / 86400);
+                
+                if (liveDayNum === day) {
+                    const liveDuration = parseFloat(liveInput.duration_seconds || 0);
+                    const liveEnd = liveInput.end_time 
+                        ? parseTimeToSeconds(liveInput.end_time, template.type)
+                        : liveStart + liveDuration;
+                    
+                    // Check if there's content after this Live Input on the same day
+                    let hasContentAfter = false;
+                    for (const item of dayItems) {
+                        const itemStart = parseTimeToSeconds(item.start_time, template.type);
+                        if (itemStart >= liveEnd) {
+                            hasContentAfter = true;
+                            break;
+                        }
+                    }
+                    
+                    // If no content after Live Input and it ends before midnight, add a gap
+                    if (!hasContentAfter && liveEnd < dayEnd) {
+                        // Check if there's another Live Input after this one
+                        let gapEnd = dayEnd;
+                        for (const otherLive of sortedLiveInputs) {
+                            const otherStart = parseTimeToSeconds(otherLive.start_time, template.type);
+                            const otherDayNum = Math.floor(otherStart / 86400);
+                            if (otherDayNum === day && otherStart > liveEnd) {
+                                gapEnd = otherStart;
+                                break;
+                            }
+                        }
+                        
+                        // Check if we already have a gap covering this period
+                        let gapExists = false;
+                        for (const gap of gaps) {
+                            if (gap.startSeconds <= liveEnd && gap.endSeconds >= liveEnd) {
+                                gapExists = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!gapExists && gapEnd > liveEnd) {
+                            console.log(`${dayNames[day]}: Adding gap after Live Input ends at ${liveEnd/3600}h`);
+                            gaps.push({
+                                startTime: liveInput.end_time || formatTimeFromSeconds(liveEnd, template.type),
+                                endTime: formatTimeFromSeconds(gapEnd - 0.001, template.type),
+                                startSeconds: liveEnd,
+                                endSeconds: gapEnd,
+                                duration: gapEnd - liveEnd
+                            });
+                        }
+                    }
                 }
             }
         }
     } else {
         // For daily schedules, check for gap at the end
-        const lastItem = sortedItems[sortedItems.length - 1];
+        const lastItem = allItemsForGaps[allItemsForGaps.length - 1];
         const lastItemStart = parseTimeToSeconds(lastItem.start_time, template.type);
         const lastItemDuration = parseFloat(lastItem.duration_seconds || 0);
         const lastItemEnd = lastItem.end_time 

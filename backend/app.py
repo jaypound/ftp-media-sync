@@ -4602,13 +4602,20 @@ def fill_template_gaps():
             # Try multiple fields for title
             title = item.get('title') or item.get('content_title') or item.get('file_name') or 'Unknown'
             
+            # Check if this is a live input/SDI item
+            is_live_input = (item.get('is_live_input', False) or 
+                           'Live Input' in title or 
+                           'SDI' in title or 
+                           'SDI' in item.get('file_path', ''))
+            
             original_items.append({
                 'title': title,
                 'start': round(start_seconds * 1000) / 1000,  # Also round the start
                 'end': end_seconds,
                 'start_time': item['start_time'],
                 'duration': duration,
-                'is_gap': item.get('is_gap', False)
+                'is_gap': item.get('is_gap', False),
+                'is_live_input': is_live_input
             })
             
             if item.get('is_gap', False):
@@ -4765,7 +4772,20 @@ def fill_template_gaps():
                         logger.info(f"    Adjusted sub-gap: {sub_start/3600:.2f}h - {sub_end/3600:.2f}h (duration: {(sub_end-sub_start)/3600:.2f}h)")
             
             gaps = adjusted_gaps
-            logger.info(f"After adjustment: {len(gaps)} gaps remain")
+            
+            # Remove duplicate gaps (gaps with identical start and end times)
+            unique_gaps = []
+            seen_gaps = set()
+            for gap in gaps:
+                gap_tuple = (round(gap['start'] * 1000) / 1000, round(gap['end'] * 1000) / 1000)
+                if gap_tuple not in seen_gaps:
+                    seen_gaps.add(gap_tuple)
+                    unique_gaps.append(gap)
+                else:
+                    logger.warning(f"Removing duplicate gap: {gap['start']/3600:.6f}h to {gap['end']/3600:.6f}h")
+            
+            gaps = unique_gaps
+            logger.info(f"After adjustment and deduplication: {len(gaps)} gaps remain")
             gap_logger.info(f"\n=== FINAL ADJUSTED GAPS ===")
             gap_logger.info(f"Total adjusted gaps: {len(gaps)}")
             for i, gap in enumerate(gaps):
@@ -5088,6 +5108,21 @@ def fill_template_gaps():
             logger.info(f"Filling gap from {gap_start/3600:.1f}h to {gap_end/3600:.1f}h (duration: {gap_duration/3600:.1f}h)")
             logger.info(f"  Exact gap values: start={gap_start}s ({gap_start/3600:.6f}h), end={gap_end}s ({gap_end/3600:.6f}h)")
             
+            # Check if this gap starts immediately after any item (especially Live Inputs)
+            # If so, add a frame buffer to prevent overlap
+            frame_buffer = 0.033367  # One frame at 29.97 fps (1001/30000 seconds)
+            gap_starts_after_item = False
+            
+            for orig_item in original_items:
+                if not orig_item.get('is_gap', False):  # Skip gap items
+                    orig_end = orig_item['end']  # Use the 'end' field directly
+                    # Check if gap starts exactly at or very close to item end time
+                    if abs(gap_start - orig_end) < 0.001:  # Within 1ms tolerance
+                        logger.info(f"  Gap starts immediately after item '{orig_item['title']}' that ends at {orig_end/3600:.6f}h")
+                        logger.info(f"  Adding {frame_buffer}s buffer to prevent overlap")
+                        gap_starts_after_item = True
+                        break
+            
             # Log date calculation for this gap
             if schedule_type == 'weekly':
                 gap_day_offset = int(gap_start // 86400)
@@ -5096,7 +5131,12 @@ def fill_template_gaps():
             else:
                 logger.info(f"  Daily schedule: All content airs on {base_date.strftime('%Y-%m-%d')}")
             
-            current_position = gap_start
+            # Adjust starting position if needed
+            if gap_starts_after_item:
+                current_position = gap_start + frame_buffer
+                logger.info(f"  Starting content placement at {current_position}s ({current_position/3600:.6f}h) instead of {gap_start}s")
+            else:
+                current_position = gap_start
             
             while current_position < gap_end:
                 # Get next duration category from rotation
