@@ -4389,13 +4389,33 @@ def fill_template_gaps():
         # Debug: Check expiration dates in available content
         content_with_expiry = 0
         content_without_expiry = 0
+        content_expiring_this_week = 0
+        
         for content in available_content:
             # Check in the scheduling object
             scheduling = content.get('scheduling', {})
-            if scheduling.get('content_expiry_date'):
+            expiry_date_str = scheduling.get('content_expiry_date')
+            if expiry_date_str:
                 content_with_expiry += 1
+                # Parse and check if it expires during this week
+                try:
+                    if isinstance(expiry_date_str, str):
+                        if 'T' in expiry_date_str:
+                            expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
+                        else:
+                            expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d')
+                    else:
+                        expiry_date = expiry_date_str
+                    
+                    # Remove timezone if present
+                    if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo:
+                        expiry_date = expiry_date.replace(tzinfo=None)
+                    
+                except Exception as e:
+                    logger.warning(f"Error parsing expiration date for debug: {e}")
             else:
                 content_without_expiry += 1
+        
         logger.info(f"Content expiration status: {content_with_expiry} with expiry date, {content_without_expiry} without expiry date")
         if template.get('items'):
             logger.info("First 3 items for debugging:")
@@ -4424,15 +4444,50 @@ def fill_template_gaps():
             base_date = datetime.now()
             logger.info(f"No schedule_date provided, using current date: {base_date.strftime('%Y-%m-%d')}")
         
-        # For weekly schedules, adjust to start on Sunday
+        # For weekly schedules, adjust to start on Sunday of the same week
         if schedule_type == 'weekly':
-            # Find the Sunday of the week containing the base date
-            days_until_sunday = (6 - base_date.weekday()) % 7
-            if days_until_sunday == 0 and base_date.weekday() != 6:
-                # If today is not Sunday, go to previous Sunday
-                days_until_sunday = -base_date.weekday() - 1
-            base_date = base_date + timedelta(days=days_until_sunday)
-            logger.info(f"Adjusted to Sunday for weekly schedule: {base_date.strftime('%Y-%m-%d')}")
+            # weekday() returns 0=Monday, 6=Sunday
+            # We want to find the Sunday that starts this week
+            if base_date.weekday() == 6:
+                # Already Sunday
+                logger.info(f"Base date is already Sunday: {base_date.strftime('%Y-%m-%d')}")
+            else:
+                # Go back to previous Sunday
+                days_since_sunday = base_date.weekday() + 1  # +1 because Sunday is -1 day from Monday
+                base_date = base_date - timedelta(days=days_since_sunday)
+                logger.info(f"Adjusted to Sunday for weekly schedule: {base_date.strftime('%Y-%m-%d')} (went back {days_since_sunday} days)")
+        
+        # Log content expiring during this week
+        if schedule_type == 'weekly':
+            week_start = base_date
+            week_end = base_date + timedelta(days=7)
+            logger.info(f"Weekly schedule spans from {week_start.strftime('%Y-%m-%d')} (Sunday) to {(week_end - timedelta(days=1)).strftime('%Y-%m-%d')} (Saturday)")
+            
+            # Count content expiring during the week
+            content_expiring_count = 0
+            for content in available_content:
+                scheduling = content.get('scheduling', {})
+                expiry_date_str = scheduling.get('content_expiry_date')
+                if expiry_date_str:
+                    try:
+                        if isinstance(expiry_date_str, str):
+                            if 'T' in expiry_date_str:
+                                expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
+                            else:
+                                expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d')
+                        else:
+                            expiry_date = expiry_date_str
+                        
+                        if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo:
+                            expiry_date = expiry_date.replace(tzinfo=None)
+                        
+                        if week_start <= expiry_date < week_end:
+                            content_expiring_count += 1
+                            logger.info(f"  Content expiring during week: '{content.get('content_title', content.get('file_name'))}' expires {expiry_date.strftime('%Y-%m-%d (%A)')}")
+                    except:
+                        pass
+            
+            logger.info(f"Total content expiring during this week: {content_expiring_count}")
         
         # Keep a copy of original items with their time ranges for overlap detection
         original_items = []
@@ -5096,6 +5151,62 @@ def fill_template_gaps():
         scheduler._load_config_if_needed()
         logger.info(f"Using rotation order: {scheduler.duration_rotation}")
         
+        # Helper function to check if content is expired at a given position
+        def is_content_expired_at_position(content, position, schedule_type, base_date):
+            """Check if content is expired for the given schedule position"""
+            # Calculate the actual air date for this position
+            if schedule_type == 'weekly':
+                days_offset = int(position // 86400)
+                air_date = base_date + timedelta(days=days_offset)
+            else:
+                air_date = base_date
+            
+            # Check expiration
+            scheduling = content.get('scheduling', {})
+            expiry_date_str = scheduling.get('content_expiry_date')
+            content_title = content.get('content_title', content.get('file_name', 'Unknown'))
+            
+            if not expiry_date_str:
+                # Log if meetings don't have expiration dates
+                if 'MTG' in content_title or 'Meeting' in content_title:
+                    logger.warning(f"  MEETING WITHOUT EXPIRATION: '{content_title}' - This content has no expiration date set!")
+                return False  # No expiration date means not expired
+                
+            try:
+                if isinstance(expiry_date_str, str):
+                    if 'T' in expiry_date_str:
+                        expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
+                    else:
+                        expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d')
+                else:
+                    expiry_date = expiry_date_str
+                
+                # Make dates timezone-naive for comparison
+                if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo:
+                    expiry_date = expiry_date.replace(tzinfo=None)
+                if hasattr(air_date, 'tzinfo') and air_date.tzinfo:
+                    air_date = air_date.replace(tzinfo=None)
+                
+                # Log details for debugging expired content
+                content_title = content.get('content_title', content.get('file_name', 'Unknown'))
+                
+                if expiry_date <= air_date:
+                    logger.info(f"EXPIRATION CHECK: Content '{content_title}' expires on {expiry_date.strftime('%Y-%m-%d')}, cannot schedule for {air_date.strftime('%Y-%m-%d')} (position: {position/3600:.1f}h)")
+                    if schedule_type == 'weekly':
+                        logger.info(f"  Weekly position details: base_date={base_date.strftime('%Y-%m-%d')}, days_offset={days_offset}, current_position={position}s")
+                    # Special debug logging for meetings
+                    if 'MTG' in content_title or 'Meeting' in content_title:
+                        logger.warning(f"  MEETING REJECTED: '{content_title}' - Expiry={expiry_date.strftime('%Y-%m-%d')}, Air date={air_date.strftime('%Y-%m-%d')}")
+                    return True
+                else:
+                    # Log when meetings pass expiration check (this shouldn't happen for old meetings)
+                    if 'MTG' in content_title or 'Meeting' in content_title:
+                        logger.warning(f"  MEETING ALLOWED: '{content_title}' - Expiry={expiry_date.strftime('%Y-%m-%d')}, Air date={air_date.strftime('%Y-%m-%d')}, Position={position/3600:.1f}h")
+                        logger.warning(f"    This may indicate an issue with expiration date calculation")
+            except Exception as e:
+                logger.warning(f"Error parsing expiration date: {e}")
+            return False
+        
         # Process each gap individually
         logger.info(f"\n=== PROCESSING {len(gaps)} GAPS ===")
         for gap_idx, gap in enumerate(gaps):
@@ -5150,6 +5261,10 @@ def fill_template_gaps():
                 current_position = gap_start
             
             while current_position < gap_end:
+                # Reset content selection for this iteration
+                selected = None
+                duration = None
+                
                 # Get next duration category from rotation
                 duration_category = scheduler._get_next_duration_category()
                 
@@ -5191,45 +5306,24 @@ def fill_template_gaps():
                         wrong_category += 1
                         continue
                     
-                    # Calculate the actual air date/time for this gap position
-                    if schedule_type == 'weekly':
-                        # For weekly schedules, calculate which day of the week this position falls on
-                        days_offset = int(current_position // 86400)  # 86400 seconds per day
-                        air_date = base_date + timedelta(days=days_offset)
-                    else:
-                        # For daily schedules, it's the same date
-                        air_date = base_date
+                    # Special debug logging for PSLA meeting
+                    content_title = content.get('content_title', content.get('file_name', 'Unknown'))
+                    if 'PSLA' in content_title:
+                        scheduling = content.get('scheduling', {})
+                        logger.warning(f"PSLA MEETING FOUND in category {duration_category}:")
+                        logger.warning(f"  Title: {content_title}")
+                        logger.warning(f"  Scheduling object: {scheduling}")
+                        logger.warning(f"  Current position: {current_position/3600:.1f}h")
                     
-                    # Check expiration date (stored in scheduling object)
-                    scheduling = content.get('scheduling', {})
-                    expiry_date_str = scheduling.get('content_expiry_date')
-                    if not expiry_date_str:
-                        # No expiration date means content doesn't expire
-                        no_expiry_date += 1
-                        logger.debug(f"Content '{content.get('content_title', content.get('file_name'))}' has no expiration date, can be scheduled")
+                    # Check expiration date
+                    if is_content_expired_at_position(content, current_position, schedule_type, base_date):
+                        blocked_by_expiry += 1
+                        continue
                     else:
-                        try:
-                            # Parse various date formats
-                            if isinstance(expiry_date_str, str):
-                                if 'T' in expiry_date_str:
-                                    expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
-                                else:
-                                    expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d')
-                            else:
-                                expiry_date = expiry_date_str
-                            
-                            # Make dates timezone-naive for comparison
-                            if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo:
-                                expiry_date = expiry_date.replace(tzinfo=None)
-                            if hasattr(air_date, 'tzinfo') and air_date.tzinfo:
-                                air_date = air_date.replace(tzinfo=None)
-                            
-                            if expiry_date <= air_date:
-                                blocked_by_expiry += 1
-                                logger.info(f"EXPIRATION CHECK: Content '{content.get('content_title', content.get('file_name'))}' expires on {expiry_date.strftime('%Y-%m-%d')}, cannot schedule for {air_date.strftime('%Y-%m-%d')} (position: {current_position/3600:.1f}h)")
-                                continue
-                        except Exception as e:
-                            logger.warning(f"Error parsing expiration date for content {content_id}: {e}")
+                        # Content is not expired - but check if it has an expiration date
+                        scheduling = content.get('scheduling', {})
+                        if not scheduling.get('content_expiry_date'):
+                            no_expiry_date += 1
                     
                     # Check replay delay
                     content_id = content.get('id')
@@ -5371,6 +5465,11 @@ def fill_template_gaps():
                                 fits_in_day = False
                         
                         if alt_duration <= remaining and fits_in_day:
+                            # Check expiration before selecting alternative content
+                            if is_content_expired_at_position(alt_content, current_position, schedule_type, base_date):
+                                logger.debug(f"Alternative content '{alt_content.get('content_title', alt_content.get('file_name'))}' is expired, skipping")
+                                continue
+                            
                             selected = alt_content
                             duration = alt_duration
                             found_fit = True
@@ -5455,9 +5554,11 @@ def fill_template_gaps():
                                                 break
                                     
                                     if can_schedule and content_duration > best_duration:
-                                        # Found a better fitting item
-                                        best_fit = content
-                                        best_duration = content_duration
+                                        # Check expiration before selecting
+                                        if not is_content_expired_at_position(content, current_position, schedule_type, base_date):
+                                            # Found a better fitting item
+                                            best_fit = content
+                                            best_duration = content_duration
                         
                         if best_fit:
                             selected = best_fit
@@ -5581,11 +5682,13 @@ def fill_template_gaps():
                                                                 break
                                                     
                                                     if can_schedule:
-                                                        selected = content
-                                                        duration = content_duration
-                                                        found_shorter_content = True
-                                                        logger.info(f"Found shorter {try_category} content for end-of-day: '{content.get('content_title', content.get('file_name'))}' ({duration/60:.1f} min)")
-                                                        break
+                                                        # Check expiration before selecting for end-of-day
+                                                        if not is_content_expired_at_position(content, current_position, schedule_type, base_date):
+                                                            selected = content
+                                                            duration = content_duration
+                                                            found_shorter_content = True
+                                                            logger.info(f"Found shorter {try_category} content for end-of-day: '{content.get('content_title', content.get('file_name'))}' ({duration/60:.1f} min)")
+                                                            break
                                             
                                             if found_shorter_content:
                                                 break
@@ -5627,11 +5730,13 @@ def fill_template_gaps():
                                                                         break
                                                             
                                                             if can_schedule:
-                                                                selected = content
-                                                                duration = content_duration
-                                                                found_shorter_content = True
-                                                                logger.info(f"Found {try_category} content with minimal delays: '{content.get('content_title', content.get('file_name'))}' ({duration/60:.1f} min)")
-                                                                break
+                                                                # Check expiration before selecting with minimal delays
+                                                                if not is_content_expired_at_position(content, current_position, schedule_type, base_date):
+                                                                    selected = content
+                                                                    duration = content_duration
+                                                                    found_shorter_content = True
+                                                                    logger.info(f"Found {try_category} content with minimal delays: '{content.get('content_title', content.get('file_name'))}' ({duration/60:.1f} min)")
+                                                                    break
                                                     
                                                     if found_shorter_content:
                                                         break
@@ -5640,6 +5745,7 @@ def fill_template_gaps():
                                             logger.warning(f"No shorter content fits end-of-day gap of {remaining/60:.1f} minutes even with minimal delays. Accepting unfilled time.")
                                             # Increment error counter to prevent infinite loops
                                             consecutive_errors += 1
+                                            # Break from the inner while loop to move to the next gap
                                             break
                             else:
                                 # Not end-of-day, normal rotation logic
@@ -5665,6 +5771,12 @@ def fill_template_gaps():
                                 
                                 continue
             
+                # Check if we actually found content to place
+                # If we broke from the loop due to no content fitting, skip to next gap
+                if selected is None or duration is None:
+                    logger.info("No content selected for this gap position, moving to next gap")
+                    break
+                
                 # Check for overlap with original items before adding
                 new_item_start = current_position
                 new_item_end = current_position + duration
@@ -5738,16 +5850,45 @@ def fill_template_gaps():
                     # If we get here, the new position is clear
                     gap_logger.info(f"  New position {current_position}s is clear, placing content")
                 
+                # Skip placement if no content was selected (handles break from while loop)
+                if selected is None or duration is None:
+                    continue  # Move to next gap
+                
                 if not overlap_found or (overlap_found and current_position < gap_end):
                     # Update item positions if we skipped
                     if overlap_found:
                         new_item_start = current_position
                         new_item_end = current_position + duration
                     
-                    gap_logger.info(f"  PLACING CONTENT: '{selected.get('content_title', selected.get('file_name'))}'")
+                    selected_title = selected.get('content_title', selected.get('file_name'))
+                    gap_logger.info(f"  PLACING CONTENT: '{selected_title}'")
                     gap_logger.info(f"    Position: {current_position}s ({current_position/3600:.6f}h)")
                     gap_logger.info(f"    Duration: {duration}s")
                     gap_logger.info(f"    Will occupy: {new_item_start}s to {new_item_end}s")
+                    
+                    # Log expiration date info
+                    scheduling = selected.get('scheduling', {})
+                    expiry_date_str = scheduling.get('content_expiry_date')
+                    if expiry_date_str:
+                        # Calculate the air date for this position
+                        if schedule_type == 'weekly':
+                            days_offset = int(current_position // 86400)
+                            air_date = base_date + timedelta(days=days_offset)
+                        else:
+                            air_date = base_date
+                        gap_logger.info(f"    Expiration date: {expiry_date_str}, Air date: {air_date.strftime('%Y-%m-%d')}")
+                    
+                    # Special alert for PSLA meeting
+                    if 'PSLA' in selected_title:
+                        logger.error(f"WARNING: PSLA MEETING IS BEING SCHEDULED!")
+                        logger.error(f"  Title: {selected_title}")
+                        logger.error(f"  Position: {current_position/3600:.1f}h")
+                        logger.error(f"  Scheduling metadata: {scheduling}")
+                        logger.error(f"  Expiry date string: {expiry_date_str}")
+                        if schedule_type == 'weekly':
+                            logger.error(f"  Air date calculated: {air_date.strftime('%Y-%m-%d')}")
+                            logger.error(f"  Base date: {base_date.strftime('%Y-%m-%d')}")
+                            logger.error(f"  Days offset: {days_offset}")
                     
                     # Calculate start_time and end_time based on template type
                     if template.get('type') == 'weekly':
@@ -8216,11 +8357,54 @@ def generate_prj_file():
         import json
         import uuid
         import os
+        import tempfile
         
-        # Calculate total duration based on Region 1 files and custom slide duration
+        # Calculate frame rate
         frame_rate_n = 30000
         frame_rate_d = 1001
         frame_rate = frame_rate_n / frame_rate_d  # 29.97 fps
+        
+        # Get music duration first (before calculating graphics)
+        music_duration_for_loop = 0
+        if region3_files:
+            # For simplicity, just use the first music file
+            music_filename = region3_files[0]
+            if music_filename:
+                # Construct full path for music file
+                music_file = os.path.join(region3_path, music_filename) if region3_path else music_filename
+                
+                # Get music duration by downloading temporarily
+                music_temp_path = None
+                try:
+                    logger.info(f"Getting duration for music file: {music_file}")
+                    
+                    # Check which server has the music file
+                    music_server = export_server  # Default to export server
+                    
+                    if music_server in ftp_managers and ftp_managers[music_server].connected:
+                        # Download music file temporarily
+                        music_temp_path = os.path.join(tempfile.gettempdir(), f"temp_music_{music_filename}")
+                        logger.info(f"Downloading music file to: {music_temp_path}")
+                        
+                        if ftp_managers[music_server].download_file(music_file, music_temp_path):
+                            # Get duration using audio_processor
+                            from audio_processor import audio_processor
+                            music_duration_for_loop = audio_processor.get_duration(music_temp_path)
+                            logger.info(f"Music duration: {music_duration_for_loop} seconds")
+                        else:
+                            logger.warning("Failed to download music file for duration check")
+                    else:
+                        logger.warning(f"Server {music_server} not connected, using default duration")
+                        
+                except Exception as e:
+                    logger.error(f"Error getting music duration: {str(e)}")
+                finally:
+                    # Clean up temp file
+                    if music_temp_path and os.path.exists(music_temp_path):
+                        try:
+                            os.unlink(music_temp_path)
+                        except:
+                            pass
         
         # Calculate exact duration and frames for the custom slide duration
         # For 29.97 fps: X seconds = X * 29.97 frames
@@ -8237,8 +8421,21 @@ def generate_prj_file():
         logger.info(f"Actual duration per image: {duration_per_image} seconds")
         logger.info(f"Expected for 10s: 299 frames, 9.976643 seconds. Got: {frames_per_image} frames, {duration_per_image} seconds")
         
-        total_frames = len(region1_files) * frames_per_image
-        total_duration = len(region1_files) * duration_per_image
+        # Calculate one cycle duration
+        one_cycle_frames = len(region1_files) * frames_per_image
+        one_cycle_duration = len(region1_files) * duration_per_image
+        
+        # Determine total duration based on music
+        if music_duration_for_loop > 0:
+            total_frames = int(music_duration_for_loop * frame_rate)
+            total_duration = music_duration_for_loop
+            logger.info(f"Using music duration: {total_duration}s ({total_frames} frames)")
+            logger.info(f"Music duration in minutes: {total_duration/60:.2f} minutes")
+            logger.info(f"Expected 11m 39s = 699s. Got: {total_duration}s")
+        else:
+            total_frames = one_cycle_frames
+            total_duration = one_cycle_duration
+            logger.info(f"No music, using one graphics cycle: {total_duration}s ({total_frames} frames)")
         
         prj_data = {
             "multiregion playlist description": {
@@ -8266,42 +8463,60 @@ def generate_prj_file():
             }
         }
         
-        # Region 1 - Upper graphics slideshow
+        # Region 1 - Upper graphics slideshow (looping)
         region1_items = []
         current_frame = 0
         current_time = 0.0
         
-        for idx, filename in enumerate(region1_files):
-            # Construct full path
-            full_path = os.path.join(region1_path, filename) if region1_path else filename
-            
-            # Calculate frame boundaries
-            # For example: first slide is frames 0-148 (149 frames), second is 149-297 (149 frames), etc.
-            end_frame = current_frame + frames_per_image - 1
-            
-            if idx == 0:  # Log details for first item
-                logger.info(f"DEBUG: First item - startFrame={current_frame}, endFrame={end_frame}")
-                logger.info(f"DEBUG: First item - start={current_time}, end={current_time + duration_per_image}")
-                logger.info(f"DEBUG: First item - durationFrame={frames_per_image}, duration={duration_per_image}")
-            
-            item = {
-                "startFrame": current_frame,
-                "endFrame": end_frame,
-                "offsetFrame": None,
-                "start": current_time,
-                "end": current_time + duration_per_image,
-                "offset": None,
-                "durationFrame": frames_per_image,
-                "duration": duration_per_image,
-                "isSelected": False,
-                "path": full_path,
-                "guid": "{" + str(uuid.uuid4()) + "}",
-                "file type": "image/jpeg",
-                "item duration": 0
-            }
-            region1_items.append(item)
-            current_frame += frames_per_image
-            current_time += duration_per_image
+        # Calculate how many times we need to loop the graphics
+        if music_duration_for_loop > 0 and one_cycle_duration > 0:
+            num_loops = int(music_duration_for_loop / one_cycle_duration) + 1
+            logger.info(f"Graphics will loop {num_loops} times to cover music duration")
+        else:
+            num_loops = 1
+        
+        # Build the looped graphics list
+        for loop in range(num_loops):
+            for idx, filename in enumerate(region1_files):
+                # Stop if we've reached the total duration
+                if current_frame >= total_frames:
+                    break
+                    
+                # Construct full path
+                full_path = os.path.join(region1_path, filename) if region1_path else filename
+                
+                # Calculate frame boundaries
+                end_frame = min(current_frame + frames_per_image - 1, total_frames - 1)
+                actual_frames = end_frame - current_frame + 1
+                actual_duration = actual_frames / frame_rate
+                
+                if loop == 0 and idx == 0:  # Log details for first item
+                    logger.info(f"DEBUG: First item - startFrame={current_frame}, endFrame={end_frame}")
+                    logger.info(f"DEBUG: First item - start={current_time}, end={current_time + actual_duration}")
+                    logger.info(f"DEBUG: First item - durationFrame={actual_frames}, duration={actual_duration}")
+                
+                item = {
+                    "startFrame": current_frame,
+                    "endFrame": end_frame,
+                    "offsetFrame": None,
+                    "start": current_time,
+                    "end": current_time + actual_duration,
+                    "offset": None,
+                    "durationFrame": actual_frames,
+                    "duration": actual_duration,
+                    "isSelected": False,
+                    "path": full_path,
+                    "guid": "{" + str(uuid.uuid4()) + "}",
+                    "file type": "image/jpeg",
+                    "item duration": 0
+                }
+                region1_items.append(item)
+                current_frame += actual_frames
+                current_time += actual_duration
+                
+                # Stop if we've reached the total duration
+                if current_frame >= total_frames:
+                    break
         
         region1 = {
             "mute": False,
@@ -8318,6 +8533,7 @@ def generate_prj_file():
             "durationFrames": total_frames,
             "duration": total_duration
         }
+        logger.info(f"Region 1 duration: {total_duration}s ({total_duration/60:.2f} minutes), frames: {total_frames}")
         prj_data["multiregion playlist description"]["sections"].append(region1)
         
         # Region 2 - Lower static graphic
@@ -8354,45 +8570,49 @@ def generate_prj_file():
                 "durationFrames": total_frames,
                 "duration": total_duration
             }
+            logger.info(f"Region 2 duration: {total_duration}s ({total_duration/60:.2f} minutes), frames: {total_frames}")
             prj_data["multiregion playlist description"]["sections"].append(region2)
         
         # Region 3 - Music (invisible audio track)
-        if region3_files:
-            # For simplicity, just use the first music file
-            music_filename = region3_files[0] if region3_files else None
-            if music_filename:
-                # Construct full path for music file
-                music_file = os.path.join(region3_path, music_filename) if region3_path else music_filename
-                region3 = {
-                    "mute": False,
-                    "invisible": True,  # Audio region is invisible
-                    "name": "Region 3",
-                    "region": {
-                        "left": -1.8705653104923163e-16,
-                        "top": -0.0695861153525056,
-                        "width": 99.99999999999987,
-                        "height": 74.50647427077814
-                    },
-                    "main": False,
-                    "list": [{
-                        "startFrame": 0,
-                        "endFrame": total_frames - 1,
-                        "offsetFrame": None,
-                        "start": 0,
-                        "end": total_duration,
-                        "offset": None,
-                        "durationFrame": total_frames,
-                        "duration": total_duration,
-                        "isSelected": False,
-                        "path": music_file,
-                        "guid": "{" + str(uuid.uuid4()) + "}",
-                        "file type": "video/quicktime",  # MP4 files show as quicktime
-                        "item duration": 145.749333  # Placeholder duration
-                    }],
-                    "durationFrames": total_frames,
-                    "duration": total_duration
-                }
-                prj_data["multiregion playlist description"]["sections"].append(region3)
+        if region3_files and music_filename:
+            # Music file path was already set above
+            music_file = os.path.join(region3_path, music_filename) if region3_path else music_filename
+            
+            # Use the already calculated music duration
+            music_duration = music_duration_for_loop if music_duration_for_loop > 0 else total_duration
+            music_frames = int(music_duration * frame_rate)
+            
+            region3 = {
+                "mute": False,
+                "invisible": True,  # Audio region is invisible
+                "name": "Region 3",
+                "region": {
+                    "left": -1.8705653104923163e-16,
+                    "top": -0.0695861153525056,
+                    "width": 99.99999999999987,
+                    "height": 74.50647427077814
+                },
+                "main": False,
+                "list": [{
+                    "startFrame": 0,
+                    "endFrame": music_frames - 1,
+                    "offsetFrame": None,
+                    "start": 0,
+                    "end": music_duration,
+                    "offset": None,
+                    "durationFrame": music_frames,
+                    "duration": music_duration,
+                    "isSelected": False,
+                    "path": music_file,
+                    "guid": "{" + str(uuid.uuid4()) + "}",
+                    "file type": "video/quicktime",  # MP4 files show as quicktime
+                    "item duration": music_duration
+                }],
+                "durationFrames": music_frames,
+                "duration": music_duration
+            }
+            logger.info(f"Region 3 (music) duration: {music_duration}s ({music_duration/60:.2f} minutes), frames: {music_frames}")
+            prj_data["multiregion playlist description"]["sections"].append(region3)
         
         # Convert to JSON string but remove outer braces for Castus format
         json_str = json.dumps(prj_data, indent=2)
