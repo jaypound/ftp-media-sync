@@ -60,6 +60,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Utility function to validate numeric values and prevent NaN
+def validate_numeric(value, default=0, name="value", min_value=None, max_value=None):
+    """
+    Validate a numeric value to prevent NaN and invalid values.
+    
+    Args:
+        value: The value to validate
+        default: Default value if validation fails
+        name: Name of the value for logging
+        min_value: Minimum allowed value (optional)
+        max_value: Maximum allowed value (optional)
+    
+    Returns:
+        Validated numeric value
+    """
+    try:
+        # Convert to float if possible
+        num_value = float(value) if value is not None else default
+        
+        # Check for NaN (NaN != NaN is always True)
+        if num_value != num_value:
+            logger.warning(f"{name} is NaN, using default {default}")
+            return default
+        
+        # Check for infinity
+        if num_value == float('inf') or num_value == float('-inf'):
+            logger.warning(f"{name} is infinite, using default {default}")
+            return default
+        
+        # Check minimum value
+        if min_value is not None and num_value < min_value:
+            logger.warning(f"{name} ({num_value}) is below minimum {min_value}, using minimum")
+            return min_value
+        
+        # Check maximum value  
+        if max_value is not None and num_value > max_value:
+            logger.warning(f"{name} ({num_value}) is above maximum {max_value}, using maximum")
+            return max_value
+        
+        return num_value
+        
+    except (TypeError, ValueError) as e:
+        logger.warning(f"Error validating {name}: {e}. Using default {default}")
+        return default
+
 # Add file handler for debugging gap filling issues
 import logging.handlers
 debug_log_file = os.path.join(os.path.dirname(__file__), 'gap_filling_debug.log')
@@ -1025,7 +1070,12 @@ def get_schedule():
             
             schedule['items'] = items
             schedule['total_items'] = len(items)
-            schedule['total_duration_hours'] = float(schedule.get('total_duration_seconds', 0)) / 3600 if schedule.get('total_duration_seconds') else 0
+            # Validate and calculate total duration hours
+            duration_seconds = validate_numeric(schedule.get('total_duration_seconds', 0), 
+                                              default=0,
+                                              name="schedule total_duration_seconds",
+                                              min_value=0)
+            schedule['total_duration_hours'] = duration_seconds / 3600 if duration_seconds > 0 else 0
             
             # Convert schedule dates to strings
             safe_schedule = convert_objectid_to_string(schedule)
@@ -1782,12 +1832,20 @@ def list_schedules():
             # Also handle created_date for backward compatibility
             if 'created_date' in schedule and schedule['created_date']:
                 schedule['created_at'] = schedule['created_date'].isoformat()
-            # Format duration
+            # Format duration with validation
             if schedule.get('total_duration'):
-                schedule['total_duration_hours'] = float(schedule['total_duration']) / 3600
+                duration = validate_numeric(schedule['total_duration'],
+                                          default=0,
+                                          name="schedule total_duration",
+                                          min_value=0)
+                schedule['total_duration_hours'] = duration / 3600 if duration > 0 else 0
             elif schedule.get('total_duration_seconds'):
-                schedule['total_duration'] = float(schedule['total_duration_seconds'])
-                schedule['total_duration_hours'] = float(schedule['total_duration_seconds']) / 3600
+                duration_seconds = validate_numeric(schedule['total_duration_seconds'],
+                                                  default=0,
+                                                  name="schedule total_duration_seconds",
+                                                  min_value=0)
+                schedule['total_duration'] = duration_seconds
+                schedule['total_duration_hours'] = duration_seconds / 3600 if duration_seconds > 0 else 0
         
         logger.info(f"Found {len(schedules)} active schedules")
         
@@ -2808,7 +2866,13 @@ def generate_castus_schedule(schedule, items, date, format_type='daily', templat
     for idx, item in enumerate(items):
         start_time = item.get('scheduled_start_time', item.get('start_time', '00:00:00'))
         # Handle both field names for compatibility
-        duration_seconds = float(item.get('scheduled_duration_seconds', item.get('duration_seconds', 0)))
+        # Validate duration seconds
+        raw_duration = item.get('scheduled_duration_seconds', item.get('duration_seconds', 0))
+        duration_seconds = validate_numeric(raw_duration,
+                                          default=0,
+                                          name=f"duration for item {idx}",
+                                          min_value=0,
+                                          max_value=86400)  # Max 24 hours per item
         
         # Check if we have a pre-calculated end time
         end_time_provided = item.get('scheduled_end_time', item.get('end_time'))
@@ -4921,8 +4985,13 @@ def fill_template_gaps():
             for content in available_content:
                 # Skip Live Input Placeholder and zero-duration content
                 content_title = content.get('content_title', content.get('title', ''))
-                # Check both duration_seconds and file_duration fields
-                content_duration = float(content.get('duration_seconds', content.get('file_duration', 0)))
+                # Check both duration_seconds and file_duration fields with validation
+                raw_duration = content.get('duration_seconds', content.get('file_duration', 0))
+                content_duration = validate_numeric(raw_duration, 
+                                                  default=0, 
+                                                  name=f"duration for '{content_title}'",
+                                                  min_value=0,
+                                                  max_value=86400)  # Max 24 hours
                 
                 if 'Live Input Placeholder' in content_title:
                     logger.info(f"Skipping Live Input Placeholder from available content")
@@ -5422,8 +5491,13 @@ def fill_template_gaps():
                 else:
                     # Select the best content for other categories
                     selected = category_content[0]
-                # Check for duration_seconds or file_duration
-                duration = float(selected.get('duration_seconds', selected.get('file_duration', 0)))
+                # Check for duration_seconds or file_duration with validation
+                raw_duration = selected.get('duration_seconds', selected.get('file_duration', 0))
+                duration = validate_numeric(raw_duration,
+                                          default=0,
+                                          name=f"selected duration for '{selected.get('content_title', 'unknown')}'",
+                                          min_value=0.1,  # Minimum 0.1 seconds
+                                          max_value=86400)  # Max 24 hours
                 consecutive_errors = 0  # Reset consecutive error counter
                 total_cycles_without_content = 0  # Reset cycle counter
                 
@@ -8359,10 +8433,15 @@ def generate_prj_file():
         import os
         import tempfile
         
-        # Calculate frame rate
+        # Calculate frame rate with validation
         frame_rate_n = 30000
         frame_rate_d = 1001
         frame_rate = frame_rate_n / frame_rate_d  # 29.97 fps
+        
+        # Validate frame rate to prevent NaN
+        if not frame_rate or frame_rate <= 0 or frame_rate != frame_rate:  # NaN check
+            logger.error(f"Invalid frame rate calculated: {frame_rate}. Using default 29.97")
+            frame_rate = 29.97
         
         # Get music duration first (before calculating graphics)
         music_duration_for_loop = 0
@@ -8413,8 +8492,18 @@ def generate_prj_file():
         frames_per_image = int(slide_duration * frame_rate)  # frames for custom duration
         logger.info(f"DEBUG: frames_per_image calculated = {frames_per_image}")
         
-        # Recalculate exact duration based on actual frame count
-        duration_per_image = frames_per_image / frame_rate  # exact duration in seconds
+        # Recalculate exact duration based on actual frame count with validation
+        if frame_rate > 0:
+            duration_per_image = frames_per_image / frame_rate  # exact duration in seconds
+        else:
+            logger.error(f"Invalid frame rate {frame_rate}, using default duration")
+            duration_per_image = slide_duration
+        
+        # Validate duration to prevent NaN
+        if not duration_per_image or duration_per_image <= 0 or duration_per_image != duration_per_image:  # NaN check
+            logger.error(f"Invalid duration_per_image calculated: {duration_per_image}. Using slide_duration {slide_duration}")
+            duration_per_image = slide_duration
+        
         logger.info(f"DEBUG: duration_per_image calculated = {duration_per_image}")
         
         logger.info(f"Slide duration calculation: {slide_duration}s * {frame_rate}fps = {frames_per_image} frames")
@@ -8488,7 +8577,19 @@ def generate_prj_file():
                 # Calculate frame boundaries
                 end_frame = min(current_frame + frames_per_image - 1, total_frames - 1)
                 actual_frames = end_frame - current_frame + 1
-                actual_duration = actual_frames / frame_rate
+                
+                # Calculate actual duration with validation
+                if frame_rate > 0:
+                    actual_duration = actual_frames / frame_rate
+                else:
+                    actual_duration = duration_per_image
+                
+                # Validate actual duration
+                actual_duration = validate_numeric(actual_duration,
+                                                 default=duration_per_image,
+                                                 name=f"actual_duration for frame {current_frame}",
+                                                 min_value=0.1,
+                                                 max_value=3600)  # Max 1 hour per image
                 
                 if loop == 0 and idx == 0:  # Log details for first item
                     logger.info(f"DEBUG: First item - startFrame={current_frame}, endFrame={end_frame}")
