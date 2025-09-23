@@ -9618,11 +9618,26 @@ async function fillScheduleGaps() {
                     manuallySplitGaps.push(...dayBoundarySplitGaps);
                     
                     console.log(`Gaps after day boundary splitting: ${manuallySplitGaps.length} gaps`);
+                    
+                    // Check for Saturday gaps
+                    const saturdayGaps = manuallySplitGaps.filter(gap => {
+                        const startDay = Math.floor(gap.start / 86400);
+                        const endDay = Math.floor((gap.end - 0.001) / 86400);
+                        return startDay === 6 || endDay === 6;
+                    });
+                    console.log(`Saturday gaps: ${saturdayGaps.length}`);
+                    
                     manuallySplitGaps.forEach((gap, idx) => {
                         const day = Math.floor(gap.start / 86400);
                         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
                         console.log(`  Gap ${idx + 1} (${dayNames[day]}): ${(gap.start/3600).toFixed(2)}h - ${(gap.end/3600).toFixed(2)}h`);
                     });
+                    
+                    if (saturdayGaps.length === 0) {
+                        console.log('WARNING: No Saturday gaps found! Saturday will not be filled with content.');
+                        console.log('Last gap ends at: ' + (manuallySplitGaps[manuallySplitGaps.length - 1]?.end / 3600).toFixed(2) + 'h');
+                    }
+                    
                     console.log('=== END DAY BOUNDARY SPLIT ===');
                 }
                 
@@ -10154,6 +10169,7 @@ function calculateScheduleGaps(template) {
     
     // Check for gap at the end
     const targetDuration = isWeekly ? (7 * 24 * 3600) : (24 * 3600);
+    console.log(`Checking final gap: lastEndTime=${lastEndTime/3600}h, targetDuration=${targetDuration/3600}h`);
     if (lastEndTime < targetDuration - 0.001) { // Add small tolerance
         gaps.push({
             // Round to 3 decimal places
@@ -10161,6 +10177,14 @@ function calculateScheduleGaps(template) {
             end: targetDuration
         });
         console.log(`Final gap: ${gaps[gaps.length-1].start/3600}h - ${targetDuration/3600}h (${(targetDuration-gaps[gaps.length-1].start)/3600}h duration)`);
+        // Log if this gap includes Saturday
+        if (isWeekly && gaps[gaps.length-1].start < 144 * 3600 && gaps[gaps.length-1].end > 144 * 3600) {
+            console.log(`  This final gap includes Saturday (starts before hour 144 and ends after)`);
+        } else if (isWeekly && gaps[gaps.length-1].start >= 144 * 3600) {
+            console.log(`  This final gap is entirely on Saturday (starts at or after hour 144)`);
+        }
+    } else {
+        console.log(`No final gap needed: content already extends to ${lastEndTime/3600}h (target: ${targetDuration/3600}h)`);
     }
     
     console.log(`Total gaps found: ${gaps.length}`);
@@ -12266,6 +12290,11 @@ function findScheduleGaps(template) {
                     console.log(`MONDAY: Day ends at ${dayEnd/3600}h (midnight)`);
                 }
                 
+                if (day === 5) { // Friday
+                    console.log(`FRIDAY: Last content item: "${lastDayItem.title || lastDayItem.file_name}" ends at ${itemEnd/3600}h`);
+                    console.log(`FRIDAY: Day ends at ${dayEnd/3600}h (should be 144h)`);
+                }
+                
                 if (itemEnd < dayEnd) {
                     // Check for Live Inputs that might limit this gap
                     let gapEnd = dayEnd;
@@ -12352,6 +12381,41 @@ function findScheduleGaps(template) {
                         }
                     }
                 }
+            }
+        }
+        
+        // CRITICAL: Check for final gap after all days are processed
+        // This handles cases like Saturday having no items
+        const lastOverallItem = allItemsForGaps[allItemsForGaps.length - 1];
+        const lastOverallStart = parseTimeToSeconds(lastOverallItem.start_time, template.type);
+        const lastOverallDuration = parseFloat(lastOverallItem.duration_seconds || 0);
+        const lastOverallEnd = lastOverallItem.end_time 
+            ? parseTimeToSeconds(lastOverallItem.end_time, template.type)
+            : lastOverallStart + lastOverallDuration;
+        const weeklyScheduleEnd = 7 * 24 * 3600; // 168 hours
+        
+        console.log(`FINAL GAP CHECK: Last item ends at ${lastOverallEnd/3600}h, weekly schedule should end at ${weeklyScheduleEnd/3600}h`);
+        
+        if (lastOverallEnd < weeklyScheduleEnd) {
+            // Check if we already have a gap covering this period
+            let finalGapExists = false;
+            for (const gap of gaps) {
+                if (gap.endSeconds >= weeklyScheduleEnd) {
+                    finalGapExists = true;
+                    console.log(`Final gap already exists ending at ${gap.endSeconds/3600}h`);
+                    break;
+                }
+            }
+            
+            if (!finalGapExists) {
+                console.log(`Adding final gap from ${lastOverallEnd/3600}h to ${weeklyScheduleEnd/3600}h (Saturday)`);
+                gaps.push({
+                    startTime: lastOverallItem.end_time || formatTimeFromSeconds(lastOverallEnd, template.type),
+                    endTime: formatTimeFromSeconds(weeklyScheduleEnd - 0.001, template.type),
+                    startSeconds: lastOverallEnd,
+                    endSeconds: weeklyScheduleEnd,
+                    duration: weeklyScheduleEnd - lastOverallEnd
+                });
             }
         }
     } else {
@@ -12810,7 +12874,6 @@ async function startAutomation() {
                     export_server: server,
                     export_path: exportPath,
                     filename: filename,
-                    format: 'castus_weekly',
                     items: updatedTemplate.items || []
                 })
             });

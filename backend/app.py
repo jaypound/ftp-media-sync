@@ -4662,8 +4662,18 @@ def fill_template_gaps():
                         logger.info(f"  Splitting gap into day-bounded segments...")
                         current_start = gap_start
                         
+                        # Frame buffer to prevent content from crossing midnight
+                        frame_buffer = 0.033367  # One frame at 29.97 fps
+                        
                         for day in range(start_day, end_day + 1):
-                            day_end_seconds = min((day + 1) * 86400, gap_end)
+                            # End the gap one frame before midnight to prevent overlap
+                            day_boundary = (day + 1) * 86400
+                            if day < end_day:
+                                # Not the last day, so apply frame buffer before midnight
+                                day_end_seconds = day_boundary - frame_buffer
+                            else:
+                                # Last day, use the actual gap end
+                                day_end_seconds = min(day_boundary, gap_end)
                             
                             if current_start < day_end_seconds:
                                 day_split_gaps.append({
@@ -4672,7 +4682,8 @@ def fill_template_gaps():
                                 })
                                 logger.info(f"  Created {day_names[day]} gap: {current_start/3600:.2f}h to {day_end_seconds/3600:.2f}h (duration: {(day_end_seconds-current_start)/3600:.2f}h)")
                             
-                            current_start = day_end_seconds
+                            # Next gap starts one frame after midnight
+                            current_start = day_boundary + frame_buffer if day < end_day else day_boundary
                 
                 if len(day_split_gaps) != len(gaps):
                     logger.info(f"Split {len(gaps)} gaps into {len(day_split_gaps)} day-bounded gaps")
@@ -5325,13 +5336,41 @@ def fill_template_gaps():
                 # Check if it fits in this gap with a safety margin
                 remaining = gap_end - current_position
                 # Add a safety margin to avoid floating point precision issues and overlaps
-                safety_margin = 1.0  # 1 second safety margin
-                if duration > remaining - safety_margin:
+                # Use frame buffer to ensure content doesn't extend past gap boundary
+                safety_margin = 0.033367  # One frame at 29.97 fps
+                
+                # For weekly schedules, check if content would cross a day boundary
+                if schedule_type == 'weekly':
+                    current_day = int(current_position // 86400)
+                    content_end_position = current_position + duration
+                    content_end_day = int(content_end_position // 86400)
+                    
+                    if content_end_day > current_day:
+                        # Content would cross into the next day
+                        # Calculate time until midnight
+                        time_to_midnight = ((current_day + 1) * 86400) - current_position
+                        
+                        if time_to_midnight < duration:
+                            logger.info(f"Content ({duration/60:.1f} min) would cross midnight boundary. Time to midnight: {time_to_midnight/60:.1f} min")
+                            # Adjust duration check to prevent crossing midnight
+                            if duration > time_to_midnight - safety_margin:
+                                duration = float('inf')  # Force it to be too long
+                
+                if duration > remaining:
                     # Try to find shorter content that fits
                     found_fit = False
                     for alt_content in category_content[1:]:
                         alt_duration = float(alt_content.get('duration_seconds', alt_content.get('file_duration', 0)))
-                        if alt_duration <= remaining - safety_margin:
+                        
+                        # Check if alternative content would cross day boundary
+                        fits_in_day = True
+                        if schedule_type == 'weekly':
+                            alt_end_position = current_position + alt_duration
+                            alt_end_day = int(alt_end_position // 86400)
+                            if alt_end_day > current_day:
+                                fits_in_day = False
+                        
+                        if alt_duration <= remaining and fits_in_day:
                             selected = alt_content
                             duration = alt_duration
                             found_fit = True
@@ -5378,7 +5417,16 @@ def fill_template_gaps():
                                 
                                 # Check duration
                                 content_duration = float(content.get('duration_seconds', content.get('file_duration', 0)))
-                                if content_duration <= remaining - safety_margin:
+                                
+                                # Check if content would cross day boundary
+                                fits_in_day = True
+                                if schedule_type == 'weekly':
+                                    content_end_position = current_position + content_duration
+                                    content_end_day = int(content_end_position // 86400)
+                                    if content_end_day > current_day:
+                                        fits_in_day = False
+                                
+                                if content_duration <= remaining and fits_in_day:
                                     # Check replay delay
                                     content_id = content.get('id')
                                     can_schedule = True
@@ -5499,7 +5547,16 @@ def fill_template_gaps():
                                             
                                             for content in category_content:
                                                 content_duration = content.get('duration_seconds', 0)
-                                                if content_duration <= remaining and content_duration > 0:
+                                                
+                                                # Check if content would cross day boundary
+                                                fits_in_day = True
+                                                if schedule_type == 'weekly':
+                                                    content_end_position = current_position + content_duration
+                                                    content_end_day = int(content_end_position // 86400)
+                                                    if content_end_day > current_day:
+                                                        fits_in_day = False
+                                                
+                                                if content_duration <= remaining and content_duration > 0 and fits_in_day:
                                                     # Check replay delays with progressive reduction for end-of-day
                                                     can_schedule = True
                                                     content_id = content.get('id')
@@ -5547,7 +5604,16 @@ def fill_template_gaps():
                                                     
                                                     for content in category_content:
                                                         content_duration = content.get('duration_seconds', 0)
-                                                        if content_duration <= remaining and content_duration > 0:
+                                                        
+                                                        # Check if content would cross day boundary
+                                                        fits_in_day = True
+                                                        if schedule_type == 'weekly':
+                                                            content_end_position = current_position + content_duration
+                                                            content_end_day = int(content_end_position // 86400)
+                                                            if content_end_day > current_day:
+                                                                fits_in_day = False
+                                                        
+                                                        if content_duration <= remaining and content_duration > 0 and fits_in_day:
                                                             # For large end-of-day gaps, use minimal delays (10% of normal)
                                                             can_schedule = True
                                                             content_id = content.get('id')
