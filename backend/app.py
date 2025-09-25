@@ -3742,6 +3742,16 @@ def calculate_duration_from_times(start_time, end_time):
         logger.debug(f"  End: {end_dt} + {end_ms}s (day={end_day})")
         logger.debug(f"  Duration: {total_duration}s ({total_duration/60:.6f} minutes)")
         
+        # Validate the calculated duration
+        if total_duration < 0:
+            logger.error(f"Negative duration calculated: {total_duration}s. Start: {start_time}, End: {end_time}")
+            logger.error(f"This usually means end time is before start time or day boundaries are incorrect")
+            return 0
+        
+        if total_duration > 604800:  # More than 7 days
+            logger.error(f"Duration exceeds 7 days: {total_duration}s. Start: {start_time}, End: {end_time}")
+            return 0
+            
         return total_duration
         
     except Exception as e:
@@ -5279,8 +5289,21 @@ def fill_template_gaps():
         # Process each gap individually
         logger.info(f"\n=== PROCESSING {len(gaps)} GAPS ===")
         for gap_idx, gap in enumerate(gaps):
-            gap_start = gap['start']
-            gap_end = gap['end']
+            # Validate gap values
+            gap_start = validate_numeric(gap.get('start', 0),
+                                        default=0,
+                                        name=f"gap {gap_idx} start",
+                                        min_value=0)
+            gap_end = validate_numeric(gap.get('end', 86400),
+                                      default=86400,
+                                      name=f"gap {gap_idx} end",
+                                      min_value=0)
+            
+            # Ensure gap_end is after gap_start
+            if gap_end <= gap_start:
+                logger.error(f"Invalid gap {gap_idx}: end ({gap_end}) <= start ({gap_start}), skipping")
+                continue
+                
             gap_duration = gap_end - gap_start
             
             # Log day information for weekly schedules
@@ -5322,12 +5345,24 @@ def fill_template_gaps():
             else:
                 logger.info(f"  Daily schedule: All content airs on {base_date.strftime('%Y-%m-%d')}")
             
+            # Validate gap_start
+            gap_start = validate_numeric(gap_start,
+                                        default=0,
+                                        name=f"gap_start for gap {gap_idx}",
+                                        min_value=0)
+            
             # Adjust starting position if needed
             if gap_starts_after_item:
-                current_position = gap_start + frame_buffer
+                current_position = validate_numeric(gap_start + frame_buffer,
+                                                 default=gap_start,
+                                                 name="initial current_position with buffer",
+                                                 min_value=0)
                 logger.info(f"  Starting content placement at {current_position}s ({current_position/3600:.6f}h) instead of {gap_start}s")
             else:
-                current_position = gap_start
+                current_position = validate_numeric(gap_start,
+                                                 default=0,
+                                                 name="initial current_position",
+                                                 min_value=0)
             
             while current_position < gap_end:
                 # Reset content selection for this iteration
@@ -5528,7 +5563,12 @@ def fill_template_gaps():
                     # Try to find shorter content that fits
                     found_fit = False
                     for alt_content in category_content[1:]:
-                        alt_duration = float(alt_content.get('duration_seconds', alt_content.get('file_duration', 0)))
+                        raw_alt_duration = alt_content.get('duration_seconds', alt_content.get('file_duration', 0))
+                        alt_duration = validate_numeric(raw_alt_duration,
+                                                      default=0,
+                                                      name=f"alt duration for '{alt_content.get('content_title', 'unknown')}'",
+                                                      min_value=0,
+                                                      max_value=86400)
                         
                         # Check if alternative content would cross day boundary
                         fits_in_day = True
@@ -5589,7 +5629,12 @@ def fill_template_gaps():
                                     continue
                                 
                                 # Check duration
-                                content_duration = float(content.get('duration_seconds', content.get('file_duration', 0)))
+                                raw_content_dur = content.get('duration_seconds', content.get('file_duration', 0))
+                                content_duration = validate_numeric(raw_content_dur,
+                                                                  default=0,
+                                                                  name=f"best fit duration for '{content.get('content_title', 'unknown')}'",
+                                                                  min_value=0,
+                                                                  max_value=86400)
                                 
                                 # Check if content would cross day boundary
                                 fits_in_day = True
@@ -5888,7 +5933,16 @@ def fill_template_gaps():
                 
                 if overlap_found:
                     # Skip ahead to after the overlapping item
-                    current_position += skip_amount
+                    # Validate skip amount before adding
+                    skip_amount = validate_numeric(skip_amount,
+                                                 default=0,
+                                                 name="skip_amount",
+                                                 min_value=0,
+                                                 max_value=86400)
+                    current_position = validate_numeric(current_position + skip_amount,
+                                                     default=current_position,
+                                                     name="current_position after skip",
+                                                     min_value=0)
                     gap_logger.info(f"  Skipped {skip_amount}s ({skip_amount/3600:.2f}h) to avoid overlap")
                     
                     # Check if we've exceeded the gap
@@ -5989,8 +6043,27 @@ def fill_template_gaps():
                         
                         start_time = f"{day_name} {time_str}"
                         
-                        # Calculate end time
-                        end_position = current_position + duration
+                        # Calculate end time with validation
+                        # Validate duration before calculating end position
+                        validated_duration = validate_numeric(duration,
+                                                            default=0,
+                                                            name=f"duration for end time calc",
+                                                            min_value=0,
+                                                            max_value=86400)
+                        # Validate current_position first
+                        current_position = validate_numeric(current_position,
+                                                          default=0,
+                                                          name="current_position before end calc",
+                                                          min_value=0)
+                        
+                        end_position = current_position + validated_duration
+                        
+                        # Validate end_position before division
+                        end_position = validate_numeric(end_position,
+                                                      default=current_position,
+                                                      name="end_position",
+                                                      min_value=0)
+                        
                         end_day_index = int(end_position // (24 * 3600))
                         end_day_seconds = end_position % (24 * 3600)
                         end_day_name = days[end_day_index] if end_day_index < 7 else 'sun'
@@ -6049,7 +6122,16 @@ def fill_template_gaps():
                         asset_schedule_times[content_id] = []
                     asset_schedule_times[content_id].append(current_position)
                     
-                    current_position += duration
+                    # Validate duration and update position
+                    duration = validate_numeric(duration,
+                                             default=0,
+                                             name="duration to add to position",
+                                             min_value=0,
+                                             max_value=86400)
+                    current_position = validate_numeric(current_position + duration,
+                                                     default=current_position,
+                                                     name="current_position after content",
+                                                     min_value=0)
                     
                     # Advance rotation after successfully scheduling content
                     scheduler._advance_rotation()
