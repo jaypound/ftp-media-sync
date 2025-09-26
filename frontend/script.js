@@ -6024,6 +6024,8 @@ function displayScheduleList(schedules) {
                         <strong>${dayName}, ${airDate}</strong>
                     </div>
                     <div class="schedule-info">
+                        <span class="schedule-stat">ID: ${schedule.id}</span>
+                        <span class="schedule-separator">•</span>
                         <span class="schedule-stat">${schedule.total_items || 0} items</span>
                         <span class="schedule-separator">•</span>
                         <span class="schedule-stat">${totalDurationFormatted}</span>
@@ -6052,20 +6054,22 @@ function displayScheduleList(schedules) {
 }
 
 async function viewScheduleDetails(scheduleId, date) {
-    log(`👁️ Loading schedule details for ${date}...`);
+    log(`👁️ Loading schedule details (ID: ${scheduleId}) for ${date}...`);
     
     // Set the view date field
     document.getElementById('viewScheduleDate').value = date;
     
     try {
+        // First try to get schedule by ID, fall back to date if backend doesn't support it yet
         const result = await window.API.post('/get-schedule', {
-            date: date
+            schedule_id: scheduleId,  // Pass the schedule ID
+            date: date  // Keep date for backward compatibility
         });
         
         if (result.success && result.schedule) {
             currentSchedule = result.schedule;  // Store the schedule globally
             displayScheduleDetails(result.schedule);
-            log(`✅ Loaded schedule details for ${date}`);
+            log(`✅ Loaded schedule details (ID: ${scheduleId}) for ${date}`);
         } else {
             log(`❌ Failed to load schedule details: ${result.message}`, 'error');
         }
@@ -9753,17 +9757,101 @@ async function fillScheduleGaps() {
                 // scheduleDate is already set from the prompt above
                 
                 // Use global sanitizeForJSON function to remove Infinity values before sending
-
-                const response = await fetch('/api/fill-template-gaps', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+                let requestBody;
+                let response;
+                
+                try {
+                    requestBody = {
                         template: sanitizeForJSON(cleanTemplate),
                         available_content: sanitizeForJSON(availableContent),
                         gaps: sanitizeForJSON(manuallySplitGaps),  // Use manually split gaps
                         schedule_date: scheduleDate
-                    })
-                });
+                    };
+                    
+                    // Test JSON serialization before sending
+                    const testStringify = JSON.stringify(requestBody);
+                    
+                    response = await fetch('/api/fill-template-gaps', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: testStringify
+                    });
+                } catch (jsonError) {
+                    // Enhanced error reporting for JSON issues
+                    console.error('JSON Serialization Error:', jsonError);
+                    console.error('Request body that failed:', requestBody);
+                    
+                    // Try to find the problematic data
+                    const debugInfo = [];
+                    debugInfo.push('=== JSON SERIALIZATION DEBUG ==');
+                    debugInfo.push(`Error: ${jsonError.message}`);
+                    debugInfo.push('');
+                    
+                    // Check template for Infinity values
+                    if (cleanTemplate && cleanTemplate.items) {
+                        let foundInTemplate = false;
+                        cleanTemplate.items.forEach((item, idx) => {
+                            Object.entries(item).forEach(([key, value]) => {
+                                if (typeof value === 'number' && !isFinite(value)) {
+                                    debugInfo.push(`Template item[${idx}].${key} = ${value}`);
+                                    foundInTemplate = true;
+                                }
+                            });
+                        });
+                        if (foundInTemplate) debugInfo.push('');
+                    }
+                    
+                    // Check available content
+                    if (availableContent) {
+                        let foundInContent = false;
+                        availableContent.forEach((item, idx) => {
+                            Object.entries(item).forEach(([key, value]) => {
+                                if (typeof value === 'number' && !isFinite(value)) {
+                                    debugInfo.push(`Available content[${idx}].${key} = ${value}`);
+                                    foundInContent = true;
+                                }
+                            });
+                        });
+                        if (foundInContent) debugInfo.push('');
+                    }
+                    
+                    // Check gaps
+                    if (manuallySplitGaps) {
+                        let foundInGaps = false;
+                        manuallySplitGaps.forEach((gap, idx) => {
+                            Object.entries(gap).forEach(([key, value]) => {
+                                if (typeof value === 'number' && !isFinite(value)) {
+                                    debugInfo.push(`Gap[${idx}].${key} = ${value}`);
+                                    foundInGaps = true;
+                                }
+                            });
+                        });
+                        if (foundInGaps) debugInfo.push('');
+                    }
+                    
+                    // Log the debug info
+                    const debugMessage = debugInfo.join('\n');
+                    console.error(debugMessage);
+                    
+                    // Create a more detailed alert
+                    let alertMessage = `Error filling schedule gaps:\n\n${jsonError.message}`;
+                    
+                    // Add specific problem locations if found
+                    const problemsFound = debugInfo.filter(line => line.includes(' = Infinity')).slice(0, 5);
+                    if (problemsFound.length > 0) {
+                        alertMessage += '\n\nFound Infinity values in:\n' + problemsFound.join('\n');
+                        if (debugInfo.filter(line => line.includes(' = Infinity')).length > 5) {
+                            alertMessage += '\n... and ' + (debugInfo.filter(line => line.includes(' = Infinity')).length - 5) + ' more';
+                        }
+                    }
+                    
+                    alertMessage += '\n\nCheck browser console for complete debug information.';
+                    
+                    alert(alertMessage);
+                    log(`fillScheduleGaps: JSON serialization error - ${jsonError.message}`, 'error');
+                    
+                    throw new Error(`JSON serialization failed: ${jsonError.message}`);
+                }
                 
                 const result = await response.json();
                 

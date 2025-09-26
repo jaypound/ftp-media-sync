@@ -1030,22 +1030,31 @@ def create_schedule():
 
 @app.route('/api/get-schedule', methods=['POST'])
 def get_schedule():
-    """Get schedule for a specific date"""
+    """Get schedule for a specific date or by ID"""
     logger.info("=== GET SCHEDULE REQUEST ===")
     try:
         data = request.json
+        schedule_id = data.get('schedule_id')
         date = data.get('date')
         
-        logger.info(f"Getting schedule for date: {date}")
+        logger.info(f"Getting schedule - ID: {schedule_id}, Date: {date}")
         
-        if not date:
+        # Try schedule_id first if provided, otherwise use date
+        schedule = None
+        if schedule_id:
+            logger.info(f"Getting schedule by ID: {schedule_id}")
+            schedule = scheduler_postgres.get_schedule_by_id(schedule_id)
+        
+        # If no schedule found by ID or no ID provided, try by date
+        if not schedule and date:
+            logger.info(f"Getting schedule by date: {date}")
+            schedule = scheduler_postgres.get_schedule_by_date(date)
+        
+        if not schedule_id and not date:
             return jsonify({
                 'success': False,
                 'message': 'Date is required'
             })
-        
-        # Get schedule
-        schedule = scheduler_postgres.get_schedule_by_date(date)
         
         if schedule:
             # Get schedule items
@@ -5099,6 +5108,18 @@ def fill_template_gaps():
                 category_counts[cat] = category_counts.get(cat, 0) + 1
             logger.info(f"Content by category: {category_counts}")
         
+        # Find minimum content duration available
+        min_content_duration = float('inf')
+        for content in available_content:
+            duration = content.get('duration_seconds', 0)
+            if duration > 0 and duration < min_content_duration:
+                min_content_duration = duration
+        
+        if min_content_duration == float('inf'):
+            min_content_duration = 30  # Default to 30 seconds if no content found
+        
+        logger.info(f"Minimum available content duration: {min_content_duration:.1f} seconds ({min_content_duration/60:.2f} minutes)")
+        
         # Track what we've scheduled
         scheduled_asset_ids = []  # We'll track this differently now
         items_added = []
@@ -5364,7 +5385,18 @@ def fill_template_gaps():
                                                  name="initial current_position",
                                                  min_value=0)
             
-            while current_position < gap_end:
+            # Track iterations to prevent infinite loops
+            gap_iterations = 0
+            max_gap_iterations = 1000  # Failsafe to prevent infinite loops
+            
+            while current_position < gap_end and gap_iterations < max_gap_iterations:
+                # Check if remaining gap is smaller than minimum available content
+                remaining = gap_end - current_position
+                if remaining < min_content_duration:
+                    logger.info(f"Remaining gap ({remaining:.1f}s / {remaining/60:.2f}min) is smaller than minimum available content duration ({min_content_duration:.1f}s / {min_content_duration/60:.2f}min)")
+                    logger.info(f"Accepting unfilled gap to prevent infinite loop")
+                    break
+                
                 # Reset content selection for this iteration
                 selected = None
                 duration = None
@@ -6136,9 +6168,18 @@ def fill_template_gaps():
                     # Advance rotation after successfully scheduling content
                     scheduler._advance_rotation()
                 
+                # Increment iteration counter
+                gap_iterations += 1
+                
                 # Log progress every 10 items to prevent timeout appearance
                 if len(items_added) % 10 == 0:
                     logger.info(f"Fill gaps progress: {len(items_added)} items added, current gap: {current_position/3600:.1f}h of {gap_end/3600:.1f}h")
+            
+            # Check if we hit the iteration limit
+            if gap_iterations >= max_gap_iterations:
+                logger.error(f"Hit maximum iterations ({max_gap_iterations}) while filling gap. Stopping to prevent infinite loop.")
+                logger.error(f"Gap details: start={gap_start/3600:.2f}h, end={gap_end/3600:.2f}h, current={current_position/3600:.2f}h")
+                logger.error(f"Minimum content duration: {min_content_duration}s, Remaining gap: {(gap_end - current_position):.1f}s")
             
             # Log gap completion when we exit the while loop
             filled_in_gap = current_position - gap_start
