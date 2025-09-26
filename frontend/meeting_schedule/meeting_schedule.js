@@ -35,12 +35,8 @@ function meetingScheduleInit() {
 async function meetingScheduleLoadMeetings() {
     try {
         const response = await window.API.get('/meetings');
-        if (response.success) {
+        if (response.meetings) {
             meetingScheduleState.meetings = response.meetings;
-            // Debug: log the first meeting to see what fields are available
-            if (response.meetings && response.meetings.length > 0) {
-                console.log('First meeting data:', response.meetings[0]);
-            }
             meetingScheduleDisplayMeetings();
         }
     } catch (error) {
@@ -63,10 +59,44 @@ function meetingScheduleDisplayMeetings() {
     
     if (noMeetingsMsg) noMeetingsMsg.style.display = 'none';
     
-    // Sort meetings by date (newest first)
-    const sortedMeetings = [...meetingScheduleState.meetings].sort((a, b) => 
-        new Date(b.meeting_date) - new Date(a.meeting_date)
-    );
+    // Sort meetings by date and time (earliest first)
+    const sortedMeetings = [...meetingScheduleState.meetings].sort((a, b) => {
+        // Compare dates first
+        const dateA = new Date(a.meeting_date);
+        const dateB = new Date(b.meeting_date);
+        const dateDiff = dateA - dateB;
+        
+        if (dateDiff !== 0) return dateDiff;
+        
+        // If dates are equal, compare times
+        const timeA = a.start_time || '00:00';
+        const timeB = b.start_time || '00:00';
+        
+        // Convert times to minutes for comparison
+        const getMinutes = (timeStr) => {
+            // Handle both "HH:MM AM/PM" and "HH:MM" formats
+            let hours = 0, minutes = 0;
+            
+            if (timeStr.includes('AM') || timeStr.includes('PM')) {
+                const [time, meridiem] = timeStr.split(' ');
+                const [h, m] = time.split(':').map(Number);
+                hours = h;
+                minutes = m;
+                
+                if (meridiem === 'PM' && hours !== 12) {
+                    hours += 12;
+                } else if (meridiem === 'AM' && hours === 12) {
+                    hours = 0;
+                }
+            } else {
+                [hours, minutes] = timeStr.split(':').map(Number);
+            }
+            
+            return hours * 60 + minutes;
+        };
+        
+        return getMinutes(timeA) - getMinutes(timeB);
+    });
     
     let html = '';
     sortedMeetings.forEach(meeting => {
@@ -153,6 +183,14 @@ function meetingScheduleOpenAddModal() {
     // Clear form
     document.getElementById('meetingId').value = '';
     document.getElementById('meetingForm').reset();
+    
+    // Set default date to today
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0];
+    document.getElementById('meetingDate').value = dateStr;
+    
+    // Set default broadcast checkbox to checked
+    document.getElementById('meetingBroadcast').checked = true;
     
     // Set default end time (2 hours after current time)
     const now = new Date();
@@ -326,10 +364,19 @@ async function meetingScheduleSaveMeeting() {
             response = await window.API.post('/meetings', formData);
         }
         
-        if (response.success) {
-            window.showNotification(meetingId ? 'Meeting updated' : 'Meeting added', 'success');
+        if (response.success || response.status === 'success') {
+            window.showNotification(meetingId ? 'Meeting updated successfully' : 'Meeting added successfully', 'success');
             meetingScheduleCloseMeetingModal();
+            // Reload meetings and ensure display is refreshed
             await meetingScheduleLoadMeetings();
+            // If we're on the meetings panel, also trigger the legacy refresh
+            const activePanel = document.querySelector('.panel.active');
+            if (activePanel && activePanel.id === 'meetings' && typeof loadMeetings === 'function') {
+                // Also refresh using the legacy system to ensure consistency
+                loadMeetings();
+            }
+        } else {
+            window.showNotification(response.message || 'Failed to save meeting', 'error');
         }
     } catch (error) {
         window.showNotification('Failed to save meeting', 'error');

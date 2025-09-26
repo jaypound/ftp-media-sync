@@ -96,6 +96,27 @@ function log(message, type = 'info') {
     status.scrollTop = status.scrollHeight;
 }
 
+// Global sanitize function to remove Infinity values from JSON
+function sanitizeForJSON(obj) {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj !== 'object') {
+        if (typeof obj === 'number' && !isFinite(obj)) {
+            return 999999999; // Replace Infinity with large number
+        }
+        return obj;
+    }
+    if (Array.isArray(obj)) {
+        return obj.map(sanitizeForJSON);
+    }
+    const result = {};
+    for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            result[key] = sanitizeForJSON(obj[key]);
+        }
+    }
+    return result;
+}
+
 function clearLog() {
     document.getElementById('status').innerHTML = '';
 }
@@ -1439,7 +1460,8 @@ async function saveConfig() {
         log('Saving configuration...');
         const config = getConfigFromForm();
         
-        const result = await window.API.post('/config', config);
+        // Sanitize config to remove Infinity values before sending
+        const result = await window.API.post('/config', sanitizeForJSON(config));
         
         if (result.success) {
             log('✅ Configuration saved successfully', 'success');
@@ -3844,7 +3866,7 @@ const SCHEDULING_CONFIG = {
         id: { min: 0, max: 16, label: 'ID (< 16s)' },
         spots: { min: 16, max: 120, label: 'Spots (16s - 2min)' },
         short_form: { min: 120, max: 1200, label: 'Short Form (2-20min)' },
-        long_form: { min: 1200, max: Infinity, label: 'Long Form (> 20min)' }
+        long_form: { min: 1200, max: 999999999, label: 'Long Form (> 20min)' }
     },
     
     // Category rotation order
@@ -4433,7 +4455,7 @@ function saveDurationConfig() {
         },
         long_form: { 
             min: parseInt(document.getElementById('long_form_min').value), 
-            max: Infinity,
+            max: 999999999,
             label: `Long Form (> ${Math.floor(document.getElementById('long_form_min').value/60)}min)`
         }
     };
@@ -8838,7 +8860,15 @@ async function loadSchedulingConfig() {
                 scheduleConfig.TIMESLOTS = config.scheduling.timeslots;
             }
             if (config.scheduling.duration_categories) {
-                scheduleConfig.DURATION_CATEGORIES = config.scheduling.duration_categories;
+                // Sanitize duration categories to replace Infinity with a large number
+                const categories = config.scheduling.duration_categories;
+                for (const key in categories) {
+                    if (categories[key].max === null || categories[key].max === undefined || 
+                        categories[key].max === Infinity || categories[key].max > 999999999) {
+                        categories[key].max = 999999999;
+                    }
+                }
+                scheduleConfig.DURATION_CATEGORIES = categories;
             }
         }
     } catch (error) {
@@ -9722,13 +9752,15 @@ async function fillScheduleGaps() {
                 // Use the schedule date we collected earlier
                 // scheduleDate is already set from the prompt above
                 
+                // Use global sanitizeForJSON function to remove Infinity values before sending
+
                 const response = await fetch('/api/fill-template-gaps', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        template: cleanTemplate,
-                        available_content: availableContent,
-                        gaps: manuallySplitGaps,  // Use manually split gaps
+                        template: sanitizeForJSON(cleanTemplate),
+                        available_content: sanitizeForJSON(availableContent),
+                        gaps: sanitizeForJSON(manuallySplitGaps),  // Use manually split gaps
                         schedule_date: scheduleDate
                     })
                 });
@@ -15015,62 +15047,7 @@ window.closeMeetingModal = function() {
     editingMeetingId = null;
 };
 
-// Save meeting
-window.saveMeeting = async function() {
-    // Get start and end times in 24-hour format from the time inputs
-    let startTimeValue = document.getElementById('meetingTime').value;
-    let endTimeValue = document.getElementById('meetingEndTime').value;
-    
-    // The time inputs already give us HH:MM format, just add seconds for consistency
-    if (startTimeValue && startTimeValue.split(':').length === 2) {
-        startTimeValue += ':00';
-    }
-    
-    if (endTimeValue && endTimeValue.split(':').length === 2) {
-        endTimeValue += ':00';
-    }
-    
-    const formData = {
-        meeting_name: document.getElementById('meetingName').value,
-        meeting_date: document.getElementById('meetingDate').value,
-        start_time: startTimeValue,
-        end_time: endTimeValue,
-        room: document.getElementById('meetingRoom').value || null,
-        atl26_broadcast: document.getElementById('meetingBroadcast').checked
-    };
-    
-    if (!formData.meeting_name || !formData.meeting_date || !formData.start_time) {
-        showNotification('Please fill in all required fields', 'error');
-        return;
-    }
-    
-    try {
-        const url = editingMeetingId 
-            ? `/api/meetings/${editingMeetingId}`
-            : '/api/meetings';
-        
-        const method = editingMeetingId ? 'PUT' : 'POST';
-        
-        const response = await fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData)
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            showNotification(editingMeetingId ? 'Meeting updated' : 'Meeting created', 'success');
-            closeMeetingModal();
-            loadMeetings();
-        } else {
-            showNotification(data.message || 'Error saving meeting', 'error');
-        }
-    } catch (error) {
-        console.error('Error saving meeting:', error);
-        showNotification('Error saving meeting', 'error');
-    }
-};
+// Note: saveMeeting is handled by meeting_schedule.js module
 
 // Delete meeting
 window.deleteMeeting = async function(meetingId) {
@@ -15262,6 +15239,145 @@ window.generateDailySchedule = async function() {
     } catch (error) {
         console.error('Error generating daily schedule:', error);
         showNotification('Error generating schedule', 'error');
+    }
+};
+
+// Get current meeting based on current date/time (including recently ended meetings)
+function getCurrentMeeting() {
+    if (!meetingScheduleState || !meetingScheduleState.meetings) {
+        return null;
+    }
+    
+    const now = new Date();
+    const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+    const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    
+    // Convert current time to minutes for easier comparison
+    const [currentHours, currentMinutes] = currentTime.split(':').map(Number);
+    const currentTotalMinutes = currentHours * 60 + currentMinutes;
+    
+    // Find a meeting that is happening right now or ended within the last 10 minutes
+    for (const meeting of meetingScheduleState.meetings) {
+        
+        // Handle the date format - the meeting date might have a time component
+        const meetingDateOnly = meeting.meeting_date.split('T')[0];
+        
+        if (meetingDateOnly === currentDate) {
+            const startTime = meeting.start_time || '';
+            const endTime = meeting.end_time || '';
+            
+            // Convert end time to minutes for comparison
+            if (endTime) {
+                // Parse time that might be in 12-hour format (e.g., "10:31 AM") or 24-hour format
+                let endHours, endMinutes;
+                
+                if (endTime.includes('AM') || endTime.includes('PM')) {
+                    // 12-hour format
+                    const [time, meridiem] = endTime.split(' ');
+                    const [h, m] = time.split(':').map(Number);
+                    endHours = h;
+                    endMinutes = m;
+                    
+                    // Convert to 24-hour format
+                    if (meridiem === 'PM' && endHours !== 12) {
+                        endHours += 12;
+                    } else if (meridiem === 'AM' && endHours === 12) {
+                        endHours = 0;
+                    }
+                } else {
+                    // 24-hour format
+                    [endHours, endMinutes] = endTime.split(':').map(Number);
+                }
+                
+                const endTotalMinutes = endHours * 60 + endMinutes;
+                const minutesSinceEnd = currentTotalMinutes - endTotalMinutes;
+                
+                
+                // For current meeting check, we need to compare times properly
+                let isCurrentlyInMeeting = false;
+                if (startTime) {
+                    // Convert start time to 24-hour format for comparison
+                    let startHours, startMinutes;
+                    if (startTime.includes('AM') || startTime.includes('PM')) {
+                        const [time, meridiem] = startTime.split(' ');
+                        const [h, m] = time.split(':').map(Number);
+                        startHours = h;
+                        startMinutes = m;
+                        
+                        if (meridiem === 'PM' && startHours !== 12) {
+                            startHours += 12;
+                        } else if (meridiem === 'AM' && startHours === 12) {
+                            startHours = 0;
+                        }
+                    } else {
+                        [startHours, startMinutes] = startTime.split(':').map(Number);
+                    }
+                    
+                    const startTotalMinutes = startHours * 60 + startMinutes;
+                    isCurrentlyInMeeting = currentTotalMinutes >= startTotalMinutes && currentTotalMinutes <= endTotalMinutes;
+                }
+                
+                // Check if currently in meeting OR meeting ended within last 10 minutes
+                if (isCurrentlyInMeeting || (minutesSinceEnd >= 0 && minutesSinceEnd <= 10)) {
+                    return meeting;
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Edit current meeting function for automation
+window.editCurrentMeeting = async function() {
+    // Always load meetings fresh from the API
+    try {
+        const response = await window.API.get('/meetings');
+        
+        if (response.status === 'success' && response.meetings) {
+            // Update the global state
+            meetingScheduleState.meetings = response.meetings;
+            
+            // Now check for current meeting
+            const currentMeeting = getCurrentMeeting();
+            
+            if (currentMeeting) {
+                // We're currently in a meeting or it ended recently - open the edit modal and focus on end time
+                meetingScheduleEditMeeting(currentMeeting.id);
+                
+                // Wait for modal to open, then update and focus on end time
+                setTimeout(() => {
+                    const endTimeInput = document.getElementById('meetingEndTime');
+                    if (endTimeInput) {
+                        // Calculate current time + 1 minute
+                        const now = new Date();
+                        now.setMinutes(now.getMinutes() + 1);
+                        
+                        // Format as HH:MM for the time input
+                        const hours = String(now.getHours()).padStart(2, '0');
+                        const minutes = String(now.getMinutes()).padStart(2, '0');
+                        const newEndTime = `${hours}:${minutes}`;
+                        
+                        // Set the new end time
+                        endTimeInput.value = newEndTime;
+                        
+                        // Focus and select the field
+                        endTimeInput.focus();
+                        endTimeInput.select();
+                    }
+                }, 150);
+            } else {
+                // Not in a meeting - switch to meetings tab
+                const now = new Date();
+                showPanel('meetings');
+            }
+        } else {
+            showPanel('meetings');
+        }
+    } catch (error) {
+        console.error('Error loading meetings:', error);
+        showPanel('meetings');
     }
 };
 

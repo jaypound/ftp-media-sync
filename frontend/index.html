@@ -648,8 +648,26 @@
                     </div>
                 </div>
                 
+                <!-- Automation Section -->
+                <div class="scheduling-card" id="automationCard">
+                    <h3><i class="fas fa-robot"></i> Automation</h3>
+                    <div class="card-content">
+                        <div class="automation-buttons">
+                            <button class="button primary large" onclick="editCurrentMeeting()">
+                                <i class="fas fa-edit"></i> Edit Meeting
+                            </button>
+                            <button class="button warning large" onclick="importWeeklyMeetings()">
+                                <i class="fas fa-calendar-week"></i> Import Weekly Meetings
+                            </button>
+                            <button class="button primary large" onclick="showReturnToAutomationModal()">
+                                <i class="fas fa-sync-alt"></i> Return to Automation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Schedule Templates Section -->
-                <div class="scheduling-card" id="scheduleTemplatesCard">
+                <div class="scheduling-card collapsed" id="scheduleTemplatesCard">
                     <h3><i class="fas fa-file-alt"></i> Schedule Templates</h3>
                     <div class="card-content">
                         <div class="template-buttons">

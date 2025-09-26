@@ -1787,6 +1787,14 @@ body.dark-mode .status {
     display: none;
 }
 
+/* Automation buttons */
+.automation-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+}
+
 /* Content filters */
 .content-filters {
     margin-bottom: 1.5rem;
