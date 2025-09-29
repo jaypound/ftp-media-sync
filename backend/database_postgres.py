@@ -799,7 +799,9 @@ class PostgreSQLDatabaseManager:
                 'BMP': 'bmp',
                 'BUMP': 'bmp',
                 'PROMO': 'pmo',
-                'PMO': 'pmo'
+                'PMO': 'pmo',
+                'SPP': 'spp',
+                'SPECIAL PROJECTS': 'spp'
             }
             mapped = type_map.get(content_type.upper())
             if mapped and mapped in valid_values:
@@ -830,7 +832,7 @@ class PostgreSQLDatabaseManager:
             return 'pmo'
         elif 'sizzle' in filename_lower:
             return 'szl'
-        elif 'special project' in filename_lower:
+        elif 'special project' in filename_lower or '_spp_' in filename_lower:
             return 'spp'
         else:
             return 'other'
