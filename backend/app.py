@@ -126,12 +126,493 @@ gap_logger.propagate = False  # Don't also send to console
 ftp_managers = {}
 config_manager = ConfigManager()
 
+# Create logger for next meeting decisions
+def get_next_meeting_logger():
+    """Get or create logger for next meeting decisions"""
+    import logging.handlers
+    from datetime import datetime
+    
+    logger_name = 'next_meeting'
+    logger = logging.getLogger(logger_name)
+    
+    # Only add handler if it doesn't exist
+    if not logger.handlers:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_file = os.path.join(os.path.dirname(__file__), 'logs', f'next_meeting_{timestamp}.log')
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    
+    return logger
+
+# Create logger for theme acceptance decisions
+def get_theme_logger():
+    """Get or create logger for theme acceptance decisions"""
+    import logging.handlers
+    from datetime import datetime
+    
+    logger_name = 'acceptable_theme'
+    logger = logging.getLogger(logger_name)
+    
+    # Only add handler if it doesn't exist
+    if not logger.handlers:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_file = os.path.join(os.path.dirname(__file__), 'logs', f'acceptable_theme_{timestamp}.log')
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    
+    return logger
+
 # Track app start time for uptime calculation
 import time
 app_start_time = time.time()
 
 # Initialize database connection
 db_manager.connect()
+
+def should_block_content_for_theme(content, recent_items, current_position, schedule_type):
+    """
+    Check if content should be blocked due to theme conflicts with recent items.
+    Only applies to spots content.
+    
+    Returns tuple: (should_block, reason)
+    """
+    theme_logger = get_theme_logger()
+    
+    try:
+        # Only check spots and ID content (not long_form or short_form)
+        content_category = content.get('duration_category', '')
+        if content_category not in ['spots', 'id']:
+            return False, None
+            
+        theme_logger.info("\n" + "="*80)
+        theme_logger.info("THEME ACCEPTANCE CHECK")
+        theme_logger.info("="*80)
+        
+        # Get content theme/topic information
+        content_title = content.get('content_title', content.get('file_name', ''))
+        content_category = content.get('duration_category', '')
+        content_tags = content.get('tags', {})
+        content_topics = content_tags.get('topics', []) if isinstance(content_tags, dict) else []
+        
+        # Try to extract theme from title if no topics
+        content_themes = set()
+        if content_topics:
+            content_themes.update([topic.lower() for topic in content_topics])
+        
+        # Extract theme keywords from title
+        theme_keywords = extract_theme_from_title(content_title)
+        if theme_keywords:
+            content_themes.update(theme_keywords)
+        
+        theme_logger.info(f"Content being evaluated: '{content_title}'")
+        theme_logger.info(f"  Category: {content_category}")
+        theme_logger.info(f"  Detected themes: {list(content_themes)}")
+        theme_logger.info(f"  Position: {current_position/3600:.2f}h")
+        
+        if not content_themes:
+            theme_logger.info("No themes detected in content")
+            return False, None
+        
+        # Check recent items for theme conflicts
+        # Look back 1-2 items (about 30-60 minutes for typical content)
+        items_to_check = 2
+        recent_themes = []
+        
+        for i, item in enumerate(reversed(recent_items[-items_to_check:])):
+            item_title = item.get('title', item.get('content_title', ''))
+            item_themes = extract_theme_from_title(item_title)
+            
+            if item_themes:
+                recent_themes.append({
+                    'title': item_title,
+                    'themes': item_themes,
+                    'position': i + 1  # 1 = most recent
+                })
+        
+        theme_logger.info(f"Recent items checked: {len(recent_themes)}")
+        for recent in recent_themes:
+            theme_logger.info(f"  Position -{recent['position']}: '{recent['title']}' themes: {list(recent['themes'])}")
+        
+        # Check for theme conflicts
+        for recent in recent_themes:
+            # Check if any themes match
+            matching_themes = content_themes.intersection(recent['themes'])
+            if matching_themes:
+                if recent['position'] == 1:  # Immediately previous item
+                    reason = f"Theme conflict: '{content_title}' has themes {list(matching_themes)} matching previous item '{recent['title']}'"
+                    theme_logger.info(f"Decision: REJECTED - {reason}")
+                    return True, reason
+                elif recent['position'] == 2:  # Two items back
+                    # Less strict - only block if strong theme match
+                    if len(matching_themes) >= 2 or any(is_strong_theme(theme) for theme in matching_themes):
+                        reason = f"Theme conflict: '{content_title}' has strong themes {list(matching_themes)} matching recent item '{recent['title']}'"
+                        theme_logger.info(f"Decision: REJECTED - {reason}")
+                        return True, reason
+        
+        theme_logger.info(f"Decision: ACCEPTED - No theme conflicts found")
+        return False, None
+        
+    except Exception as e:
+        theme_logger.error(f"Error checking theme conflicts: {str(e)}")
+        logger.error(f"Error in should_block_content_for_theme: {str(e)}")
+        return False, None
+
+def extract_theme_from_title(title):
+    """Extract theme keywords from content title"""
+    if not title:
+        return set()
+    
+    # Common theme keywords to look for
+    theme_patterns = [
+        'gun', 'firearm', 'weapon', 'shooting',
+        'safety', 'violence', 'crime', 'police',
+        'health', 'medical', 'covid', 'vaccine',
+        'education', 'school', 'student', 'teacher',
+        'housing', 'homeless', 'affordable', 'rent',
+        'environment', 'climate', 'green', 'pollution',
+        'election', 'vote', 'campaign', 'political',
+        'budget', 'tax', 'finance', 'money',
+        'transport', 'traffic', 'transit', 'road',
+        'community', 'neighborhood', 'resident',
+        'business', 'economy', 'job', 'employment',
+        'arts', 'culture', 'music', 'festival',
+        'park', 'recreation', 'sport', 'fitness'
+    ]
+    
+    title_lower = title.lower()
+    themes = set()
+    
+    for pattern in theme_patterns:
+        if pattern in title_lower:
+            themes.add(pattern)
+    
+    # Also check for compound themes
+    if 'gun' in title_lower and 'safe' in title_lower:
+        themes.add('gun_safety')
+    if 'public' in title_lower and 'safe' in title_lower:
+        themes.add('public_safety')
+    
+    return themes
+
+def is_strong_theme(theme):
+    """Check if a theme is considered 'strong' (should have stricter spacing)"""
+    strong_themes = {'gun', 'firearm', 'weapon', 'violence', 'crime', 'covid', 'election', 'political'}
+    return theme.lower() in strong_themes
+
+def should_block_meeting_after_live(content, original_items, current_position, schedule_type, base_date):
+    """
+    Check if content should be blocked because it's a recording of the same meeting
+    that just aired live.
+    
+    Returns tuple: (should_block, reason)
+    """
+    next_meeting_logger = get_next_meeting_logger()
+    
+    try:
+        next_meeting_logger.info("\n" + "="*80)
+        next_meeting_logger.info("MEETING DUPLICATE CHECK")
+        next_meeting_logger.info("="*80)
+        
+        # Only check for long_form content
+        if content.get('duration_category') != 'long_form':
+            next_meeting_logger.info("Content is not long_form, skipping check")
+            return False, None
+            
+        # Get content meeting name (remove date prefix and extension)
+        content_title = content.get('content_title', content.get('file_name', ''))
+        content_meeting_name = extract_meeting_name_from_title(content_title)
+        
+        if not content_meeting_name:
+            next_meeting_logger.info(f"No meeting name extracted from content: {content_title}")
+            return False, None
+            
+        # Look for the most recent live meeting before current position
+        recent_live_meeting = None
+        live_meeting_distance = float('inf')
+        
+        for item in original_items:
+            # Check if this is a live meeting
+            if not item.get('is_live_input'):
+                continue
+                
+            # Check if it's before current position
+            item_end = item.get('end', 0)
+            if item_end > current_position:
+                continue
+                
+            # Check distance from current position
+            distance = current_position - item_end
+            
+            # Use 120 minutes (2 hours) as the buffer
+            if distance < 7200 and distance < live_meeting_distance:  # 7200 seconds = 120 minutes
+                recent_live_meeting = item
+                live_meeting_distance = distance
+        
+        if not recent_live_meeting:
+            next_meeting_logger.info(f"No recent live meeting found within 120 minutes before position {current_position/3600:.2f}h")
+            return False, None
+            
+        # Get the live meeting details
+        live_start_time = recent_live_meeting.get('start_time', '')
+        live_title = recent_live_meeting.get('title', '')
+        live_start_position = recent_live_meeting.get('start', 0)
+        
+        # Calculate the air date for the live meeting
+        live_air_date = None
+        if schedule_type == 'weekly':
+            # Calculate which day this position falls on
+            days_offset = int(live_start_position // 86400)
+            live_air_date = base_date + timedelta(days=days_offset)
+        else:
+            # Daily schedule - all items air on base_date
+            live_air_date = base_date
+            
+        next_meeting_logger.info(f"Recent live meeting found: '{live_title}' at {live_start_time}, air date: {live_air_date.strftime('%Y-%m-%d (%A)')}, distance: {live_meeting_distance/60:.1f} min")
+        
+        # Try to get meeting name from database
+        live_meeting_name = None
+        
+        next_meeting_logger.info(f"Database check: db_manager={db_manager is not None}, connected={db_manager.connected if db_manager else 'N/A'}")
+        
+        # Try to query meetings table regardless of the database type flag
+        if db_manager and db_manager.connected and live_air_date:
+            # Parse time from live meeting start time
+            meeting_time = None
+            
+            if schedule_type == 'weekly' and ' ' in live_start_time:
+                # Weekly format: "mon 2:00 pm" - extract just the time part
+                parts = live_start_time.split(' ', 1)
+                meeting_time = parts[1] if len(parts) > 1 else None
+            else:
+                # Daily format - time is the full start_time
+                meeting_time = live_start_time
+                
+            if meeting_time:
+                # Convert to 24-hour format for database query
+                meeting_time_24h = convert_to_24hour_format(meeting_time)
+                
+                next_meeting_logger.info(f"Meeting time parsing:")
+                next_meeting_logger.info(f"  - Original meeting_time: '{meeting_time}'")
+                next_meeting_logger.info(f"  - Converted to 24h: '{meeting_time_24h}'")
+                next_meeting_logger.info(f"  - Live air date: {live_air_date.strftime('%Y-%m-%d')}")
+                
+                # Query meetings table using just the start time
+                # Since we don't schedule two meetings at the same time, this should be unique
+                query = """
+                    SELECT meeting_name, meeting_date, start_time
+                    FROM meetings 
+                    WHERE start_time = %s::time
+                    ORDER BY meeting_date DESC
+                    LIMIT 5
+                """
+                
+                next_meeting_logger.info(f"Executing query: SELECT meeting_name FROM meetings WHERE start_time = '{meeting_time_24h}'::time")
+                
+                try:
+                    # Execute query using the database manager's connection
+                    conn = None
+                    cursor = None
+                    
+                    # Try to get connection from the pool
+                    if hasattr(db_manager, '_get_connection'):
+                        conn = db_manager._get_connection()
+                        cursor = conn.cursor()
+                        
+                        cursor.execute(query, (meeting_time_24h,))
+                        result = cursor.fetchone()
+                        
+                        if result:
+                            # Result is a dictionary due to RealDictCursor
+                            live_meeting_name = result['meeting_name']
+                            next_meeting_logger.info(f"Found live meeting name from database: '{live_meeting_name}'")
+                            if 'meeting_date' in result and 'start_time' in result:
+                                next_meeting_logger.info(f"  Meeting details: date={result['meeting_date']}, time={result['start_time']}")
+                        else:
+                            next_meeting_logger.info(f"No meeting found in database for time {meeting_time_24h}")
+                            
+                            # Try to see what times exist in the database
+                            debug_query = """
+                                SELECT DISTINCT start_time::text, COUNT(*) as count
+                                FROM meetings 
+                                WHERE start_time IS NOT NULL
+                                GROUP BY start_time
+                                ORDER BY start_time
+                                LIMIT 10
+                            """
+                            
+                            cursor.execute(debug_query)
+                            debug_results = cursor.fetchall()
+                            
+                            if debug_results:
+                                next_meeting_logger.info("Sample times in meetings table:")
+                                for row in debug_results:
+                                    next_meeting_logger.info(f"  - Time: {row['start_time']}, Count: {row['count']}")
+                            else:
+                                next_meeting_logger.info("  - No times found in meetings table")
+                        
+                        cursor.close()
+                        if hasattr(db_manager, '_put_connection'):
+                            db_manager._put_connection(conn)
+                    else:
+                        next_meeting_logger.error("Database manager doesn't have connection methods")
+                        
+                except Exception as e:
+                    next_meeting_logger.error(f"Database query error: {str(e)}")
+                    next_meeting_logger.error(f"Error type: {type(e).__name__}")
+                    next_meeting_logger.error(f"Query was: {query}")
+                    next_meeting_logger.error(f"Parameter was: {meeting_time_24h}")
+                    if cursor:
+                        cursor.close()
+                    if conn and hasattr(db_manager, '_put_connection'):
+                        db_manager._put_connection(conn)
+        
+        # If no database match, try to extract from title
+        if not live_meeting_name and 'Committee Room' in live_title:
+            # Extract meeting type from room assignment
+            if 'Committee Room 1' in live_title:
+                live_meeting_name = 'committee'  # Generic committee match
+            elif 'Committee Room 2' in live_title:
+                live_meeting_name = 'committee'
+            elif 'Council Chamber' in live_title:
+                live_meeting_name = 'council'
+                
+        if not live_meeting_name:
+            next_meeting_logger.info("Could not determine live meeting name")
+            return False, None
+            
+        # Calculate the air date for the current content position
+        content_air_date = None
+        if schedule_type == 'weekly':
+            days_offset = int(current_position // 86400)
+            content_air_date = base_date + timedelta(days=days_offset)
+        else:
+            content_air_date = base_date
+            
+        next_meeting_logger.info(f"Content being evaluated: '{content_title}' would air at position {current_position/3600:.2f}h on {content_air_date.strftime('%Y-%m-%d (%A)')}")
+        
+        # Compare first 15 characters of meeting names
+        live_meeting_compare = live_meeting_name[:15].lower()
+        content_meeting_compare = content_meeting_name[:15].lower()
+        
+        next_meeting_logger.info(f"Comparing: live='{live_meeting_compare}' vs content='{content_meeting_compare}'")
+        
+        if live_meeting_compare == content_meeting_compare:
+            reason = f"Blocking '{content_title}' - same meeting as recent live '{live_meeting_name}'"
+            next_meeting_logger.info(reason)
+            next_meeting_logger.info(f"Decision: BLOCKED - Live {live_meeting_name} on {live_air_date.strftime('%Y-%m-%d')} at {live_start_time}, content would air {live_meeting_distance/60:.1f} min later")
+            return True, reason
+        else:
+            next_meeting_logger.info(f"No match - allowing '{content_title}'")
+            next_meeting_logger.info(f"Decision: ALLOWED - Different meeting type")
+            return False, None
+            
+    except Exception as e:
+        next_meeting_logger.error(f"Error checking meeting block: {str(e)}")
+        logger.error(f"Error in should_block_meeting_after_live: {str(e)}")
+        return False, None
+
+def extract_meeting_name_from_title(title):
+    """Extract meeting name from content title, removing date prefix and extension"""
+    if not title:
+        return None
+        
+    # Remove file extension
+    if '.' in title:
+        title = title.rsplit('.', 1)[0]
+        
+    # Common patterns for meeting titles:
+    # "YYMMDD_MTG_Meeting Name"
+    # "Meeting Name YYYY-MM-DD"
+    # "2024-09-15 Meeting Name"
+    
+    # Remove date prefix patterns
+    import re
+    
+    # Pattern 1: YYMMDD_MTG_ prefix
+    match = re.match(r'^\d{6}_MTG_(.+)$', title)
+    if match:
+        return match.group(1).strip()
+        
+    # Pattern 2: Date at beginning (various formats)
+    match = re.match(r'^[\d-]+\s+(.+)$', title)
+    if match:
+        return match.group(1).strip()
+        
+    # Pattern 3: Date at end
+    match = re.match(r'^(.+?)\s+\d{4}-\d{2}-\d{2}$', title)
+    if match:
+        return match.group(1).strip()
+        
+    # If no pattern matches, return the title as-is
+    return title.strip()
+
+def convert_to_24hour_format(time_str):
+    """Convert 12-hour format to 24-hour format"""
+    if not time_str:
+        return "00:00:00"
+        
+    time_str = str(time_str).strip()
+    
+    # Already in 24-hour format
+    if not any(marker in time_str.lower() for marker in [' am', ' pm']):
+        # Check if it looks like 24-hour format
+        if ':' in time_str:
+            parts = time_str.split(':')
+            if len(parts) >= 2:
+                try:
+                    hour = int(parts[0])
+                    if 0 <= hour <= 23:
+                        return time_str
+                except:
+                    pass
+        return time_str
+        
+    # Parse 12-hour format
+    import re
+    # Updated regex to be more flexible with spaces
+    match = re.match(r'^(\d{1,2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?\s*(am|pm)$', time_str.lower().strip())
+    if not match:
+        # Try without seconds
+        match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)$', time_str.lower().strip())
+        if not match:
+            logger.warning(f"Could not parse time format: '{time_str}'")
+            return time_str
+        hours = int(match.group(1))
+        minutes = int(match.group(2))
+        seconds = 0
+        am_pm = match.group(3)
+    else:
+        hours = int(match.group(1))
+        minutes = int(match.group(2))
+        seconds = float(match.group(3) or 0)
+        am_pm = match.group(4)
+    
+    # Convert to 24-hour
+    if am_pm == 'pm' and hours != 12:
+        hours += 12
+    elif am_pm == 'am' and hours == 12:
+        hours = 0
+        
+    # Format with proper seconds handling
+    if seconds == int(seconds):
+        return f"{hours:02d}:{minutes:02d}:{int(seconds):02d}"
+    else:
+        # Include milliseconds
+        return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
@@ -6274,6 +6755,35 @@ def fill_template_gaps():
                 else:
                     # Select the best content for other categories
                     selected = category_content[0]
+                    
+                # Check if we should block this meeting after a live meeting
+                if selected and duration_category == 'long_form':
+                    should_block, block_reason = should_block_meeting_after_live(
+                        selected, original_items, current_position, schedule_type, base_date
+                    )
+                    if should_block:
+                        logger.info(f"Blocking content: {block_reason}")
+                        # Try next best content in the category
+                        blocked_content = selected
+                        selected = None
+                        for alt_content in category_content[1:]:
+                            # Check if alternative should also be blocked
+                            alt_should_block, alt_block_reason = should_block_meeting_after_live(
+                                alt_content, original_items, current_position, schedule_type, base_date
+                            )
+                            if not alt_should_block:
+                                selected = alt_content
+                                logger.info(f"Selected alternative: {alt_content.get('content_title', alt_content.get('file_name'))}")
+                                break
+                            else:
+                                logger.info(f"Alternative also blocked: {alt_block_reason}")
+                        
+                        if not selected:
+                            # No suitable long-form content, advance rotation
+                            logger.info("No suitable long-form content after filtering duplicates")
+                            scheduler._advance_rotation()
+                            continue
+                            
                 # Check for duration_seconds or file_duration with validation
                 raw_duration = selected.get('duration_seconds', selected.get('file_duration', 0))
                 duration = validate_numeric(raw_duration,
@@ -6331,6 +6841,15 @@ def fill_template_gaps():
                             if is_content_expired_at_position(alt_content, current_position, schedule_type, base_date):
                                 logger.debug(f"Alternative content '{alt_content.get('content_title', alt_content.get('file_name'))}' is expired, skipping")
                                 continue
+                            
+                            # Check if we should block this meeting after a live meeting
+                            if duration_category == 'long_form':
+                                should_block, block_reason = should_block_meeting_after_live(
+                                    alt_content, original_items, current_position, schedule_type, base_date
+                                )
+                                if should_block:
+                                    logger.info(f"Alternative blocked: {block_reason}")
+                                    continue
                             
                             selected = alt_content
                             duration = alt_duration
@@ -6423,6 +6942,15 @@ def fill_template_gaps():
                                     if can_schedule and content_duration > best_duration:
                                         # Check expiration before selecting
                                         if not is_content_expired_at_position(content, current_position, schedule_type, base_date):
+                                            # Check if we should block this meeting after a live meeting
+                                            if try_category == 'long_form':
+                                                should_block, block_reason = should_block_meeting_after_live(
+                                                    content, original_items, current_position, schedule_type, base_date
+                                                )
+                                                if should_block:
+                                                    logger.info(f"Best fit candidate blocked: {block_reason}")
+                                                    continue
+                                            
                                             # Found a better fitting item
                                             best_fit = content
                                             best_duration = content_duration
@@ -6735,6 +7263,47 @@ def fill_template_gaps():
                     if overlap_found:
                         new_item_start = current_position
                         new_item_end = current_position + duration
+                    
+                    # Check theme conflicts for spots and ID content
+                    if selected.get('duration_category') in ['spots', 'id']:
+                        should_block, block_reason = should_block_content_for_theme(
+                            selected, items_added, current_position, schedule_type
+                        )
+                        if should_block:
+                            logger.info(f"Theme conflict detected: {block_reason}")
+                            gap_logger.info(f"  THEME CONFLICT: {block_reason}")
+                            
+                            # Try to find alternative content
+                            blocked_content = selected
+                            found_alternative = False
+                            
+                            # Look for alternative in same category without theme conflict
+                            for alt_idx, alt_content in enumerate(category_content):
+                                # Skip the blocked content
+                                if alt_content.get('id') == blocked_content.get('id'):
+                                    continue
+                                    
+                                # Check duration fits
+                                alt_duration = alt_content.get('duration_seconds', alt_content.get('file_duration', 0))
+                                if alt_duration <= remaining and alt_duration > 0:
+                                    # Check theme conflict for alternative
+                                    alt_should_block, alt_block_reason = should_block_content_for_theme(
+                                        alt_content, items_added, current_position, schedule_type
+                                    )
+                                    if not alt_should_block:
+                                        selected = alt_content
+                                        duration = alt_duration
+                                        logger.info(f"Selected theme-acceptable alternative: {alt_content.get('content_title', alt_content.get('file_name'))}")
+                                        gap_logger.info(f"  ALTERNATIVE FOUND: '{selected.get('content_title', selected.get('file_name'))}'")
+                                        found_alternative = True
+                                        break
+                            
+                            if not found_alternative:
+                                # No suitable alternative found, skip this position
+                                logger.info("No theme-acceptable alternative found, advancing rotation")
+                                gap_logger.info("  NO ALTERNATIVE FOUND - skipping position")
+                                scheduler._advance_rotation()
+                                continue
                     
                     selected_title = selected.get('content_title', selected.get('file_name'))
                     gap_logger.info(f"  PLACING CONTENT: '{selected_title}'")
