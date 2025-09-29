@@ -2630,3 +2630,40 @@ body.dark-mode .status {
 }
 
 /* End of styles */
+/* Expiration configuration styles */
+.expiration-config {
+    margin: 20px 0;
+}
+
+.expiration-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.expiration-row label {
+    font-weight: 500;
+    margin-right: 10px;
+}
+
+.expiration-buttons {
+    display: flex;
+    gap: 5px;
+}
+
+.expiration-note {
+    margin-top: 20px;
+    padding: 15px;
+    background: rgba(59, 130, 246, 0.1);
+    border-left: 3px solid #3b82f6;
+    border-radius: 4px;
+}
+
+.expiration-note p {
+    margin: 5px 0;
+    font-size: 0.9em;
+}
+

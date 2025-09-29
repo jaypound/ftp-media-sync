@@ -3891,11 +3891,23 @@ const SCHEDULING_CONFIG = {
     },
     
     // Default content expiration (in days)
+    // 0 = do not change expiration
     CONTENT_EXPIRATION: {
-        id: 30,
-        spots: 60,
-        short_form: 90,
-        long_form: 180
+        'AN': 0,           // ATLANTA NOW
+        'ATLD': 0,         // ATL DIRECT
+        'BMP': 0,          // BUMPS
+        'IMOW': 0,         // IMOW
+        'IM': 0,           // INCLUSION MONTHS
+        'IA': 0,           // INSIDE ATLANTA
+        'LM': 0,           // LEGISLATIVE MINUTE
+        'MTG': 14,         // MEETINGS - 14 days default
+        'MAF': 0,          // MOVING ATLANTA FORWARD
+        'PKG': 0,          // PACKAGES
+        'PMO': 0,          // PROMOS
+        'PSA': 0,          // PSAs
+        'SZL': 0,          // SIZZLES
+        'SPP': 0,          // SPECIAL PROJECTS
+        'OTHER': 0         // OTHER
     }
 };
 
@@ -3937,14 +3949,13 @@ function showScheduleConfig(configType) {
             bodyContent = generateReplayConfigHTML();
             break;
         case 'expiration':
-            // Use the new scheduling expiration modal instead
-            if (window.schedulingShowExpirationModal) {
-                window.schedulingShowExpirationModal();
-                return;
-            } else {
-                titleText = 'Content Expiration Configuration';
-                bodyContent = generateExpirationConfigHTML();
-            }
+            console.log('=== DEBUG: showScheduleConfig expiration case ===');
+            // Always use the new configuration modal
+            console.log('Using generateExpirationConfigHTML');
+            titleText = 'Content Expiration Configuration';
+            bodyContent = generateExpirationConfigHTML();
+            console.log('Generated HTML length:', bodyContent.length);
+            console.log('First 200 chars:', bodyContent.substring(0, 200));
             break;
         case 'rotation':
             titleText = 'Category Rotation Configuration';
@@ -3952,10 +3963,23 @@ function showScheduleConfig(configType) {
             break;
     }
     
+    console.log('=== DEBUG: Setting modal content ===');
+    console.log('Title:', titleText);
+    console.log('Body content length:', bodyContent ? bodyContent.length : 'undefined');
+    console.log('Config type:', configType);
+    
     title.textContent = titleText;
     body.innerHTML = bodyContent;
     modal.style.display = 'block';
     body.setAttribute('data-config-type', configType);
+    
+    // Make the modal wider for expiration configuration
+    const modalContent = modal.querySelector('.modal-content');
+    if (configType === 'expiration' && modalContent) {
+        modalContent.style.maxWidth = '900px';
+    } else if (modalContent) {
+        modalContent.style.maxWidth = '600px';
+    }
     
     // Initialize drag and drop for rotation configuration
     if (configType === 'rotation') {
@@ -4150,38 +4174,84 @@ function generateReplayConfigHTML() {
 }
 
 function generateExpirationConfigHTML() {
-    return `
+    const contentTypes = [
+        { code: 'AN', name: 'Atlanta Now' },
+        { code: 'ATLD', name: 'ATL Direct' },
+        { code: 'BMP', name: 'Bumps' },
+        { code: 'IMOW', name: 'IMOW' },
+        { code: 'IM', name: 'Inclusion Months' },
+        { code: 'IA', name: 'Inside Atlanta' },
+        { code: 'LM', name: 'Legislative Minute' },
+        { code: 'MTG', name: 'Meetings' },
+        { code: 'MAF', name: 'Moving Atlanta Forward' },
+        { code: 'PKG', name: 'Packages' },
+        { code: 'PMO', name: 'Promos' },
+        { code: 'PSA', name: 'PSAs' },
+        { code: 'SZL', name: 'Sizzles' },
+        { code: 'SPP', name: 'Special Projects' },
+        { code: 'OTHER', name: 'Other' }
+    ];
+    
+    let html = `
         <div class="config-section">
             <h4>Configure Content Expiration</h4>
-            <p>Set default expiration periods for each content category (in days):</p>
+            <p>Set expiration periods for each content type (in days). Use 0 to not change expiration dates.</p>
             
             <div class="expiration-config">
-                <div class="form-group">
-                    <label>ID Content Expiration</label>
-                    <input type="number" id="id_expiration" value="30" min="1"> days
+    `;
+    
+    contentTypes.forEach(type => {
+        const currentValue = scheduleConfig.CONTENT_EXPIRATION[type.code] || 0;
+        html += `
+                <div class="form-group expiration-row">
+                    <label style="width: 200px;">${type.name}</label>
+                    <input type="number" 
+                           id="${type.code}_expiration" 
+                           data-content-type="${type.code}"
+                           value="${currentValue}" 
+                           min="0" 
+                           style="width: 80px;"> days
+                    <div class="expiration-buttons" style="margin-left: 20px; display: inline-flex; gap: 5px;">
+                        <button class="button small primary" onclick="setExpirationForCategory('${type.code}')" title="Set expiration dates for all content of this type">
+                            <i class="fas fa-calendar-plus"></i> Set
+                        </button>
+                        <button class="button small secondary" onclick="clearExpirationForCategory('${type.code}')" title="Clear expiration dates for all content of this type">
+                            <i class="fas fa-calendar-times"></i> Clear
+                        </button>
+                        <button class="button small info" onclick="showServerSelectionModal('${type.code}', 'copyFromCastus')" title="Copy expiration dates from Castus metadata">
+                            <i class="fas fa-download"></i> From Castus
+                        </button>
+                        <button class="button small warning" onclick="showServerSelectionModal('${type.code}', 'copyToCastus')" title="Copy expiration dates to Castus metadata">
+                            <i class="fas fa-upload"></i> To Castus
+                        </button>
+                    </div>
                 </div>
-                
-                <div class="form-group">
-                    <label>Spots Content Expiration</label>
-                    <input type="number" id="spots_expiration" value="60" min="1"> days
-                </div>
-                
-                <div class="form-group">
-                    <label>Short Form Content Expiration</label>
-                    <input type="number" id="short_form_expiration" value="90" min="1"> days
-                </div>
-                
-                <div class="form-group">
-                    <label>Long Form Content Expiration</label>
-                    <input type="number" id="long_form_expiration" value="180" min="1"> days
-                </div>
+        `;
+    });
+    
+    html += `
             </div>
             
             <div class="expiration-note">
-                <p><strong>Note:</strong> Individual content items can override these defaults based on AI-calculated shelf life from analysis.</p>
+                <p><strong>Note:</strong> Set to 0 days to not automatically change expiration dates for that category.</p>
+                <p><strong>Meetings:</strong> Default is 14 days after creation based on file name date.</p>
+            </div>
+            
+            <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                <h5>Bulk Operations</h5>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="button primary" onclick="copyAllExpirationsFromCastus()">
+                        <i class="fas fa-download"></i> Copy All From Castus
+                    </button>
+                    <button class="button warning" onclick="copyAllExpirationsToCastus()">
+                        <i class="fas fa-upload"></i> Copy All To Castus
+                    </button>
+                </div>
             </div>
         </div>
     `;
+    
+    return html;
 }
 
 function generateRotationConfigHTML() {
@@ -4700,14 +4770,329 @@ function applyOptimalDelays(delays) {
     log('✅ Optimal delays applied! Remember to save your configuration.');
 }
 
-function saveExpirationConfig() {
-    scheduleConfig.CONTENT_EXPIRATION = {
-        id: parseInt(document.getElementById('id_expiration').value),
-        spots: parseInt(document.getElementById('spots_expiration').value),
-        short_form: parseInt(document.getElementById('short_form_expiration').value),
-        long_form: parseInt(document.getElementById('long_form_expiration').value)
-    };
+// Save expiration configuration
+async function saveExpirationConfig() {
+    console.log('=== saveExpirationConfig called ===');
+    const config = {};
+    
+    // Get values for each content type
+    // Try multiple selectors to find the inputs
+    let inputs = document.querySelectorAll('input[type="number"][data-content-type]');
+    if (inputs.length === 0) {
+        inputs = document.querySelectorAll('#configModalBody input[type="number"][data-content-type]');
+    }
+    if (inputs.length === 0) {
+        inputs = document.querySelectorAll('.expiration-config input[type="number"]');
+    }
+    console.log('Found inputs:', inputs.length);
+    
+    inputs.forEach(input => {
+        const contentType = input.dataset.contentType;
+        console.log(`Input - contentType: ${contentType}, value: ${input.value}`);
+        if (contentType) {
+            config[contentType] = parseInt(input.value) || 0;
+        }
+    });
+    
+    console.log('Config to save:', config);
+    
+    try {
+        const response = await fetch('/api/config/expiration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+        
+        const result = await response.json();
+        console.log('Save result:', result);
+        
+        if (result.status === 'success') {
+            // Update local config
+            scheduleConfig.CONTENT_EXPIRATION = config;
+            console.log('Updated scheduleConfig.CONTENT_EXPIRATION:', scheduleConfig.CONTENT_EXPIRATION);
+            showNotification('Expiration configuration saved successfully', 'success');
+            
+            // Close modal
+            closeConfigModal();
+        } else {
+            throw new Error(result.message || 'Failed to save configuration');
+        }
+    } catch (error) {
+        console.error('Failed to save expiration config:', error);
+        showNotification('Failed to save expiration configuration', 'error');
+    }
 }
+
+// Set expiration for a specific category
+async function setExpirationForCategory(contentType) {
+    // Try multiple selectors to find the input
+    let input = document.querySelector(`input[data-content-type="${contentType}"]`);
+    if (!input) {
+        input = document.querySelector(`#${contentType}_expiration`);
+    }
+    if (!input) {
+        input = document.querySelector(`#configModalBody input[data-content-type="${contentType}"]`);
+    }
+    
+    if (!input) {
+        showNotification('Could not find expiration input field', 'error');
+        return;
+    }
+    
+    const days = parseInt(input.value) || 0;
+    
+    if (days === 0) {
+        showNotification(`Please enter a value greater than 0 to set expirations for ${getCategoryName(contentType)}`, 'warning');
+        return;
+    }
+    
+    try {
+        showNotification(`Setting expiration dates for ${getCategoryName(contentType)}...`, 'info');
+        
+        const response = await fetch('/api/set-category-expiration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content_type: contentType,
+                expiration_days: days
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const count = result.updated_count || 0;
+            showNotification(`✅ Successfully updated expiration dates for ${count} ${getCategoryName(contentType)} items`, 'success');
+        } else {
+            showNotification(`Failed to set expiration dates: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error setting category expiration:', error);
+        showNotification('Failed to set expiration dates', 'error');
+    }
+}
+
+// Clear expiration for a specific category
+async function clearExpirationForCategory(contentType) {
+    // Try multiple selectors to find the input
+    let input = document.querySelector(`input[data-content-type="${contentType}"]`);
+    if (!input) {
+        input = document.querySelector(`#${contentType}_expiration`);
+    }
+    if (!input) {
+        input = document.querySelector(`#configModalBody input[data-content-type="${contentType}"]`);
+    }
+    
+    if (!input) {
+        showNotification('Could not find expiration input field', 'error');
+        return;
+    }
+    
+    try {
+        showNotification(`Clearing expiration dates for ${getCategoryName(contentType)}...`, 'info');
+        
+        const response = await fetch('/api/set-category-expiration', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content_type: contentType,
+                expiration_days: 0  // 0 means clear expirations
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const count = result.cleared_count || 0;
+            input.value = 0;
+            showNotification(`✅ Successfully cleared expiration dates for ${count} ${getCategoryName(contentType)} items`, 'success');
+        } else {
+            showNotification(`Failed to clear expiration dates: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error clearing category expiration:', error);
+        showNotification('Failed to clear expiration dates', 'error');
+    }
+}
+
+// Show server selection modal for copy operations
+function showServerSelectionModal(contentType, operation) {
+    const modalHtml = `
+        <div class="modal" id="serverSelectionModal">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>Select Server</h3>
+                    <button class="modal-close" onclick="closeServerSelectionModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <p>Select which server to ${operation === 'copyFromCastus' ? 'copy from' : 'copy to'} for ${getCategoryName(contentType)}:</p>
+                    <div class="server-selection-buttons" style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                        <button class="button primary" onclick="executeServerOperation('${contentType}', '${operation}', 'source')">
+                            <i class="fas fa-server"></i> Source Server
+                        </button>
+                        <button class="button primary" onclick="executeServerOperation('${contentType}', '${operation}', 'target')">
+                            <i class="fas fa-server"></i> Target Server
+                        </button>
+                        ${operation === 'copyToCastus' ? `
+                            <button class="button success" onclick="executeServerOperation('${contentType}', '${operation}', 'both')">
+                                <i class="fas fa-server"></i> Both Servers
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    document.getElementById('serverSelectionModal').classList.add('active');
+}
+
+// Close server selection modal
+function closeServerSelectionModal() {
+    const modal = document.getElementById('serverSelectionModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// Execute server operation
+async function executeServerOperation(contentType, operation, server) {
+    closeServerSelectionModal();
+    
+    if (operation === 'copyFromCastus') {
+        await copyExpirationFromCastus(contentType, server);
+    } else if (operation === 'copyToCastus') {
+        await copyExpirationToCastus(contentType, server);
+    }
+}
+
+// Copy expiration from Castus for a specific category
+async function copyExpirationFromCastus(contentType, server) {
+    try {
+        showNotification(`Copying expirations from Castus ${server} server for ${getCategoryName(contentType)}...`, 'info');
+        
+        const response = await fetch('/api/copy-expirations-from-castus', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content_type: contentType,
+                server: server
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            // Update the input field with the imported value
+            let input = document.querySelector(`input[data-content-type="${contentType}"]`);
+            if (!input) {
+                input = document.querySelector(`#${contentType}_expiration`);
+            }
+            if (input && result.expiration_days !== undefined) {
+                input.value = result.expiration_days;
+            }
+            showNotification(`Successfully copied expiration from Castus: ${result.expiration_days} days`, 'success');
+        } else {
+            throw new Error(result.message || 'Failed to copy from Castus');
+        }
+    } catch (error) {
+        console.error('Failed to copy expiration from Castus:', error);
+        showNotification('Failed to copy expiration from Castus', 'error');
+    }
+}
+
+// Copy expiration to Castus for a specific category
+async function copyExpirationToCastus(contentType, servers) {
+    try {
+        let input = document.querySelector(`input[data-content-type="${contentType}"]`);
+        if (!input) {
+            input = document.querySelector(`#${contentType}_expiration`);
+        }
+        if (!input) {
+            showNotification('Could not find expiration value', 'error');
+            return;
+        }
+        
+        const days = parseInt(input.value) || 0;
+        
+        showNotification(`Copying expiration (${days} days) to Castus ${servers} server(s) for ${getCategoryName(contentType)}...`, 'info');
+        
+        const response = await fetch('/api/copy-expirations-to-castus', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                content_type: contentType,
+                expiration_days: days,
+                servers: servers
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showNotification(`Successfully copied expiration to Castus ${servers} server(s)`, 'success');
+        } else {
+            throw new Error(result.message || 'Failed to copy to Castus');
+        }
+    } catch (error) {
+        console.error('Failed to copy expiration to Castus:', error);
+        showNotification('Failed to copy expiration to Castus', 'error');
+    }
+}
+
+// Get category name from content type code
+function getCategoryName(contentType) {
+    const names = {
+        'AN': 'Atlanta Now',
+        'ATLD': 'ATL Direct',
+        'BMP': 'Bumps',
+        'IMOW': 'IMOW',
+        'IM': 'Inclusion Months',
+        'IA': 'Inside Atlanta',
+        'LM': 'Legislative Minute',
+        'MTG': 'Meetings',
+        'MAF': 'Moving Atlanta Forward',
+        'PKG': 'Packages',
+        'PMO': 'Promos',
+        'PSA': 'PSAs',
+        'SZL': 'Sizzles',
+        'SPP': 'Special Projects',
+        'OTHER': 'Other'
+    };
+    return names[contentType] || contentType;
+}
+
+// Bulk operations for expiration settings
+function copyAllExpirationsFromCastus() {
+    showServerSelectionModal('ALL', 'copyFromCastus');
+}
+
+function copyAllExpirationsToCastus() {
+    showServerSelectionModal('ALL', 'copyToCastus');
+}
+
+// Export expiration functions to global scope
+window.setExpirationForCategory = setExpirationForCategory;
+window.clearExpirationForCategory = clearExpirationForCategory;
+window.showServerSelectionModal = showServerSelectionModal;
+window.closeServerSelectionModal = closeServerSelectionModal;
+window.executeServerOperation = executeServerOperation;
+window.copyExpirationFromCastus = copyExpirationFromCastus;
+window.copyExpirationToCastus = copyExpirationToCastus;
+window.copyAllExpirationsFromCastus = copyAllExpirationsFromCastus;
+window.copyAllExpirationsToCastus = copyAllExpirationsToCastus;
 
 function saveRotationConfig() {
     const rotationList = document.getElementById('rotationList');
@@ -12950,10 +13335,16 @@ async function startAutomation() {
         
         // Call the existing fillScheduleGaps function
         if (typeof fillScheduleGaps === 'function') {
+            log('Calling fillScheduleGaps function...', 'info');
             await fillScheduleGaps();
+            log('fillScheduleGaps function completed', 'info');
             
             // Get the updated template after filling gaps
             const filledTemplate = window.currentTemplate;
+            
+            if (!filledTemplate || !filledTemplate.items) {
+                throw new Error('Fill schedule gaps did not produce a valid template');
+            }
             
             // IMPORTANT: Preserve the defaults we set earlier
             if (filledTemplate && updatedTemplate.defaults) {
@@ -12963,7 +13354,7 @@ async function startAutomation() {
             updatedTemplate = filledTemplate;
             window.currentTemplate = updatedTemplate;
             
-            log('Schedule gaps filled successfully', 'success');
+            log(`Schedule gaps filled successfully. Template now has ${updatedTemplate.items.length} items`, 'success');
         } else {
             throw new Error('Fill schedule gaps function not available');
         }
@@ -12986,25 +13377,33 @@ async function startAutomation() {
         
         const exportedPaths = [];
         for (const server of exportServers) {
-            const exportResponse = await fetch('/api/export-template', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    template: updatedTemplate,
-                    export_server: server,
-                    export_path: exportPath,
-                    filename: filename,
-                    items: updatedTemplate.items || []
-                })
-            });
-            
-            const exportResult = await exportResponse.json();
-            if (exportResult.success) {
-                const fullPath = exportResult.file_path || `${exportPath}/${filename}`;
-                log(`Schedule exported to ${server} server: ${fullPath}`, 'success');
-                exportedPaths.push(`${server}: ${fullPath}`);
-            } else {
-                log(`Failed to export to ${server}: ${exportResult.message}`, 'error');
+            log(`Exporting to ${server} server...`, 'info');
+            try {
+                const exportResponse = await fetch('/api/export-template', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        template: updatedTemplate,
+                        export_server: server,
+                        export_path: exportPath,
+                        filename: filename,
+                        items: updatedTemplate.items || []
+                    })
+                });
+                
+                const exportResult = await exportResponse.json();
+                console.log(`Export result for ${server}:`, exportResult);
+                
+                if (exportResult.success) {
+                    const fullPath = exportResult.file_path || `${exportPath}/${filename}`;
+                    log(`✅ Schedule exported to ${server} server: ${fullPath}`, 'success');
+                    exportedPaths.push(`${server}: ${fullPath}`);
+                } else {
+                    log(`❌ Failed to export to ${server}: ${exportResult.message}`, 'error');
+                }
+            } catch (exportError) {
+                log(`❌ Error exporting to ${server}: ${exportError.message}`, 'error');
+                console.error(`Export error for ${server}:`, exportError);
             }
         }
         

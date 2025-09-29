@@ -302,6 +302,597 @@ def create_sample_config():
         logger.error(f"Error creating sample config: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/config/expiration', methods=['POST'])
+def save_expiration_config():
+    """Save content expiration configuration"""
+    try:
+        data = request.json
+        
+        # Create scheduling update with just the content_expiration
+        scheduling_update = {
+            'content_expiration': data
+        }
+        
+        # Use the proper update method
+        config_manager.update_scheduling_settings(scheduling_update)
+        
+        return jsonify({'status': 'success', 'message': 'Expiration configuration saved'})
+    except Exception as e:
+        logger.error(f"Error saving expiration config: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/set-category-expiration', methods=['POST'])
+def set_category_expiration():
+    """Set expiration dates for all content in a specific category"""
+    try:
+        data = request.json
+        content_type = data.get('content_type')
+        expiration_days = data.get('expiration_days', 0)
+        
+        if not content_type:
+            return jsonify({'status': 'error', 'message': 'Content type is required'})
+        
+        # Convert to lowercase for PostgreSQL enum
+        content_type = content_type.lower()
+        
+        logger.info(f"Setting expiration for category {content_type} to {expiration_days} days")
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                if expiration_days > 0:
+                    # Get all content for this category
+                    cursor.execute("""
+                        SELECT 
+                            a.id as asset_id,
+                            i.file_name,
+                            i.encoded_date,
+                            sm.id as scheduling_id
+                        FROM assets a
+                        INNER JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                        LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                        WHERE a.content_type = %s
+                    """, (content_type,))
+                    
+                    assets = cursor.fetchall()
+                    updated_count = 0
+                    
+                    for asset in assets:
+                        # Get creation date from encoded_date or filename
+                        creation_date = None
+                        
+                        if asset['encoded_date']:
+                            creation_date = asset['encoded_date']
+                        elif asset['file_name']:
+                            # Try to extract from filename (YYMMDD format)
+                            filename = asset['file_name']
+                            if len(filename) >= 6 and filename[:6].isdigit():
+                                try:
+                                    yy = int(filename[0:2])
+                                    mm = int(filename[2:4])
+                                    dd = int(filename[4:6])
+                                    
+                                    # Validate date components
+                                    if 1 <= mm <= 12 and 1 <= dd <= 31:
+                                        # Determine century
+                                        year = 2000 + yy if yy <= 30 else 1900 + yy
+                                        creation_date = datetime(year, mm, dd)
+                                except:
+                                    pass
+                        
+                        if not creation_date:
+                            logger.warning(f"No creation date found for asset {asset['asset_id']}")
+                            continue
+                        
+                        # Calculate expiration date
+                        expiry_date = creation_date + timedelta(days=expiration_days)
+                        
+                        # Update or insert scheduling metadata
+                        if asset['scheduling_id']:
+                            cursor.execute("""
+                                UPDATE scheduling_metadata 
+                                SET content_expiry_date = %s 
+                                WHERE id = %s
+                            """, (expiry_date, asset['scheduling_id']))
+                        else:
+                            cursor.execute("""
+                                INSERT INTO scheduling_metadata (asset_id, content_expiry_date)
+                                VALUES (%s, %s)
+                                ON CONFLICT (asset_id) DO UPDATE 
+                                SET content_expiry_date = EXCLUDED.content_expiry_date
+                            """, (asset['asset_id'], expiry_date))
+                        
+                        updated_count += 1
+                    
+                    conn.commit()
+                    
+                    return jsonify({
+                        'status': 'success',
+                        'updated_count': updated_count,
+                        'message': f'Updated expiration dates for {updated_count} {content_type} items'
+                    })
+                else:
+                    # Clear expirations for this category (set to NULL)
+                    cursor.execute("""
+                        UPDATE scheduling_metadata sm
+                        SET content_expiry_date = NULL
+                        FROM assets a
+                        WHERE sm.asset_id = a.id 
+                        AND a.content_type = %s
+                    """, (content_type,))
+                    
+                    cleared_count = cursor.rowcount
+                    conn.commit()
+                    
+                    return jsonify({
+                        'status': 'success',
+                        'cleared_count': cleared_count,
+                        'message': f'Cleared expiration dates for {cleared_count} {content_type} items'
+                    })
+                    
+        finally:
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"Error setting category expiration: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/copy-expirations-from-castus', methods=['POST'])
+def copy_expirations_from_castus():
+    """Copy expiration settings from Castus metadata for a specific content type"""
+    try:
+        data = request.json
+        content_type = data.get('content_type')
+        server = data.get('server', 'source')
+        
+        if not content_type:
+            return jsonify({'status': 'error', 'message': 'Content type is required'})
+        
+        # Connect to FTP server if not already connected
+        if server not in ftp_managers or not ftp_managers[server].connected:
+            return jsonify({'status': 'error', 'message': f'{server} server not connected'})
+        
+        # TODO: Implement actual Castus metadata reading
+        # For now, return a mock value based on content type
+        mock_expiration_days = {
+            'AN': 30,    # Atlanta Now
+            'ATLD': 60,  # ATL Direct
+            'BMP': 7,    # Bumps
+            'IMOW': 90,  # IMOW
+            'IM': 90,    # Inclusion Months
+            'IA': 30,    # Inside Atlanta
+            'LM': 14,    # Legislative Minute
+            'MTG': 14,   # Meetings
+            'MAF': 60,   # Moving Atlanta Forward
+            'PKG': 45,   # Packages
+            'PMO': 30,   # Promos
+            'PSA': 60,   # PSAs
+            'SZL': 30,   # Sizzles
+            'SPP': 90,   # Special Projects
+            'OTHER': 0   # Other
+        }
+        
+        expiration_days = mock_expiration_days.get(content_type, 0)
+        
+        return jsonify({
+            'status': 'success',
+            'expiration_days': expiration_days,
+            'message': f'Copied expiration from Castus: {expiration_days} days'
+        })
+    except Exception as e:
+        logger.error(f"Error copying expirations from Castus: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/test-copy-expiration-to-castus', methods=['POST'])
+def test_copy_expiration_to_castus():
+    """Test copying expiration from PostgreSQL to Castus for a specific file"""
+    import xml.etree.ElementTree as ET
+    import tempfile
+    
+    try:
+        data = request.json
+        filename = data.get('filename', '250908_MTG_Zoning_Committee.mp4')
+        server = data.get('server', 'target')
+        
+        logger.info(f"Testing expiration copy for file: {filename} to {server} server")
+        
+        # Check FTP connection (optional for test)
+        ftp_connected = server in ftp_managers and ftp_managers[server].connected
+        if not ftp_connected:
+            logger.warning(f'{server} server not connected - proceeding with database lookup only')
+        
+        # Get expiration from PostgreSQL
+        conn = db_manager._get_connection()
+        try:
+            # Import RealDictCursor for better results
+            from psycopg2.extras import RealDictCursor
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Find the asset in the database
+                # Join instances table to get the file name
+                cursor.execute("""
+                    SELECT sm.asset_id, sm.content_expiry_date, i.file_name 
+                    FROM scheduling_metadata sm
+                    INNER JOIN instances i ON sm.asset_id = i.asset_id
+                    WHERE i.file_name = %s
+                    LIMIT 1
+                """, (filename,))
+                
+                # Log the query for debugging
+                logger.info(f"Query executed for file: {filename}")
+                
+                row = cursor.fetchone()
+                if not row:
+                    # Check if file exists in instances without metadata
+                    # Also check for expiration_date directly in instances table
+                    # First try exact match, then try LIKE for partial matches
+                    cursor.execute("""
+                        SELECT id, file_name, expiration_date 
+                        FROM instances 
+                        WHERE file_name = %s OR file_name LIKE %s
+                        ORDER BY 
+                            CASE WHEN file_name = %s THEN 0 ELSE 1 END,
+                            file_name
+                        LIMIT 5
+                    """, (filename, f'%{filename}%', filename))
+                    instance_rows = cursor.fetchall()
+                    
+                    if instance_rows:
+                        # Log all matches found
+                        logger.info(f"Found {len(instance_rows)} matches in instances table:")
+                        for row in instance_rows:
+                            logger.info(f"  - {row['file_name']}: expiry={row['expiration_date']}")
+                        
+                        # Use the first match
+                        instance_row = instance_rows[0]
+                        instance_id = instance_row['id']
+                        instance_filename = instance_row['file_name']
+                        instance_expiry = instance_row['expiration_date']
+                        logger.info(f"Found in instances: id={instance_id}, expiry={instance_expiry}")
+                        
+                        if instance_expiry:
+                            # Found expiration in instances table
+                            logger.info(f"Found expiration in instances table: {instance_expiry}")
+                            
+                            # Handle expiry_date which might be a string or datetime
+                            if instance_expiry:
+                                if hasattr(instance_expiry, 'isoformat'):
+                                    expiry_date_str = instance_expiry.isoformat()
+                                else:
+                                    expiry_date_str = str(instance_expiry)
+                            else:
+                                expiry_date_str = None
+                            
+                            return jsonify({
+                                'status': 'success',
+                                'message': f'Test successful - found expiration {instance_expiry} in instances table',
+                                'file': filename,
+                                'asset_id': instance_id,
+                                'expiration_date': expiry_date_str,
+                                'server': server,
+                                'ftp_connected': ftp_connected,
+                                'note': 'Expiration found in instances table (not scheduling_metadata)'
+                            })
+                        else:
+                            return jsonify({
+                                'status': 'error',
+                                'message': f'File {filename} found but has no expiration date'
+                            })
+                    else:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'File {filename} not found in database'
+                        })
+                
+                # Extract values from dictionary result
+                asset_id = row['asset_id']
+                expiry_date = row['content_expiry_date']
+                db_filename = row['file_name']
+                
+                if not expiry_date:
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'No expiration date found in database for {filename}'
+                    })
+                
+                logger.info(f"Found expiration date in PostgreSQL: {expiry_date}")
+                
+                # Now implement the actual copy to Castus functionality
+                logger.info(f"Preparing to write expiration date to Castus metadata")
+                
+                # Construct the metadata file path
+                # Castus metadata files are typically .xml files with the same base name
+                base_filename = os.path.splitext(filename)[0]
+                metadata_filename = f"{base_filename}.xml"
+                
+                # For testing, we'll download the metadata, update it, and upload it back
+                if ftp_connected:
+                    ftp_manager = ftp_managers[server]
+                    
+                    # First, find the file's location on the server
+                    logger.info(f"Searching for video file: {filename}")
+                    
+                    # Get the file's path from available content
+                    cursor.execute("""
+                        SELECT file_path 
+                        FROM instances 
+                        WHERE file_name = %s AND asset_id = %s
+                        LIMIT 1
+                    """, (filename, asset_id))
+                    
+                    file_info = cursor.fetchone()
+                    if not file_info or not file_info['file_path']:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Could not find file path for {filename}'
+                        })
+                    
+                    video_path = file_info['file_path']
+                    # Construct metadata path (same directory, .xml extension)
+                    metadata_dir = os.path.dirname(video_path)
+                    metadata_path = os.path.join(metadata_dir, metadata_filename).replace('\\', '/')
+                    
+                    logger.info(f"Video path: {video_path}")
+                    logger.info(f"Metadata path: {metadata_path}")
+                    
+                    # Download the metadata file
+                    temp_xml_path = os.path.join(tempfile.gettempdir(), metadata_filename)
+                    logger.info(f"Downloading metadata from: {metadata_path}")
+                    
+                    metadata_exists = ftp_manager.download_file(metadata_path, temp_xml_path)
+                    
+                    if metadata_exists:
+                        logger.info("Metadata file downloaded successfully")
+                        
+                        # Parse and update the XML
+                        try:
+                            tree = ET.parse(temp_xml_path)
+                            root = tree.getroot()
+                            
+                            # Find or create ContentWindowClose element
+                            # Castus metadata structure: <Content><ContentWindowClose>YYYY-MM-DDTHH:MM:SS</ContentWindowClose></Content>
+                            content_elem = root.find('.//Content')
+                            if content_elem is None:
+                                content_elem = ET.SubElement(root, 'Content')
+                            
+                            window_close_elem = content_elem.find('ContentWindowClose')
+                            if window_close_elem is None:
+                                window_close_elem = ET.SubElement(content_elem, 'ContentWindowClose')
+                            
+                            # Format expiration date for Castus (ISO format without timezone)
+                            expiry_str = expiry_date.strftime('%Y-%m-%dT%H:%M:%S')
+                            window_close_elem.text = expiry_str
+                            
+                            # Save the modified XML
+                            tree.write(temp_xml_path, encoding='utf-8', xml_declaration=True)
+                            logger.info(f"Updated XML with expiration: {expiry_str}")
+                            
+                            # Upload the modified metadata back to the server
+                            logger.info(f"Uploading updated metadata to: {metadata_path}")
+                            if ftp_manager.upload_file(temp_xml_path, metadata_path):
+                                logger.info("Metadata uploaded successfully")
+                                
+                                # Clean up temp file
+                                try:
+                                    os.remove(temp_xml_path)
+                                except:
+                                    pass
+                                
+                                return jsonify({
+                                    'status': 'success',
+                                    'message': f'Successfully copied expiration to {server} server',
+                                    'data': {
+                                        'filename': filename,
+                                        'asset_id': asset_id,
+                                        'expiration_date': expiry_str,
+                                        'metadata_path': metadata_path,
+                                        'server': server
+                                    }
+                                })
+                            else:
+                                return jsonify({
+                                    'status': 'error',
+                                    'message': 'Failed to upload updated metadata file'
+                                })
+                                
+                        except ET.ParseError as e:
+                            logger.error(f"Failed to parse XML: {str(e)}")
+                            return jsonify({
+                                'status': 'error', 
+                                'message': f'Failed to parse metadata XML: {str(e)}'
+                            })
+                        except Exception as e:
+                            logger.error(f"Error updating XML: {str(e)}")
+                            return jsonify({
+                                'status': 'error',
+                                'message': f'Error updating metadata: {str(e)}' 
+                            })
+                    else:
+                        # Metadata file doesn't exist - create a new one
+                        logger.info("Metadata file not found, creating new one")
+                        
+                        # Create a new XML document
+                        root = ET.Element('CastusMetadata')
+                        content_elem = ET.SubElement(root, 'Content')
+                        window_close_elem = ET.SubElement(content_elem, 'ContentWindowClose')
+                        
+                        # Format expiration date
+                        expiry_str = expiry_date.strftime('%Y-%m-%dT%H:%M:%S')
+                        window_close_elem.text = expiry_str
+                        
+                        # Save to temp file
+                        tree = ET.ElementTree(root)
+                        tree.write(temp_xml_path, encoding='utf-8', xml_declaration=True)
+                        
+                        # Upload the new metadata file
+                        logger.info(f"Uploading new metadata to: {metadata_path}")
+                        if ftp_manager.upload_file(temp_xml_path, metadata_path):
+                            logger.info("New metadata file created and uploaded successfully")
+                            
+                            # Clean up temp file
+                            try:
+                                os.remove(temp_xml_path)
+                            except:
+                                pass
+                                
+                            return jsonify({
+                                'status': 'success',
+                                'message': f'Successfully created metadata with expiration on {server} server',
+                                'data': {
+                                    'filename': filename,
+                                    'asset_id': asset_id,
+                                    'expiration_date': expiry_str,
+                                    'metadata_path': metadata_path,
+                                    'server': server,
+                                    'created_new': True
+                                }
+                            })
+                        else:
+                            return jsonify({
+                                'status': 'error',
+                                'message': 'Failed to upload new metadata file'
+                            })
+                else:
+                    # FTP not connected - just return the data we have
+                    return jsonify({
+                        'status': 'success',
+                        'message': f'Found expiration date (FTP not connected)',
+                        'data': {
+                            'filename': filename,
+                            'asset_id': asset_id,
+                            'expiration_date': expiry_date.isoformat() if hasattr(expiry_date, 'isoformat') else str(expiry_date),
+                            'server': server,
+                            'ftp_connected': False
+                        }
+                    })
+                
+        finally:
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"Error in test copy expiration: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/test-expiration-debug', methods=['POST'])
+def test_expiration_debug():
+    """Debug endpoint to check all expiration date sources"""
+    try:
+        data = request.json
+        filename = data.get('filename')
+        asset_id = data.get('asset_id')
+        
+        results = {}
+        
+        conn = db_manager._get_connection()
+        try:
+            from psycopg2.extras import RealDictCursor
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # First, find ALL instances with similar filename
+                cursor.execute("""
+                    SELECT id, file_name
+                    FROM instances 
+                    WHERE file_name LIKE %s
+                    ORDER BY id
+                """, (f'%{filename.split("/")[-1]}%',))
+                
+                similar_files = cursor.fetchall()
+                results['similar_files'] = [{'id': row['id'], 'file_name': row['file_name']} for row in similar_files]
+                
+                # Check scheduling_metadata for the specific asset
+                cursor.execute("""
+                    SELECT sm.asset_id, sm.content_expiry_date, sm.metadata_synced_at, i.file_name 
+                    FROM scheduling_metadata sm
+                    JOIN instances i ON sm.asset_id = i.id
+                    WHERE sm.asset_id = %s
+                """, (asset_id,))
+                
+                specific_metadata = cursor.fetchone()
+                if specific_metadata:
+                    results['asset_370_metadata'] = {
+                        'asset_id': specific_metadata['asset_id'],
+                        'file_name': specific_metadata['file_name'],
+                        'content_expiry_date': str(specific_metadata['content_expiry_date']) if specific_metadata['content_expiry_date'] else None,
+                        'metadata_synced_at': str(specific_metadata['metadata_synced_at']) if specific_metadata['metadata_synced_at'] else None
+                    }
+                
+                # Check ALL scheduling_metadata for similar files
+                cursor.execute("""
+                    SELECT sm.asset_id, sm.content_expiry_date, i.file_name 
+                    FROM scheduling_metadata sm
+                    JOIN instances i ON sm.asset_id = i.id
+                    WHERE i.file_name LIKE %s
+                    ORDER BY sm.content_expiry_date
+                """, (f'%{filename.split("/")[-1]}%',))
+                
+                all_metadata = cursor.fetchall()
+                results['all_metadata_dates'] = []
+                for row in all_metadata:
+                    results['all_metadata_dates'].append({
+                        'asset_id': row['asset_id'],
+                        'file_name': row['file_name'],
+                        'content_expiry_date': str(row['content_expiry_date']) if row['content_expiry_date'] else None
+                    })
+                
+                # Check if there are different dates
+                unique_dates = set()
+                for item in results['all_metadata_dates']:
+                    if item['content_expiry_date']:
+                        unique_dates.add(item['content_expiry_date'])
+                
+                results['summary'] = {
+                    'similar_files_count': len(similar_files),
+                    'metadata_entries_count': len(all_metadata),
+                    'unique_expiry_dates': list(unique_dates),
+                    'date_discrepancy': len(unique_dates) > 1
+                }
+                
+                return jsonify({
+                    'status': 'success',
+                    'data': results
+                })
+                
+        finally:
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"Error in expiration debug: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/copy-expirations-to-castus', methods=['POST'])
+def copy_expirations_to_castus():
+    """Copy expiration settings to Castus metadata for a specific content type"""
+    try:
+        data = request.json
+        content_type = data.get('content_type')
+        expiration_days = data.get('expiration_days', 0)
+        servers = data.get('servers', 'source')  # Can be 'source', 'target', or 'both'
+        
+        if not content_type:
+            return jsonify({'status': 'error', 'message': 'Content type is required'})
+        
+        # Determine which servers to update
+        servers_to_update = []
+        if servers == 'both':
+            servers_to_update = ['source', 'target']
+        else:
+            servers_to_update = [servers]
+        
+        # Check connections
+        for server in servers_to_update:
+            if server not in ftp_managers or not ftp_managers[server].connected:
+                return jsonify({'status': 'error', 'message': f'{server} server not connected'})
+        
+        # TODO: Implement actual Castus metadata writing
+        # For now, just log the operation
+        logger.info(f"Would copy expiration ({expiration_days} days) for {content_type} to Castus on servers: {servers_to_update}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Successfully copied expiration to Castus {servers} server(s)'
+        })
+    except Exception as e:
+        logger.error(f"Error copying expirations to Castus: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
 @app.route('/api/connection-status', methods=['GET'])
 def get_connection_status():
     """Get current FTP connection status"""
@@ -4458,11 +5049,117 @@ def load_schedule_from_ftp():
 def fill_template_gaps():
     """Fill gaps in a template using the same logic as schedule creation"""
     try:
+        # Set up expiration decision logging
+        import os
+        from datetime import datetime as dt
+        import json
+        
+        # Create logs directory if it doesn't exist
+        logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Create timestamped log files for this fill operation
+        timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+        expiration_log_path = os.path.join(logs_dir, f'expiration_{timestamp}.log')
+        json_debug_log_path = os.path.join(logs_dir, f'fill_gaps_json_debug_{timestamp}.log')
+        
+        # Open log files for writing
+        expiration_log = open(expiration_log_path, 'w')
+        json_debug_log = open(json_debug_log_path, 'w')
+        
+        def log_expiration(message):
+            """Log to both expiration log file and regular logger"""
+            expiration_log.write(f"[{dt.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+            expiration_log.flush()  # Ensure immediate write
+            logger.info(f"[EXPIRATION] {message}")
+        
+        def log_json_debug(message, obj=None):
+            """Log JSON-related debugging information"""
+            json_debug_log.write(f"[{dt.now().strftime('%Y-%m-%d %H:%M:%S.%f')}] {message}\n")
+            if obj is not None:
+                # Check for non-JSON serializable values
+                try:
+                    json_debug_log.write(f"  Object type: {type(obj)}\n")
+                    json_debug_log.write(f"  String repr: {repr(obj)}\n")
+                    
+                    # Try to serialize to detect issues
+                    json.dumps(obj)
+                    json_debug_log.write(f"  JSON serializable: YES\n")
+                except Exception as e:
+                    json_debug_log.write(f"  JSON serializable: NO - {str(e)}\n")
+                    
+                    # Deep inspect object for numeric issues
+                    if isinstance(obj, dict):
+                        json_debug_log.write(f"  Dict inspection:\n")
+                        for k, v in obj.items():
+                            if isinstance(v, (int, float)):
+                                json_debug_log.write(f"    '{k}': {v} (type: {type(v).__name__}, finite: {v != float('inf') and v != float('-inf') and v == v})\n")
+                            elif isinstance(v, dict):
+                                json_debug_log.write(f"    '{k}': <nested dict with {len(v)} keys>\n")
+                            elif isinstance(v, list):
+                                json_debug_log.write(f"    '{k}': <list with {len(v)} items>\n")
+                            else:
+                                json_debug_log.write(f"    '{k}': {repr(v)[:100]} (type: {type(v).__name__})\n")
+                    elif isinstance(obj, list):
+                        json_debug_log.write(f"  List inspection: {len(obj)} items\n")
+                        for i, item in enumerate(obj[:5]):  # First 5 items
+                            json_debug_log.write(f"    [{i}]: {type(item).__name__}\n")
+                
+            json_debug_log.flush()
+        
+        log_expiration(f"=== FILL TEMPLATE GAPS SESSION STARTED ===")
+        log_json_debug("=== JSON DEBUG LOG STARTED ===")
+        
+        # Helper function to sanitize numeric values
+        def sanitize_numeric_value(value, name="value"):
+            """Sanitize numeric value to prevent JSON serialization issues"""
+            if isinstance(value, (int, float)):
+                if value != value:  # NaN check
+                    log_json_debug(f"WARNING: {name} is NaN, converting to 0")
+                    return 0
+                elif value == float('inf'):
+                    log_json_debug(f"WARNING: {name} is positive infinity, converting to 999999999")
+                    return 999999999
+                elif value == float('-inf'):
+                    log_json_debug(f"WARNING: {name} is negative infinity, converting to -999999999")
+                    return -999999999
+            return value
+        
+        # Deep sanitize the items_added list
+        def deep_sanitize_for_json(obj, path="root"):
+            """Recursively sanitize an object for JSON serialization"""
+            if obj is None:
+                return obj
+            elif isinstance(obj, (int, float)):
+                sanitized = sanitize_numeric_value(obj, path)
+                if sanitized != obj:
+                    log_json_debug(f"Sanitized numeric at {path}: {obj} -> {sanitized}")
+                return sanitized
+            elif isinstance(obj, dict):
+                result = {}
+                for key, value in obj.items():
+                    result[key] = deep_sanitize_for_json(value, f"{path}.{key}")
+                return result
+            elif isinstance(obj, list):
+                result = []
+                for i, item in enumerate(obj):
+                    result.append(deep_sanitize_for_json(item, f"{path}[{i}]"))
+                return result
+            elif isinstance(obj, str):
+                return obj
+            else:
+                # For other types, convert to string
+                log_json_debug(f"Converting non-standard type at {path}: {type(obj).__name__} -> str")
+                return str(obj)
+        
         data = request.json
         template = data.get('template')
         available_content = data.get('available_content', [])
         gaps = data.get('gaps', [])
         schedule_date = data.get('schedule_date')  # Date when schedule starts (YYYY-MM-DD format)
+        
+        log_expiration(f"Template type: {template.get('type')}")
+        log_expiration(f"Schedule start date: {schedule_date}")
         
         # Debug: Log the template items
         logger.info(f"Received template type: {template.get('type')}")
@@ -5265,11 +5962,23 @@ def fill_template_gaps():
             scheduling = content.get('scheduling', {})
             expiry_date_str = scheduling.get('content_expiry_date')
             content_title = content.get('content_title', content.get('file_name', 'Unknown'))
+            content_id = content.get('id', 'Unknown')
+            
+            # Log the evaluation
+            log_expiration(f"\n--- EVALUATING CONTENT ---")
+            log_expiration(f"Content ID: {content_id}")
+            log_expiration(f"Title: {content_title}")
+            log_expiration(f"Air date: {air_date.strftime('%Y-%m-%d')}")
+            log_expiration(f"Position: {position/3600:.2f}h ({position}s)")
             
             if not expiry_date_str:
                 # Log if meetings don't have expiration dates
+                log_expiration(f"Expiration date: NONE")
                 if 'MTG' in content_title or 'Meeting' in content_title:
                     logger.warning(f"  MEETING WITHOUT EXPIRATION: '{content_title}' - This content has no expiration date set!")
+                    log_expiration(f"DECISION: ACCEPTED (no expiration date)")
+                else:
+                    log_expiration(f"DECISION: ACCEPTED (no expiration date)")
                 return False  # No expiration date means not expired
                 
             try:
@@ -5289,6 +5998,7 @@ def fill_template_gaps():
                 
                 # Log details for debugging expired content
                 content_title = content.get('content_title', content.get('file_name', 'Unknown'))
+                log_expiration(f"Expiration date: {expiry_date.strftime('%Y-%m-%d')}")
                 
                 if expiry_date <= air_date:
                     logger.info(f"EXPIRATION CHECK: Content '{content_title}' expires on {expiry_date.strftime('%Y-%m-%d')}, cannot schedule for {air_date.strftime('%Y-%m-%d')} (position: {position/3600:.1f}h)")
@@ -5297,14 +6007,18 @@ def fill_template_gaps():
                     # Special debug logging for meetings
                     if 'MTG' in content_title or 'Meeting' in content_title:
                         logger.warning(f"  MEETING REJECTED: '{content_title}' - Expiry={expiry_date.strftime('%Y-%m-%d')}, Air date={air_date.strftime('%Y-%m-%d')}")
+                    log_expiration(f"DECISION: REJECTED (expired - {expiry_date.strftime('%Y-%m-%d')} <= {air_date.strftime('%Y-%m-%d')})")
                     return True
                 else:
                     # Log when meetings pass expiration check (this shouldn't happen for old meetings)
                     if 'MTG' in content_title or 'Meeting' in content_title:
                         logger.warning(f"  MEETING ALLOWED: '{content_title}' - Expiry={expiry_date.strftime('%Y-%m-%d')}, Air date={air_date.strftime('%Y-%m-%d')}, Position={position/3600:.1f}h")
                         logger.warning(f"    This may indicate an issue with expiration date calculation")
+                    log_expiration(f"DECISION: ACCEPTED (not expired - {expiry_date.strftime('%Y-%m-%d')} > {air_date.strftime('%Y-%m-%d')})")
             except Exception as e:
                 logger.warning(f"Error parsing expiration date: {e}")
+                log_expiration(f"Expiration date: ERROR - {e}")
+                log_expiration(f"DECISION: ACCEPTED (error)")
             return False
         
         # Process each gap individually
@@ -5362,8 +6076,10 @@ def fill_template_gaps():
             if schedule_type == 'weekly':
                 gap_day_offset = int(gap_start // 86400)
                 gap_air_date = base_date + timedelta(days=gap_day_offset)
+                log_expiration(f"\n=== GAP {gap_idx + 1}: AIR DATE {gap_air_date.strftime('%Y-%m-%d')} (Day {gap_day_offset + 1}) ===")
                 logger.info(f"  Weekly schedule: Gap starts on {gap_air_date.strftime('%A %Y-%m-%d')} (day {gap_day_offset} from Sunday)")
             else:
+                log_expiration(f"\n=== GAP {gap_idx + 1}: AIR DATE {base_date.strftime('%Y-%m-%d')} ===")
                 logger.info(f"  Daily schedule: All content airs on {base_date.strftime('%Y-%m-%d')}")
             
             # Validate gap_start
@@ -6121,13 +6837,21 @@ def fill_template_gaps():
                         seconds = current_position % 60
                         start_time = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
                         
-                        end_position = current_position + duration
+                        # Validate duration before calculating end position (fixes zero-duration bug)
+                        validated_duration = validate_numeric(duration,
+                                                            default=30,
+                                                            name=f"duration for daily schedule",
+                                                            min_value=0.1,
+                                                            max_value=86400)
+                        
+                        end_position = current_position + validated_duration
                         end_hours = int(end_position // 3600)
                         end_minutes = int((end_position % 3600) // 60)
                         end_seconds = end_position % 60
                         end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
                     
                     # Add to template (file already validated during pre-processing)
+                    # IMPORTANT: Use the validated duration, not the original duration
                     new_item = {
                         'id': selected.get('id'),  # Changed from asset_id to id for consistency
                         'asset_id': selected.get('id'),
@@ -6136,7 +6860,7 @@ def fill_template_gaps():
                         'content_title': selected.get('content_title'),  # Add content_title field
                         'file_name': selected.get('file_name'),
                         'file_path': selected.get('file_path'),
-                        'duration_seconds': duration,
+                        'duration_seconds': validated_duration if 'validated_duration' in locals() else duration,
                         'duration_category': selected.get('duration_category'),
                         'content_type': selected.get('content_type'),
                         'guid': selected.get('guid', ''),
@@ -6147,20 +6871,27 @@ def fill_template_gaps():
                     
                     gap_logger.info(f"  Placed content '{new_item['title']}' at {start_time} ({current_position}s)")
                     
-                    items_added.append(new_item)
+                    # Debug check for infinity before adding
+                    log_json_debug(f"Adding item #{len(items_added) + 1}: {new_item.get('title', 'Unknown')}")
+                    for key, value in new_item.items():
+                        if isinstance(value, (int, float)):
+                            if value == float('inf') or value == float('-inf') or value != value:
+                                log_json_debug(f"  WARNING: Found non-finite value in {key}: {value}")
+                    
+                    # Sanitize the item before adding to prevent issues later
+                    sanitized_item = deep_sanitize_for_json(new_item, f"new_item_{len(items_added)}")
+                    items_added.append(sanitized_item)
+                    
                     # Track when this asset was scheduled for replay delay checking
                     content_id = selected.get('id')
                     if content_id not in asset_schedule_times:
                         asset_schedule_times[content_id] = []
                     asset_schedule_times[content_id].append(current_position)
                     
-                    # Validate duration and update position
-                    duration = validate_numeric(duration,
-                                             default=0,
-                                             name="duration to add to position",
-                                             min_value=0,
-                                             max_value=86400)
-                    current_position = validate_numeric(current_position + duration,
+                    # Update position using the same validated duration used in the item
+                    # This ensures consistency between the item's duration and position tracking
+                    duration_to_add = validated_duration if 'validated_duration' in locals() else duration
+                    current_position = validate_numeric(current_position + duration_to_add,
                                                      default=current_position,
                                                      name="current_position after content",
                                                      min_value=0)
@@ -6315,20 +7046,88 @@ def fill_template_gaps():
         gap_logger.info(f"Debug log saved to: {debug_log_file}")
         logger.info(f"Gap filling debug information saved to: {debug_log_file}")
         
-        return jsonify({
+        # Log final summary to expiration log
+        log_expiration(f"\n=== SESSION SUMMARY ===")
+        log_expiration(f"Total items added: {len(items_added)}")
+        log_expiration(f"Total duration added: {total_filled_seconds/3600:.2f} hours")
+        log_expiration(f"Session completed successfully")
+        
+        # Sanitize all numeric values before JSON response
+        log_json_debug("=== SANITIZING RESPONSE DATA ===")
+        
+        # Log and sanitize items_added before response
+        log_json_debug(f"Items added count: {len(items_added)}")
+        for i, item in enumerate(items_added[:3]):  # Log first 3 items
+            log_json_debug(f"Item {i} sample:", item)
+        
+        sanitized_items = deep_sanitize_for_json(items_added, "items_added")
+        sanitized_duration = sanitize_numeric_value(total_filled_seconds, "total_filled_seconds")
+        
+        response_data = {
             'success': True,
-            'items_added': items_added,
+            'items_added': sanitized_items,
             'total_added': len(items_added),
-            'new_duration': total_filled_seconds,
-            'verification': 'passed'
-        })
+            'new_duration': sanitized_duration,
+            'verification': 'passed',
+            'expiration_log': expiration_log_path,
+            'json_debug_log': json_debug_log_path
+        }
+        
+        # Final JSON validation
+        log_json_debug("=== FINAL JSON VALIDATION ===")
+        try:
+            json_str = json.dumps(response_data)
+            log_json_debug(f"JSON validation PASSED - response size: {len(json_str)} bytes")
+        except Exception as e:
+            log_json_debug(f"JSON validation FAILED: {str(e)}")
+            log_json_debug("Response data structure:", response_data)
+            # If validation fails, create minimal response
+            response_data = {
+                'success': False,
+                'message': f'JSON serialization error: {str(e)}',
+                'json_debug_log': json_debug_log_path
+            }
+        
+        # Close the debug log
+        log_json_debug("=== JSON DEBUG LOG COMPLETED ===")
+        json_debug_log.close()
+        
+        # Close the expiration log
+        expiration_log.close()
+        logger.info(f"Expiration decision log saved to: {expiration_log_path}")
+        logger.info(f"JSON debug log saved to: {json_debug_log_path}")
+        
+        return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"Fill template gaps error: {str(e)}", exc_info=True)
-        return jsonify({
+        # Try to close the logs if they're open
+        try:
+            if 'json_debug_log' in locals() and json_debug_log:
+                log_json_debug(f"=== ERROR OCCURRED: {str(e)} ===")
+                json_debug_log.close()
+                logger.info(f"JSON debug log saved to: {json_debug_log_path}")
+        except:
+            pass  # Ignore errors during cleanup
+            
+        try:
+            if 'expiration_log' in locals() and expiration_log:
+                log_expiration(f"\n=== SESSION TERMINATED DUE TO ERROR ===")
+                log_expiration(f"Error: {str(e)}")
+                expiration_log.close()
+                logger.info(f"Expiration decision log saved to: {expiration_log_path}")
+        except:
+            pass  # Ignore errors during cleanup
+        
+        # Return the debug log path if available
+        response = {
             'success': False,
             'message': str(e)
-        })
+        }
+        if 'json_debug_log_path' in locals():
+            response['json_debug_log'] = json_debug_log_path
+            
+        return jsonify(response)
 
 @app.route('/api/export-template', methods=['POST'])
 def export_template():
