@@ -500,6 +500,10 @@ class PostgreSQLScheduler:
             duration_categories = ['id', 'spots', 'short_form', 'long_form']
             is_duration_category = duration_category in duration_categories
             
+            # Handle uppercase content type codes from frontend (BMP -> bmp)
+            if not is_duration_category:
+                duration_category = duration_category.lower()
+            
             # Build query using only positional parameters
             query_parts = ["""
                 SELECT 

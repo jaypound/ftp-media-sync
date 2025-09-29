@@ -6601,6 +6601,10 @@ def fill_template_gaps():
                 # Get next duration category from rotation
                 duration_category = scheduler._get_next_duration_category()
                 
+                # Determine if this is a duration category or content type
+                duration_categories = ['id', 'spots', 'short_form', 'long_form']
+                is_duration_category = duration_category in duration_categories
+                
                 # Check if we should skip long-form content after 10 PM
                 current_hour = (current_position % 86400) / 3600
                 if current_hour >= 22 and duration_category == 'long_form':
@@ -6634,10 +6638,17 @@ def fill_template_gaps():
                 
                 for content_id, content in content_by_id.items():
                     
-                    # Check duration category
-                    if content.get('duration_category') != duration_category:
-                        wrong_category += 1
-                        continue
+                    # Check category - either duration_category or content_type
+                    if is_duration_category:
+                        if content.get('duration_category') != duration_category:
+                            wrong_category += 1
+                            continue
+                    else:
+                        # For content types like BMP, check content_type field
+                        content_type = content.get('content_type', '').upper()
+                        if content_type != duration_category.upper():
+                            wrong_category += 1
+                            continue
                     
                     # Special debug logging for PSLA meeting
                     content_title = content.get('content_title', content.get('file_name', 'Unknown'))
@@ -6697,7 +6708,14 @@ def fill_template_gaps():
                         temp_category_content = []
                         
                         for content_id, content in content_by_id.items():
-                            if content.get('duration_category') == duration_category:
+                            # Check category match
+                            category_match = False
+                            if is_duration_category:
+                                category_match = content.get('duration_category') == duration_category
+                            else:
+                                category_match = content.get('content_type', '').upper() == duration_category.upper()
+                                
+                            if category_match:
                                 # Check with reduced delay
                                 if content_id in asset_schedule_times:
                                     last_times = asset_schedule_times[content_id]
@@ -6745,7 +6763,7 @@ def fill_template_gaps():
                 ))
                 
                 # For ID content, add variety by selecting from top candidates randomly
-                if duration_category == 'id' and len(category_content) > 1:
+                if is_duration_category and duration_category == 'id' and len(category_content) > 1:
                     # Take top 40% of available IDs (at least 3) to add variety
                     import random
                     top_count = max(3, int(len(category_content) * 0.4))
