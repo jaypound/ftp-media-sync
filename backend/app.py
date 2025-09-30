@@ -5637,6 +5637,16 @@ def fill_template_gaps():
         template = data.get('template')
         available_content = data.get('available_content', [])
         gaps = data.get('gaps', [])
+        
+        # Debug: Log what content was received
+        logger.info(f"Fill gaps request received with {len(available_content)} content items")
+        content_by_category = {}
+        for content in available_content:
+            cat = content.get('duration_category', 'unknown')
+            if cat not in content_by_category:
+                content_by_category[cat] = 0
+            content_by_category[cat] += 1
+        logger.info(f"Content breakdown by category: {content_by_category}")
         schedule_date = data.get('schedule_date')  # Date when schedule starts (YYYY-MM-DD format)
         
         log_expiration(f"Template type: {template.get('type')}")
@@ -6692,6 +6702,21 @@ def fill_template_gaps():
             
                 if not category_content:
                     logger.info(f"Category {duration_category}: found=0, wrong_category={wrong_category}, blocked_by_delay={blocked_by_delay}, blocked_by_expiry={blocked_by_expiry}, no_expiry_date={no_expiry_date}, total_available={len(content_by_id)}")
+                    
+                    # Additional debug for spots category
+                    if duration_category == 'spots':
+                        logger.debug(f"Spots category empty. Checking why (gap={remaining/60:.1f}min):")
+                        spots_in_db = 0
+                        for cid, c in content_by_id.items():
+                            if c.get('duration_category') == 'spots':
+                                spots_in_db += 1
+                                dur = c.get('duration_seconds', 0)
+                                title = c.get('content_title', c.get('file_name', 'Unknown'))
+                                logger.debug(f"  Found spots content: {title} ({dur}s / {dur/60:.1f}min)")
+                        if spots_in_db == 0:
+                            logger.warning("  NO SPOTS CONTENT in available content pool!")
+                        else:
+                            logger.debug(f"  Total spots content in pool: {spots_in_db} items")
                 
                 # If no content due to delays, try with progressively reduced delays
                 if not category_content and blocked_by_delay > 0:
@@ -7163,23 +7188,35 @@ def fill_template_gaps():
                             else:
                                 # Not end-of-day, normal rotation logic
                                 
+                                # Log available content for debugging
+                                logger.debug("Content availability summary:")
+                                for cat, items in available_content_by_category.items():
+                                    if items:
+                                        durations = [i.get('duration_seconds', 0) for i in items[:3]]
+                                        logger.debug(f"  {cat}: {len(items)} items, shortest durations: {[f'{d:.1f}s' for d in sorted(durations)[:3]]}")
+                                    else:
+                                        logger.debug(f"  {cat}: 0 items")
+                                
                                 # Check if gap is small enough to accept
-                                minimum_fillable_gap = 30  # 30 seconds minimum
+                                minimum_fillable_gap = 10  # 10 seconds minimum
                                 if remaining < minimum_fillable_gap:
                                     logger.info(f"Gap of {remaining:.1f} seconds is below minimum fillable threshold. Accepting unfilled gap.")
                                     break
                                 
-                                # For gaps less than 1 minute, accept them after trying once
-                                if remaining < 60 and consecutive_errors > 0:
-                                    logger.info(f"Small gap of {remaining:.1f} seconds. Accepting after {consecutive_errors} attempts.")
-                                    break
+                                # For gaps less than 1 minute, be more lenient
+                                if remaining < 60:
+                                    # For 30-60 second gaps, try all categories once before giving up
+                                    if consecutive_errors >= len(scheduler.duration_rotation):
+                                        logger.info(f"Small gap of {remaining:.1f} seconds. Accepting after trying all {len(scheduler.duration_rotation)} categories.")
+                                        break
                                 
-                                logger.info(f"Gap of {remaining/60:.1f} min is too large to leave unfilled. Advancing rotation.")
+                                logger.info(f"Gap of {remaining/60:.1f} min. Advancing rotation to find fitting content.")
                                 scheduler._advance_rotation()
                                 consecutive_errors += 1
                                 
-                                if consecutive_errors >= len(scheduler.duration_rotation) * 2:
-                                    logger.warning(f"Tried all rotations twice. Accepting gap of {remaining/60:.1f} minutes.")
+                                # Prevent infinite loops
+                                if consecutive_errors >= len(scheduler.duration_rotation) * 3:
+                                    logger.warning(f"Tried all rotations three times ({consecutive_errors} attempts). Accepting gap of {remaining/60:.1f} minutes to prevent infinite loop.")
                                     break
                                 
                                 continue
