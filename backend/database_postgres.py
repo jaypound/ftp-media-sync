@@ -1047,6 +1047,7 @@ class PostgreSQLDatabaseManager:
                     i.file_duration,
                     sm.available_for_scheduling,
                     sm.content_expiry_date,
+                    sm.go_live_date,
                     sm.last_scheduled_date,
                     sm.total_airings,
                     sm.priority_score,
@@ -1152,6 +1153,7 @@ class PostgreSQLDatabaseManager:
                     'scheduling': {
                         'available_for_scheduling': row.get('available_for_scheduling', True),
                         'content_expiry_date': row['content_expiry_date'],
+                        'go_live_date': row.get('go_live_date'),
                         'last_scheduled_date': row['last_scheduled_date'],
                         'total_airings': row.get('total_airings', 0),
                         'priority_score': float(row['priority_score']) if row['priority_score'] else 0,

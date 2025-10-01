@@ -920,7 +920,8 @@ def set_category_expiration():
 
 @app.route('/api/copy-expirations-from-castus', methods=['POST'])
 def copy_expirations_from_castus():
-    """Copy expiration settings from Castus metadata for a specific content type"""
+    """Sync expiration dates from Castus metadata for all content of a specific type"""
+    logger.info("=== COPY EXPIRATIONS FROM CASTUS REQUEST ===")
     try:
         data = request.json
         content_type = data.get('content_type')
@@ -929,36 +930,155 @@ def copy_expirations_from_castus():
         if not content_type:
             return jsonify({'status': 'error', 'message': 'Content type is required'})
         
-        # Connect to FTP server if not already connected
-        if server not in ftp_managers or not ftp_managers[server].connected:
-            return jsonify({'status': 'error', 'message': f'{server} server not connected'})
+        # Handle 'ALL' content types
+        content_types_to_sync = []
+        if content_type == 'ALL':
+            content_types = ['AN', 'ATLD', 'BMP', 'IMOW', 'IM', 'IA', 'LM', 'MTG', 'MAF', 'PKG', 'PMO', 'PSA', 'SZL', 'SPP', 'OTHER']
+            content_types_to_sync = content_types
+        else:
+            content_types_to_sync = [content_type]
         
-        # TODO: Implement actual Castus metadata reading
-        # For now, return a mock value based on content type
-        mock_expiration_days = {
-            'AN': 30,    # Atlanta Now
-            'ATLD': 60,  # ATL Direct
-            'BMP': 7,    # Bumps
-            'IMOW': 90,  # IMOW
-            'IM': 90,    # Inclusion Months
-            'IA': 30,    # Inside Atlanta
-            'LM': 14,    # Legislative Minute
-            'MTG': 14,   # Meetings
-            'MAF': 60,   # Moving Atlanta Forward
-            'PKG': 45,   # Packages
-            'PMO': 30,   # Promos
-            'PSA': 60,   # PSAs
-            'SZL': 30,   # Sizzles
-            'SPP': 90,   # Special Projects
-            'OTHER': 0   # Other
-        }
+        # Import here to avoid circular imports
+        from castus_metadata import CastusMetadataHandler
         
-        expiration_days = mock_expiration_days.get(content_type, 0)
+        # Get FTP configuration
+        config = config_manager.get_server_config(server)
+        if not config:
+            return jsonify({
+                'status': 'error',
+                'message': f'Server configuration not found: {server}'
+            })
+        
+        # Initialize results
+        total_synced = 0
+        total_updated = 0
+        total_errors = 0
+        details = []
+        
+        # Connect to database
+        conn = db_manager._get_connection()
+        try:
+            for ct in content_types_to_sync:
+                logger.info(f"Processing content type: {ct}")
+                
+                # Get all assets of this content type
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    # Convert content type to lowercase for PostgreSQL enum
+                    ct_lower = ct.lower()
+                    cursor.execute("""
+                        SELECT a.id, i.file_path, i.file_name, a.content_title, a.content_type
+                        FROM assets a
+                        JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                        WHERE a.content_type = %s
+                        AND a.analysis_completed = true
+                        ORDER BY a.id
+                    """, (ct_lower,))
+                    
+                    assets = cursor.fetchall()
+                    logger.info(f"Found {len(assets)} {ct} assets to sync")
+                    
+                    # Process each asset
+                    for asset in assets:
+                        asset_id = asset['id']
+                        file_path = asset['file_path'] or asset['file_name']
+                        
+                        if not file_path:
+                            logger.warning(f"No file path for asset {asset_id}")
+                            total_errors += 1
+                            continue
+                        
+                        try:
+                            # Connect to FTP
+                            ftp = FTPManager(config)
+                            if not ftp.connect():
+                                logger.error(f"Failed to connect to {server} server")
+                                total_errors += 1
+                                continue
+                            
+                            try:
+                                # Get Castus metadata
+                                handler = CastusMetadataHandler(ftp)
+                                expiry_date = handler.get_content_window_close(file_path)
+                                go_live_date = handler.get_content_window_open(file_path)
+                                
+                                # Update database - set or clear both dates
+                                with conn.cursor() as update_cursor:
+                                    update_cursor.execute("""
+                                            UPDATE scheduling_metadata 
+                                            SET content_expiry_date = %s,
+                                                go_live_date = %s,
+                                                metadata_synced_at = CURRENT_TIMESTAMP
+                                            WHERE asset_id = %s
+                                    """, (expiry_date, go_live_date, asset_id))
+                                    
+                                    if update_cursor.rowcount == 0:
+                                        # Create scheduling_metadata record if it doesn't exist
+                                        update_cursor.execute("""
+                                            INSERT INTO scheduling_metadata 
+                                            (asset_id, content_expiry_date, go_live_date, metadata_synced_at)
+                                            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                                        """, (asset_id, expiry_date, go_live_date))
+                                
+                                conn.commit()
+                                total_updated += 1
+                                
+                                if expiry_date or go_live_date:
+                                    details.append({
+                                        'asset_id': asset_id,
+                                        'title': asset['content_title'] or asset['file_name'],
+                                        'expiry_date': expiry_date.strftime('%Y-%m-%d %H:%M:%S') if expiry_date else None,
+                                        'go_live_date': go_live_date.strftime('%Y-%m-%d %H:%M:%S') if go_live_date else None,
+                                        'status': 'updated'
+                                    })
+                                    logger.info(f"Updated metadata for {asset['file_name']}: go_live={go_live_date}, expiry={expiry_date}")
+                                else:
+                                    details.append({
+                                        'asset_id': asset_id,
+                                        'title': asset['content_title'] or asset['file_name'],
+                                        'expiry_date': None,
+                                        'go_live_date': None,
+                                        'status': 'cleared'
+                                    })
+                                    logger.info(f"Cleared metadata for {asset['file_name']} (no Castus metadata)")
+                                
+                                total_synced += 1
+                                
+                            finally:
+                                ftp.disconnect()
+                                
+                        except Exception as e:
+                            logger.error(f"Error syncing asset {asset_id}: {str(e)}")
+                            total_errors += 1
+                            details.append({
+                                'asset_id': asset_id,
+                                'title': asset['content_title'] or asset['file_name'],
+                                'status': 'error',
+                                'error': str(e)
+                            })
+            
+        finally:
+            db_manager._put_connection(conn)
+        
+        # Create summary message
+        message_parts = []
+        if total_synced > 0:
+            message_parts.append(f"Synced {total_synced} items")
+        if total_updated > 0:
+            message_parts.append(f"Updated {total_updated} expirations")
+        if total_errors > 0:
+            message_parts.append(f"{total_errors} errors")
+        
+        message = ', '.join(message_parts) if message_parts else 'No items processed'
         
         return jsonify({
             'status': 'success',
-            'expiration_days': expiration_days,
-            'message': f'Copied expiration from Castus: {expiration_days} days'
+            'message': message,
+            'summary': {
+                'total_synced': total_synced,
+                'total_updated': total_updated,
+                'total_errors': total_errors
+            },
+            'details': details[:10]  # Return first 10 for UI display
         })
     except Exception as e:
         logger.error(f"Error copying expirations from Castus: {str(e)}")
@@ -1338,13 +1458,91 @@ def test_expiration_debug():
         logger.error(f"Error in expiration debug: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)})
 
+@app.route('/api/sync-single-content-metadata', methods=['POST'])
+def sync_single_content_metadata():
+    """Sync metadata (go live and expiration dates) from Castus for a single content item"""
+    logger.info("=== SYNC SINGLE CONTENT METADATA REQUEST ===")
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        file_path = data.get('file_path')
+        server = data.get('server', 'source')
+        
+        if not asset_id or not file_path:
+            return jsonify({'success': False, 'message': 'Asset ID and file path are required'})
+        
+        # Get server config and connect
+        config = config_manager.get_server_config(server)
+        if not config:
+            return jsonify({'success': False, 'message': f'Server configuration not found: {server}'})
+        
+        # Import here to avoid circular imports
+        from castus_metadata import CastusMetadataHandler
+        
+        # Connect to FTP
+        if server not in ftp_managers:
+            ftp_managers[server] = FTPManager(config)
+        
+        ftp = ftp_managers[server]
+        if not ftp.connected:
+            if not ftp.connect():
+                return jsonify({'success': False, 'message': f'Failed to connect to {server} server'})
+        
+        try:
+            # Get Castus metadata
+            handler = CastusMetadataHandler(ftp)
+            expiry_date = handler.get_content_window_close(file_path)
+            go_live_date = handler.get_content_window_open(file_path)
+            
+            # Update database
+            conn = db_manager._get_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Update or create scheduling_metadata record
+                    cursor.execute("""
+                        UPDATE scheduling_metadata 
+                        SET content_expiry_date = %s,
+                            go_live_date = %s,
+                            metadata_synced_at = CURRENT_TIMESTAMP
+                        WHERE asset_id = %s
+                    """, (expiry_date, go_live_date, asset_id))
+                    
+                    if cursor.rowcount == 0:
+                        # Create record if it doesn't exist
+                        cursor.execute("""
+                            INSERT INTO scheduling_metadata 
+                            (asset_id, content_expiry_date, go_live_date, metadata_synced_at)
+                            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                        """, (asset_id, expiry_date, go_live_date))
+                
+                conn.commit()
+                
+                # Return the dates
+                return jsonify({
+                    'success': True,
+                    'message': 'Metadata synced successfully',
+                    'expiration_date': expiry_date.isoformat() if expiry_date else None,
+                    'go_live_date': go_live_date.isoformat() if go_live_date else None
+                })
+                
+            finally:
+                db_manager._put_connection(conn)
+                
+        finally:
+            # Keep connection for reuse
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error syncing single content metadata: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
 @app.route('/api/copy-expirations-to-castus', methods=['POST'])
 def copy_expirations_to_castus():
-    """Copy expiration settings to Castus metadata for a specific content type"""
+    """Copy expiration dates from database to Castus metadata for a specific content type"""
+    logger.info("=== COPY EXPIRATIONS TO CASTUS REQUEST ===")
     try:
         data = request.json
         content_type = data.get('content_type')
-        expiration_days = data.get('expiration_days', 0)
         servers = data.get('servers', 'source')  # Can be 'source', 'target', or 'both'
         
         if not content_type:
@@ -1357,18 +1555,154 @@ def copy_expirations_to_castus():
         else:
             servers_to_update = [servers]
         
-        # Check connections
-        for server in servers_to_update:
-            if server not in ftp_managers or not ftp_managers[server].connected:
-                return jsonify({'status': 'error', 'message': f'{server} server not connected'})
+        # Import here to avoid circular imports
+        from castus_metadata import CastusMetadataHandler
+        import xml.etree.ElementTree as ET
+        from datetime import datetime
         
-        # TODO: Implement actual Castus metadata writing
-        # For now, just log the operation
-        logger.info(f"Would copy expiration ({expiration_days} days) for {content_type} to Castus on servers: {servers_to_update}")
+        # Handle 'ALL' content types
+        content_types_to_sync = []
+        if content_type == 'ALL':
+            content_types = ['AN', 'ATLD', 'BMP', 'IMOW', 'IM', 'IA', 'LM', 'MTG', 'MAF', 'PKG', 'PMO', 'PSA', 'SZL', 'SPP', 'OTHER']
+            content_types_to_sync = content_types
+        else:
+            content_types_to_sync = [content_type]
+        
+        # Initialize results
+        total_processed = 0
+        total_updated = 0
+        total_errors = 0
+        details = []
+        
+        # Process each server
+        for server in servers_to_update:
+            # Get FTP configuration
+            config = config_manager.get_server_config(server)
+            if not config:
+                logger.error(f'Server configuration not found: {server}')
+                total_errors += 1
+                continue
+            
+            # Connect to database
+            conn = db_manager._get_connection()
+            try:
+                for ct in content_types_to_sync:
+                    logger.info(f"Processing content type {ct} for {server} server")
+                    
+                    # Get all assets of this content type with their expiration dates
+                    with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                        ct_lower = ct.lower()
+                        cursor.execute("""
+                            SELECT 
+                                a.id, 
+                                i.file_path, 
+                                i.file_name, 
+                                a.content_title,
+                                sm.content_expiry_date,
+                                sm.go_live_date
+                            FROM assets a
+                            JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                            LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                            WHERE a.content_type = %s
+                            AND a.analysis_completed = true
+                            ORDER BY a.id
+                        """, (ct_lower,))
+                        
+                        assets = cursor.fetchall()
+                        logger.info(f"Found {len(assets)} {ct} assets to process for {server}")
+                        
+                        # Process each asset
+                        for asset in assets:
+                            asset_id = asset['id']
+                            file_path = asset['file_path'] or asset['file_name']
+                            expiry_date = asset['content_expiry_date']
+                            go_live_date = asset['go_live_date']
+                            
+                            if not file_path:
+                                logger.warning(f"No file path for asset {asset_id}")
+                                total_errors += 1
+                                continue
+                            
+                            try:
+                                # Connect to FTP
+                                ftp = FTPManager(config)
+                                if not ftp.connect():
+                                    logger.error(f"Failed to connect to {server} server")
+                                    total_errors += 1
+                                    continue
+                                
+                                try:
+                                    # Write both dates to Castus metadata
+                                    handler = CastusMetadataHandler(ftp)
+                                    success = handler.write_content_windows(file_path, go_live_date, expiry_date)
+                                    
+                                    # Create result object
+                                    write_result = {'success': success}
+                                    
+                                    if write_result['success']:
+                                        total_updated += 1
+                                        details.append({
+                                            'asset_id': asset_id,
+                                            'title': asset['content_title'] or asset['file_name'],
+                                            'expiry_date': expiry_date.isoformat() if expiry_date and hasattr(expiry_date, 'isoformat') else str(expiry_date) if expiry_date else None,
+                                            'go_live_date': go_live_date.isoformat() if go_live_date and hasattr(go_live_date, 'isoformat') else str(go_live_date) if go_live_date else None,
+                                            'server': server,
+                                            'status': 'updated' if (expiry_date or go_live_date) else 'cleared'
+                                        })
+                                        if expiry_date or go_live_date:
+                                            logger.info(f"Updated Castus metadata for {asset['file_name']} on {server}: go_live={go_live_date}, expiry={expiry_date}")
+                                        else:
+                                            logger.info(f"Cleared Castus metadata for {asset['file_name']} on {server}")
+                                    else:
+                                        logger.error(f"Failed to write metadata for {asset['file_name']}: {write_result.get('message', 'Unknown error')}")
+                                        total_errors += 1
+                                        details.append({
+                                            'asset_id': asset_id,
+                                            'title': asset['content_title'] or asset['file_name'],
+                                            'server': server,
+                                            'status': 'error',
+                                            'error': write_result.get('message', 'Failed to write metadata')
+                                        })
+                                    
+                                    total_processed += 1
+                                    
+                                finally:
+                                    ftp.disconnect()
+                                    
+                            except Exception as e:
+                                logger.error(f"Error processing asset {asset_id} on {server}: {str(e)}")
+                                total_errors += 1
+                                details.append({
+                                    'asset_id': asset_id,
+                                    'title': asset['content_title'] or asset['file_name'],
+                                    'server': server,
+                                    'status': 'error',
+                                    'error': str(e)
+                                })
+                
+            finally:
+                db_manager._put_connection(conn)
+        
+        # Create summary message
+        message_parts = []
+        if total_processed > 0:
+            message_parts.append(f"Processed {total_processed} items")
+        if total_updated > 0:
+            message_parts.append(f"Updated {total_updated} in Castus")
+        if total_errors > 0:
+            message_parts.append(f"{total_errors} errors")
+        
+        message = ', '.join(message_parts) if message_parts else 'No items processed'
         
         return jsonify({
             'status': 'success',
-            'message': f'Successfully copied expiration to Castus {servers} server(s)'
+            'message': message,
+            'summary': {
+                'total_processed': total_processed,
+                'total_updated': total_updated,
+                'total_errors': total_errors
+            },
+            'details': details[:10]  # Return first 10 for UI display
         })
     except Exception as e:
         logger.error(f"Error copying expirations to Castus: {str(e)}")
@@ -6441,7 +6775,7 @@ def fill_template_gaps():
         
         # Helper function to check if content is expired at a given position
         def is_content_expired_at_position(content, position, schedule_type, base_date):
-            """Check if content is expired for the given schedule position"""
+            """Check if content is expired or not yet available for the given schedule position"""
             # Calculate the actual air date for this position
             if schedule_type == 'weekly':
                 days_offset = int(position // 86400)
@@ -6449,9 +6783,10 @@ def fill_template_gaps():
             else:
                 air_date = base_date
             
-            # Check expiration
+            # Check expiration and go live dates
             scheduling = content.get('scheduling', {})
             expiry_date_str = scheduling.get('content_expiry_date')
+            go_live_date_str = scheduling.get('go_live_date')
             content_title = content.get('content_title', content.get('file_name', 'Unknown'))
             content_id = content.get('id', 'Unknown')
             
@@ -6462,8 +6797,39 @@ def fill_template_gaps():
             log_expiration(f"Air date: {air_date.strftime('%Y-%m-%d')}")
             log_expiration(f"Position: {position/3600:.2f}h ({position}s)")
             
+            # Check go live date first
+            if go_live_date_str:
+                try:
+                    if isinstance(go_live_date_str, str):
+                        if 'T' in go_live_date_str:
+                            go_live_date = datetime.fromisoformat(go_live_date_str.replace('Z', '+00:00'))
+                        else:
+                            go_live_date = datetime.strptime(go_live_date_str, '%Y-%m-%d')
+                    else:
+                        go_live_date = go_live_date_str
+                    
+                    # Make dates timezone-naive for comparison
+                    if hasattr(go_live_date, 'tzinfo') and go_live_date.tzinfo:
+                        go_live_date = go_live_date.replace(tzinfo=None)
+                    if hasattr(air_date, 'tzinfo') and air_date.tzinfo:
+                        air_date_check = air_date.replace(tzinfo=None)
+                    else:
+                        air_date_check = air_date
+                    
+                    log_expiration(f"Go live date: {go_live_date.strftime('%Y-%m-%d')}")
+                    
+                    if go_live_date > air_date_check:
+                        logger.info(f"GO LIVE CHECK: Content '{content_title}' not available until {go_live_date.strftime('%Y-%m-%d')}, cannot schedule for {air_date.strftime('%Y-%m-%d')} (position: {position/3600:.1f}h)")
+                        log_expiration(f"DECISION: REJECTED (not yet available - {go_live_date.strftime('%Y-%m-%d')} > {air_date.strftime('%Y-%m-%d')})")
+                        return True
+                except Exception as e:
+                    logger.warning(f"Error parsing go live date: {e}")
+                    log_expiration(f"Go live date: ERROR - {e}")
+            else:
+                log_expiration(f"Go live date: NONE")
+            
+            # Check expiration date
             if not expiry_date_str:
-                # Log if meetings don't have expiration dates
                 log_expiration(f"Expiration date: NONE")
                 if 'MTG' in content_title or 'Meeting' in content_title:
                     logger.warning(f"  MEETING WITHOUT EXPIRATION: '{content_title}' - This content has no expiration date set!")
@@ -10519,6 +10885,64 @@ def update_content_expiration():
         
     except Exception as e:
         error_msg = f"Update content expiration error: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        }), 500
+
+@app.route('/api/update-content-go-live', methods=['POST'])
+def update_content_go_live():
+    """Update go live date for a single content item"""
+    logger.info("=== UPDATE CONTENT GO LIVE DATE REQUEST ===")
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        go_live_date = data.get('go_live_date')
+        
+        if not asset_id:
+            return jsonify({
+                'success': False,
+                'message': 'asset_id is required'
+            }), 400
+        
+        logger.info(f"Updating go live date for asset {asset_id} to {go_live_date}")
+        
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor() as cur:
+                if go_live_date:
+                    # Update or insert the go live date
+                    cur.execute("""
+                        INSERT INTO scheduling_metadata (asset_id, go_live_date)
+                        VALUES (%s, %s)
+                        ON CONFLICT (asset_id) 
+                        DO UPDATE SET go_live_date = EXCLUDED.go_live_date
+                    """, (asset_id, go_live_date))
+                else:
+                    # Clear the go live date (set to NULL)
+                    cur.execute("""
+                        UPDATE scheduling_metadata 
+                        SET go_live_date = NULL 
+                        WHERE asset_id = %s
+                    """, (asset_id,))
+                
+                conn.commit()
+        
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+                
+        logger.info(f"Successfully updated go live date for asset {asset_id}")
+        return jsonify({
+            'success': True,
+            'message': 'Go live date updated successfully'
+        })
+        
+    except Exception as e:
+        error_msg = f"Update content go live date error: {str(e)}"
         logger.error(error_msg)
         return jsonify({
             'success': False,

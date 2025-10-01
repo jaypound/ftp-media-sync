@@ -4977,7 +4977,8 @@ async function executeServerOperation(contentType, operation, server) {
 // Copy expiration from Castus for a specific category
 async function copyExpirationFromCastus(contentType, server) {
     try {
-        showNotification(`Copying expirations from Castus ${server} server for ${getCategoryName(contentType)}...`, 'info');
+        const categoryName = contentType === 'ALL' ? 'all categories' : getCategoryName(contentType);
+        showNotification(`Syncing expirations from Castus ${server} server for ${categoryName}...`, 'info', 30000);
         
         const response = await fetch('/api/copy-expirations-from-castus', {
             method: 'POST',
@@ -4993,39 +4994,40 @@ async function copyExpirationFromCastus(contentType, server) {
         const result = await response.json();
         
         if (result.status === 'success') {
-            // Update the input field with the imported value
-            let input = document.querySelector(`input[data-content-type="${contentType}"]`);
-            if (!input) {
-                input = document.querySelector(`#${contentType}_expiration`);
+            // Show detailed results
+            let detailsHtml = '';
+            if (result.details && result.details.length > 0) {
+                detailsHtml = '<br><br>Updated items:';
+                result.details.forEach(item => {
+                    if (item.status === 'updated') {
+                        detailsHtml += `<br>• ${item.title}: ${item.expiry_date}`;
+                    }
+                });
+                if (result.summary.total_updated > result.details.length) {
+                    detailsHtml += `<br>• ... and ${result.summary.total_updated - result.details.length} more`;
+                }
             }
-            if (input && result.expiration_days !== undefined) {
-                input.value = result.expiration_days;
+            
+            showNotification(`${result.message}${detailsHtml}`, 'success', 10000);
+            
+            // Reload content to show updated expiration dates
+            if (result.summary && result.summary.total_updated > 0) {
+                await loadAvailableContent();
             }
-            showNotification(`Successfully copied expiration from Castus: ${result.expiration_days} days`, 'success');
         } else {
-            throw new Error(result.message || 'Failed to copy from Castus');
+            throw new Error(result.message || 'Failed to sync from Castus');
         }
     } catch (error) {
-        console.error('Failed to copy expiration from Castus:', error);
-        showNotification('Failed to copy expiration from Castus', 'error');
+        console.error('Failed to sync expiration from Castus:', error);
+        showNotification(`Failed to sync expiration from Castus: ${error.message}`, 'error');
     }
 }
 
 // Copy expiration to Castus for a specific category
 async function copyExpirationToCastus(contentType, servers) {
     try {
-        let input = document.querySelector(`input[data-content-type="${contentType}"]`);
-        if (!input) {
-            input = document.querySelector(`#${contentType}_expiration`);
-        }
-        if (!input) {
-            showNotification('Could not find expiration value', 'error');
-            return;
-        }
-        
-        const days = parseInt(input.value) || 0;
-        
-        showNotification(`Copying expiration (${days} days) to Castus ${servers} server(s) for ${getCategoryName(contentType)}...`, 'info');
+        const categoryName = contentType === 'ALL' ? 'all categories' : getCategoryName(contentType);
+        showNotification(`Syncing database expirations to Castus ${servers} server(s) for ${categoryName}...`, 'info', 30000);
         
         const response = await fetch('/api/copy-expirations-to-castus', {
             method: 'POST',
@@ -5034,7 +5036,6 @@ async function copyExpirationToCastus(contentType, servers) {
             },
             body: JSON.stringify({
                 content_type: contentType,
-                expiration_days: days,
                 servers: servers
             })
         });
@@ -5042,13 +5043,29 @@ async function copyExpirationToCastus(contentType, servers) {
         const result = await response.json();
         
         if (result.status === 'success') {
-            showNotification(`Successfully copied expiration to Castus ${servers} server(s)`, 'success');
+            // Show detailed results
+            let detailsHtml = '';
+            if (result.details && result.details.length > 0) {
+                detailsHtml = '<br><br>Updated in Castus:';
+                result.details.forEach(item => {
+                    if (item.status === 'updated') {
+                        detailsHtml += `<br>• ${item.title} on ${item.server}: ${item.expiry_date || 'cleared'}`;
+                    } else if (item.status === 'cleared') {
+                        detailsHtml += `<br>• ${item.title} on ${item.server}: expiration cleared`;
+                    }
+                });
+                if (result.summary.total_updated > result.details.length) {
+                    detailsHtml += `<br>• ... and ${result.summary.total_updated - result.details.length} more`;
+                }
+            }
+            
+            showNotification(`${result.message}${detailsHtml}`, 'success', 10000);
         } else {
-            throw new Error(result.message || 'Failed to copy to Castus');
+            throw new Error(result.message || 'Failed to sync to Castus');
         }
     } catch (error) {
-        console.error('Failed to copy expiration to Castus:', error);
-        showNotification('Failed to copy expiration to Castus', 'error');
+        console.error('Failed to sync expiration to Castus:', error);
+        showNotification(`Failed to sync expiration to Castus: ${error.message}`, 'error');
     }
 }
 
@@ -5400,7 +5417,7 @@ function displayAvailableContent() {
                            title="Mark as featured for heavy rotation">
                 </div>
                 <div class="content-actions">
-                    <button class="button small info" onclick="syncContentExpiration('${contentId}')" title="Sync Expiration from Castus">
+                    <button class="button small info" onclick="syncContentExpiration('${contentId}')" title="Sync Go Live & Expiration dates from Castus">
                         <i class="fas fa-sync"></i>
                     </button>
                     <button class="button small primary" onclick="schedulingEditExpiration('${contentId}', '${content.scheduling?.content_expiry_date || ''}')" title="Edit Expiration Date">
@@ -7174,6 +7191,12 @@ function viewScheduleItemDetails(scheduleId, itemIdOrAssetId, index) {
                         <strong>Added to Schedule:</strong>
                         <span>${createdAtDisplay}</span>
                         
+                        <strong>Go Live Date:</strong>
+                        <span>${item.go_live_date ? formatGoLiveDate(item.go_live_date) : 'Not Set'}</span>
+                        
+                        <strong>Expiration Date:</strong>
+                        <span>${item.content_expiry_date ? formatExpirationDate(item.content_expiry_date) : 'Not Set'}</span>
+                        
                         ${item.theme || item.topics && item.topics.length > 0 || item.topic ? `
                             <strong>Content Details:</strong>
                             <span style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin: 0.5rem 0;"></span>
@@ -8552,6 +8575,130 @@ function formatExpirationDate(expiryDate) {
     }
 }
 
+// Format go live date (different coloring than expiration)
+function formatGoLiveDate(goLiveDate) {
+    if (!goLiveDate) {
+        return 'Not Set';
+    }
+    
+    const goLive = new Date(goLiveDate);
+    const today = new Date();
+    const daysUntilGoLive = Math.floor((goLive - today) / (1000 * 60 * 60 * 24));
+    
+    const formattedDate = goLive.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+    
+    if (daysUntilGoLive < 0) {
+        // Content is already live - show in green
+        return `<span style="color: var(--success-color, #28a745); font-weight: 600;">${formattedDate}</span>`;
+    } else if (daysUntilGoLive === 0) {
+        return `<span style="color: var(--info-color, #2196f3); font-weight: 600;">Goes Live Today</span>`;
+    } else if (daysUntilGoLive <= 7) {
+        return `<span style="color: var(--info-color, #2196f3);">Goes live in ${daysUntilGoLive} day${daysUntilGoLive > 1 ? 's' : ''} (${formattedDate})</span>`;
+    } else {
+        return `${formattedDate} (in ${daysUntilGoLive} days)`;
+    }
+}
+
+// Edit go live date for individual content
+async function editGoLiveDate(assetId) {
+    // Find the content item
+    const content = availableContent.find(c => {
+        const itemId = c._id || c.id || c.guid;
+        return itemId == assetId || itemId === assetId || String(itemId) === String(assetId);
+    });
+    
+    if (!content) {
+        window.showNotification('Content not found', 'error');
+        return;
+    }
+    
+    const currentGoLive = content.scheduling?.go_live_date;
+    const today = new Date().toISOString().split('T')[0];
+    const currentDate = currentGoLive ? new Date(currentGoLive).toISOString().split('T')[0] : '';
+    
+    const modalHtml = `
+        <div class="modal" id="editGoLiveDateModal" style="display: block;">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>Edit Go Live Date</h3>
+                    <button class="modal-close" onclick="document.getElementById('editGoLiveDateModal').remove()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="goLiveDate">Go Live Date:</label>
+                        <input type="date" id="goLiveDate" value="${currentDate}" class="form-control">
+                        <small class="form-text text-muted">Leave empty to clear go live date</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="button secondary" onclick="document.getElementById('editGoLiveDateModal').remove()">Cancel</button>
+                    <button class="button primary" onclick="saveGoLiveDate('${assetId}')">Save</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    document.getElementById('goLiveDate').focus();
+}
+
+// Save go live date for individual content
+async function saveGoLiveDate(assetId) {
+    const dateInput = document.getElementById('goLiveDate');
+    const goLiveDate = dateInput.value;
+    
+    try {
+        const response = await fetch('/api/update-content-go-live', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                asset_id: assetId,
+                go_live_date: goLiveDate || null
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            window.showNotification('Go live date updated successfully', 'success');
+            
+            // Remove the modal
+            document.getElementById('editGoLiveDateModal').remove();
+            
+            // Update the content in memory
+            const content = availableContent.find(c => {
+                const itemId = c._id || c.id || c.guid;
+                return itemId == assetId || itemId === assetId || String(itemId) === String(assetId);
+            });
+            
+            if (content) {
+                if (!content.scheduling) {
+                    content.scheduling = {};
+                }
+                content.scheduling.go_live_date = goLiveDate || null;
+                
+                // Refresh the details modal if it's open
+                const detailsModal = document.getElementById('contentDetailsModal');
+                if (detailsModal) {
+                    closeContentDetailsModal();
+                    viewContentDetails(assetId);
+                }
+            }
+        } else {
+            window.showNotification(`Failed to update go live date: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error updating go live date:', error);
+        window.showNotification('Error updating go live date', 'error');
+    }
+}
+
 // Helper function to format creation date with source info
 function formatCreationDate(content) {
     const creationDate = getEffectiveCreationDate(content);
@@ -8988,17 +9135,18 @@ async function syncContentExpiration(contentId) {
     }
     
     // Show loading notification
-    showNotification('Syncing expiration metadata...', 'info', 10000);
+    showNotification('Syncing metadata from Castus...', 'info', 10000);
     
     try {
-        const response = await fetch('/api/sync-castus-expiration', {
+        const response = await fetch('/api/sync-single-content-metadata', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 asset_id: content.id || content._id,
-                file_path: content.file_path || `${content.file_name}`,
+                file_path: content.file_path || content.file_name,
+                content_type: content.content_type,
                 server: 'source'
             })
         });
@@ -9006,18 +9154,32 @@ async function syncContentExpiration(contentId) {
         const result = await response.json();
         
         if (result.success) {
+            let message = 'Metadata synced: ';
+            const updates = [];
+            
+            if (result.go_live_date) {
+                updates.push(`Go Live: ${new Date(result.go_live_date).toLocaleDateString()}`);
+            }
+            if (result.expiration_date) {
+                updates.push(`Expiration: ${new Date(result.expiration_date).toLocaleDateString()}`);
+            }
+            if (updates.length === 0) {
+                updates.push('No dates found in Castus metadata');
+            }
+            
             showNotification(
-                'Expiration Synced',
-                `Successfully synced expiration: ${result.message}`,
+                'Metadata Synced',
+                message + updates.join(', '),
                 'success',
                 5000
             );
             
-            // Update the content item with new expiration
+            // Update the content item with new dates
             if (!content.scheduling) {
                 content.scheduling = {};
             }
             content.scheduling.content_expiry_date = result.expiration_date;
+            content.scheduling.go_live_date = result.go_live_date;
             content.scheduling.metadata_synced_at = new Date().toISOString();
             
             // Refresh the display
@@ -9026,13 +9188,13 @@ async function syncContentExpiration(contentId) {
         } else {
             showNotification(
                 'Sync Failed',
-                result.message || 'Failed to sync expiration metadata',
+                result.message || 'Failed to sync metadata from Castus',
                 'error'
             );
         }
         
     } catch (error) {
-        console.error('Error syncing expiration:', error);
+        console.error('Error syncing metadata:', error);
         showNotification(
             'Error',
             `Failed to sync: ${error.message}`,
@@ -9127,8 +9289,21 @@ function viewContentDetails(contentId) {
                         <strong>Total Airings:</strong>
                         <span>${totalAirings}</span>
                         
+                        <strong>Go Live Date:</strong>
+                        <span style="display: flex; align-items: center; gap: 10px;">
+                            ${formatGoLiveDate(content.scheduling?.go_live_date) || 'Not Set'}
+                            <button class="button small primary" onclick="editGoLiveDate('${contentId}')" title="Edit go live date">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                        </span>
+                        
                         <strong>Expiration Date:</strong>
-                        <span>${formatExpirationDate(content.scheduling?.content_expiry_date)}</span>
+                        <span style="display: flex; align-items: center; gap: 10px;">
+                            ${formatExpirationDate(content.scheduling?.content_expiry_date)}
+                            <button class="button small primary" onclick="schedulingEditExpiration('${contentId}', '${content.scheduling?.content_expiry_date || ''}')" title="Edit expiration date">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                        </span>
                         
                         <strong>Shelf Life:</strong>
                         <span>${getShelfLifeInfo(content)}</span>

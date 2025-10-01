@@ -119,7 +119,8 @@ class PostgreSQLScheduler:
                         ) THEN COALESCE(sm.featured, FALSE)
                         ELSE FALSE
                     END as featured,
-                    sm.content_expiry_date
+                    sm.content_expiry_date,
+                    sm.go_live_date
                 FROM assets a
                 JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
                 LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
@@ -148,6 +149,13 @@ class PostgreSQLScheduler:
                 params.append(schedule_date)
             else:
                 query += " AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > CURRENT_TIMESTAMP)"
+            
+            # Add go live date check
+            if schedule_date:
+                query += " AND (sm.go_live_date IS NULL OR sm.go_live_date <= %s::date)"
+                params.append(schedule_date)
+            else:
+                query += " AND (sm.go_live_date IS NULL OR sm.go_live_date <= CURRENT_TIMESTAMP)"
             
             # Handle exclude_ids
             if exclude_ids and len(exclude_ids) > 0:
@@ -240,6 +248,7 @@ class PostgreSQLScheduler:
                 WHERE a.duration_category = %s
                   AND a.analysis_completed = TRUE
                   AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > %s)
+                  AND (sm.go_live_date IS NULL OR sm.go_live_date <= %s)
             """, (duration_category, schedule_date if schedule_date else datetime.now()))
             
             category_asset_ids = {row['id'] for row in cursor}
@@ -530,6 +539,7 @@ class PostgreSQLScheduler:
                         ELSE FALSE
                     END as featured,
                     COALESCE(sm.content_expiry_date, %s) as content_expiry_date,
+                    sm.go_live_date,
                     CASE 
                         WHEN EXISTS (
                             SELECT 1 FROM information_schema.columns 
@@ -567,9 +577,10 @@ class PostgreSQLScheduler:
             query_parts.append("""
                 AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
                 AND COALESCE(sm.content_expiry_date, %s) > %s
+                AND (sm.go_live_date IS NULL OR sm.go_live_date <= %s)
                 AND NOT (i.file_path LIKE %s)
             """)
-            params.extend([default_expiry_date, compare_date, '%FILL%'])
+            params.extend([default_expiry_date, compare_date, compare_date, '%FILL%'])
             
             # Add replay delay check if not ignoring
             if not ignore_delays:
