@@ -2667,3 +2667,113 @@ body.dark-mode .status {
     font-size: 0.9em;
 }
 
+/* Progress Modal Styles */
+.progress-container {
+    padding: 10px;
+}
+
+.progress-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #f5f5f5;
+    border-radius: 5px;
+}
+
+.dark-mode .stat-row {
+    background: #2a2a2a;
+}
+
+.stat-label {
+    font-weight: 600;
+    color: #666;
+}
+
+.dark-mode .stat-label {
+    color: #999;
+}
+
+.stat-value {
+    font-size: 1.2em;
+    font-weight: 700;
+}
+
+.stat-value.success {
+    color: #10b981;
+}
+
+.stat-value.warning {
+    color: #f59e0b;
+}
+
+.stat-value.info {
+    color: #3b82f6;
+}
+
+.progress-bar {
+    height: 24px;
+    background: #e5e7eb;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+}
+
+.dark-mode .progress-bar {
+    background: #374151;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6 0%, #10b981 100%);
+    transition: width 0.3s ease;
+    position: relative;
+}
+
+.progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        45deg,
+        transparent 25%,
+        rgba(255,255,255,0.1) 25%,
+        rgba(255,255,255,0.1) 50%,
+        transparent 50%,
+        transparent 75%,
+        rgba(255,255,255,0.1) 75%,
+        rgba(255,255,255,0.1)
+    );
+    background-size: 30px 30px;
+    animation: progress-stripes 1s linear infinite;
+}
+
+@keyframes progress-stripes {
+    0% {
+        background-position: 0 0;
+    }
+    100% {
+        background-position: 30px 0;
+    }
+}
+
+.progress-message {
+    color: #6b7280;
+    font-size: 0.9em;
+    margin-top: 10px;
+}
+
+.dark-mode .progress-message {
+    color: #9ca3af;
+}
+

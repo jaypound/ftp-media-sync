@@ -107,6 +107,17 @@ def validate_numeric(value, default=0, name="value", min_value=None, max_value=N
 
 # Add file handler for debugging gap filling issues
 import logging.handlers
+
+# Global variable to track fill gaps cancellation
+fill_gaps_cancelled = False
+fill_gaps_progress = {
+    'files_searched': 0,
+    'files_accepted': 0,
+    'files_rejected': 0,
+    'gaps_filled': 0,
+    'total_files': 0,
+    'message': 'Initializing...'
+}
 debug_log_file = os.path.join(os.path.dirname(__file__), 'gap_filling_debug.log')
 file_handler = logging.handlers.RotatingFileHandler(
     debug_log_file, 
@@ -3109,6 +3120,121 @@ def reorder_schedule_items():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+def generate_available_content_report():
+    """Generate available content report by duration category"""
+    try:
+        from psycopg2.extras import RealDictCursor
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            # Get current date for comparisons
+            today = datetime.now().date()
+            
+            # Query for content statistics by duration category
+            query = """
+                WITH content_stats AS (
+                    SELECT 
+                        a.duration_category,
+                        COUNT(*) as count,
+                        SUM(a.duration_seconds) / 3600.0 as total_hours,
+                        CASE 
+                            WHEN sm.content_expiry_date IS NULL OR sm.content_expiry_date > %s THEN 
+                                CASE 
+                                    WHEN sm.go_live_date IS NULL OR sm.go_live_date <= %s THEN 'active'
+                                    ELSE 'not_yet_live'
+                                END
+                            ELSE 'expired'
+                        END as status
+                    FROM assets a
+                    LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                    JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                    WHERE a.analysis_completed = TRUE
+                    AND NOT (i.file_path LIKE '%%FILL%%')
+                    AND a.duration_category IN ('id', 'spots', 'short_form', 'long_form')
+                    GROUP BY a.duration_category, status
+                )
+                SELECT 
+                    duration_category,
+                    status,
+                    count,
+                    total_hours
+                FROM content_stats
+                ORDER BY 
+                    CASE duration_category
+                        WHEN 'id' THEN 1
+                        WHEN 'spots' THEN 2
+                        WHEN 'short_form' THEN 3
+                        WHEN 'long_form' THEN 4
+                    END,
+                    status
+            """
+            
+            cursor.execute(query, (today, today))
+            results = cursor.fetchall()
+            
+            # Organize results by category
+            categories = ['id', 'spots', 'short_form', 'long_form']
+            category_stats = {cat: {'active': {'count': 0, 'hours': 0}, 
+                                   'expired': {'count': 0, 'hours': 0},
+                                   'not_yet_live': {'count': 0, 'hours': 0}} for cat in categories}
+            
+            for row in results:
+                cat = row['duration_category']
+                status = row['status']
+                if cat in category_stats and status in category_stats[cat]:
+                    category_stats[cat][status]['count'] = row['count']
+                    category_stats[cat][status]['hours'] = float(row['total_hours']) if row['total_hours'] else 0
+            
+            # Calculate totals
+            totals = {'active': {'count': 0, 'hours': 0}, 
+                     'expired': {'count': 0, 'hours': 0},
+                     'not_yet_live': {'count': 0, 'hours': 0}}
+            
+            for cat in categories:
+                for status in ['active', 'expired', 'not_yet_live']:
+                    totals[status]['count'] += category_stats[cat][status]['count']
+                    totals[status]['hours'] += category_stats[cat][status]['hours']
+            
+            # Get additional statistics for active content
+            cursor.execute("""
+                SELECT 
+                    COUNT(DISTINCT a.content_type) as content_types,
+                    COUNT(DISTINCT a.theme) as themes,
+                    AVG(a.engagement_score) as avg_engagement
+                FROM assets a
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                WHERE a.analysis_completed = TRUE
+                AND NOT (i.file_path LIKE %s)
+                AND a.duration_category IN ('id', 'spots', 'short_form', 'long_form')
+                AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > %s)
+                AND (sm.go_live_date IS NULL OR sm.go_live_date <= %s)
+            """, ('%FILL%', today, today))
+            
+            stats = cursor.fetchone()
+            
+            return {
+                'generated_at': datetime.now().isoformat(),
+                'categories': category_stats,
+                'totals': totals,
+                'additional_stats': {
+                    'content_types': stats['content_types'] or 0,
+                    'themes': stats['themes'] or 0,
+                    'avg_engagement': float(stats['avg_engagement']) if stats['avg_engagement'] else 0
+                }
+            }
+            
+        finally:
+            cursor.close()
+            
+    except Exception as e:
+        logger.error(f"Error generating available content report: {str(e)}")
+        raise
+    finally:
+        if 'conn' in locals() and conn:
+            db_manager._put_connection(conn)
+
 @app.route('/api/generate-report', methods=['POST'])
 def generate_report():
     """Generate various analytical reports"""
@@ -3143,6 +3269,13 @@ def generate_report():
             report = ScheduleReplayAnalysisReport(db_manager)
             report_data = report.generate(schedule_id, report_type)
             
+            return jsonify({
+                'success': True,
+                'data': report_data
+            })
+        elif report_type == 'available-content':
+            # Generate available content report
+            report_data = generate_available_content_report()
             return jsonify({
                 'success': True,
                 'data': report_data
@@ -5863,6 +5996,19 @@ def load_schedule_from_ftp():
 @app.route('/api/fill-template-gaps', methods=['POST'])
 def fill_template_gaps():
     """Fill gaps in a template using the same logic as schedule creation"""
+    global fill_gaps_cancelled, fill_gaps_progress
+    
+    # Reset cancellation state and progress
+    fill_gaps_cancelled = False
+    fill_gaps_progress = {
+        'files_searched': 0,
+        'files_accepted': 0,
+        'files_rejected': 0,
+        'gaps_filled': 0,
+        'total_files': 0,
+        'message': 'Initializing...'
+    }
+    
     try:
         # Set up expiration decision logging
         import os
@@ -6505,6 +6651,10 @@ def fill_template_gaps():
         logger.info("Pre-validating file existence for available content...")
         validated_files = {}  # file_path -> exists (True/False)
         
+        # Update progress
+        fill_gaps_progress['total_files'] = len(available_content)
+        fill_gaps_progress['message'] = 'Validating content files...'
+        
         # Get FTP configurations once
         config = config_manager.get_all_config()
         source_config = config.get('servers', {}).get('source', {})
@@ -6524,6 +6674,19 @@ def fill_template_gaps():
         
         try:
             for content in available_content:
+                # Check for cancellation
+                if fill_gaps_cancelled:
+                    log_expiration("=== FILL GAPS CANCELLED BY USER ===")
+                    logger.info("Fill gaps operation cancelled by user during file validation")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Operation cancelled by user',
+                        'items_added': 0,
+                        'cancelled': True
+                    })
+                
+                # Update progress
+                fill_gaps_progress['files_searched'] += 1
                 # Skip Live Input Placeholder and zero-duration content
                 content_title = content.get('content_title', content.get('title', ''))
                 # Check both duration_seconds and file_duration fields with validation
@@ -6536,24 +6699,32 @@ def fill_template_gaps():
                 
                 if 'Live Input Placeholder' in content_title:
                     logger.info(f"Skipping Live Input Placeholder from available content")
+                    fill_gaps_progress['files_rejected'] += 1
                     continue
                     
                 if content_duration <= 0:
                     logger.info(f"Skipping zero-duration content: '{content_title}' (duration_seconds={content.get('duration_seconds')}, file_duration={content.get('file_duration')})")
+                    fill_gaps_progress['files_rejected'] += 1
                     continue
+                
+                # Update the content object with the validated duration
+                content['duration_seconds'] = content_duration
                 
                 # Check if this content is from Recordings folder
                 file_path = content.get('file_path', '')
                 if file_path and '/mnt/main/Recordings' in file_path:
                     filtered_count += 1
+                    fill_gaps_progress['files_rejected'] += 1
                     continue  # Skip content from Recordings folder
                 
                 # Check if we've already validated this file
                 if file_path in validated_files:
                     if validated_files[file_path]:
                         content_by_id[content.get('id')] = content
+                        fill_gaps_progress['files_accepted'] += 1
                     else:
                         missing_files_count += 1
+                        fill_gaps_progress['files_rejected'] += 1
                     continue
                 
                 # Validate file exists on at least one server
@@ -6602,8 +6773,10 @@ def fill_template_gaps():
                     # This allows us to debug while keeping the system functional
                     content_by_id[content.get('id')] = content
                     logger.warning(f"Could not validate file existence (including anyway): {file_path}")
+                    fill_gaps_progress['files_accepted'] += 1  # Accepting even if can't validate
                 else:
                     content_by_id[content.get('id')] = content
+                    fill_gaps_progress['files_accepted'] += 1
         
         finally:
             # Always disconnect FTP connections
@@ -6759,6 +6932,9 @@ def fill_template_gaps():
             logger.warning(f"Could not load replay delays, using defaults: {e}")
             replay_delays = {'id': 1, 'spots': 2, 'short_form': 4, 'long_form': 8}
         
+        # Update progress
+        fill_gaps_progress['message'] = 'Analyzing schedule gaps...'
+        
         # Fill gaps using rotation logic
         consecutive_errors = 0
         max_errors = 100  # Same as in create schedule
@@ -6881,6 +7057,21 @@ def fill_template_gaps():
         # Process each gap individually
         logger.info(f"\n=== PROCESSING {len(gaps)} GAPS ===")
         for gap_idx, gap in enumerate(gaps):
+            # Check for cancellation
+            if fill_gaps_cancelled:
+                log_expiration("=== FILL GAPS CANCELLED BY USER ===")
+                logger.info("Fill gaps operation cancelled by user during gap processing")
+                return jsonify({
+                    'success': False,
+                    'message': 'Operation cancelled by user',
+                    'items_added': len(items_added),
+                    'gaps_filled': gap_idx,
+                    'cancelled': True
+                })
+                
+            # Update progress
+            fill_gaps_progress['message'] = f'Filling gap {gap_idx + 1} of {len(gaps)}...'
+            
             # Validate gap values
             gap_start = validate_numeric(gap.get('start', 0),
                                         default=0,
@@ -6963,6 +7154,18 @@ def fill_template_gaps():
             max_gap_iterations = 1000  # Failsafe to prevent infinite loops
             
             while current_position < gap_end and gap_iterations < max_gap_iterations:
+                # Check for cancellation
+                if fill_gaps_cancelled:
+                    log_expiration("=== FILL GAPS CANCELLED BY USER (during gap filling) ===")
+                    logger.info("Fill gaps operation cancelled by user while filling gap")
+                    return jsonify({
+                        'success': False,
+                        'message': 'Operation cancelled by user',
+                        'items_added': len(items_added),
+                        'gaps_filled': gap_idx,
+                        'cancelled': True
+                    })
+                    
                 # Check if remaining gap is smaller than minimum available content
                 remaining = gap_end - current_position
                 if remaining < min_content_duration:
@@ -7560,6 +7763,10 @@ def fill_template_gaps():
                                     if items:
                                         durations = [i.get('duration_seconds', 0) for i in items[:3]]
                                         logger.debug(f"  {cat}: {len(items)} items, shortest durations: {[f'{d:.1f}s' for d in sorted(durations)[:3]]}")
+                                        # Log sample item details if durations are 0
+                                        if any(d == 0 for d in durations):
+                                            sample = items[0]
+                                            logger.warning(f"    Sample item with 0 duration: title='{sample.get('content_title', 'Unknown')}', duration_seconds={sample.get('duration_seconds')}, file_duration={sample.get('file_duration')}")
                                     else:
                                         logger.debug(f"  {cat}: 0 items")
                                 
@@ -7911,6 +8118,10 @@ def fill_template_gaps():
                 logger.info(f"Completed {day_names[gap_day]} Gap {gap_idx + 1}: Filled {filled_in_gap/3600:.2f}h of {gap_duration/3600:.2f}h, {remaining_in_gap/3600:.2f}h unfilled")
             else:
                 logger.info(f"Completed Gap {gap_idx + 1}: Filled {filled_in_gap/3600:.2f}h of {gap_duration/3600:.2f}h, {remaining_in_gap/3600:.2f}h unfilled")
+            
+            # Update gaps filled progress
+            if filled_in_gap > 0:
+                fill_gaps_progress['gaps_filled'] += 1
         
         # Calculate total filled duration
         total_filled_seconds = sum(item['duration_seconds'] for item in items_added)
@@ -8118,6 +8329,20 @@ def fill_template_gaps():
             response['json_debug_log'] = json_debug_log_path
             
         return jsonify(response)
+
+@app.route('/api/fill-gaps-progress', methods=['GET'])
+def get_fill_gaps_progress():
+    """Get current progress of fill gaps operation"""
+    global fill_gaps_progress
+    return jsonify(fill_gaps_progress)
+
+@app.route('/api/cancel-fill-gaps', methods=['POST'])
+def cancel_fill_gaps():
+    """Cancel the current fill gaps operation"""
+    global fill_gaps_cancelled
+    fill_gaps_cancelled = True
+    logger.info("Fill gaps operation cancelled by user")
+    return jsonify({'success': True, 'message': 'Fill gaps operation cancelled'})
 
 @app.route('/api/export-template', methods=['POST'])
 def export_template():

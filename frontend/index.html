@@ -1997,6 +1997,48 @@
         </div>
     </div>
 
+    <!-- Fill Gaps Progress Modal -->
+    <div id="fillGapsProgressModal" class="modal">
+        <div class="modal-content small">
+            <div class="modal-header">
+                <h3><i class="fas fa-spinner fa-spin"></i> Filling Schedule Gaps</h3>
+            </div>
+            <div class="modal-body">
+                <div class="progress-container">
+                    <div class="progress-stats">
+                        <div class="stat-row">
+                            <span class="stat-label">Files Searched:</span>
+                            <span class="stat-value" id="filesSearched">0</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Files Accepted:</span>
+                            <span class="stat-value success" id="filesAccepted">0</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Files Rejected:</span>
+                            <span class="stat-value warning" id="filesRejected">0</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Gaps Filled:</span>
+                            <span class="stat-value info" id="gapsFilled">0</span>
+                        </div>
+                    </div>
+                    <div class="progress-bar" style="margin-top: 20px;">
+                        <div class="progress-fill" id="fillGapsProgress" style="width: 0%;"></div>
+                    </div>
+                    <div class="progress-message" id="fillGapsMessage" style="margin-top: 10px; text-align: center;">
+                        Initializing content search...
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button danger" onclick="cancelFillGaps()">
+                    <i class="fas fa-stop"></i> Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Legacy script for compatibility -->
     <script src="script.js"></script>
     <!-- Content type filters -->

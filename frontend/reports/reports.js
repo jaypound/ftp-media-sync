@@ -62,6 +62,13 @@ const reportsState = {
             requiresScheduleId: true
         },
         {
+            id: 'available-content',
+            name: 'Available Content Report',
+            description: 'Analysis of available content by duration category, showing active and expired content',
+            icon: 'fas fa-database',
+            requiresScheduleId: false
+        },
+        {
             id: 'content-rotation',
             name: 'Content Rotation Report',
             description: 'Analysis of content rotation patterns and replay delays',
@@ -168,6 +175,9 @@ async function reportsOpenReport(reportId) {
         case 'replay-gaps':
         case 'comprehensive-analysis':
             await reportsLoadScheduleBasedReport(reportId);
+            break;
+        case 'available-content':
+            await reportsLoadAvailableContent();
             break;
         default:
             window.showNotification('Report not yet implemented', 'info');
@@ -1351,6 +1361,294 @@ function initGapHistogram(data) {
 function initComprehensiveCharts(data) {
     // Implement comprehensive analysis charts
     console.log('Comprehensive data:', data);
+}
+
+// Load Available Content Report
+async function reportsLoadAvailableContent() {
+    const reportContent = document.getElementById('reportContent');
+    
+    reportContent.innerHTML = `
+        <div class="report-header">
+            <button class="button secondary" onclick="reportsBackToMenu()">
+                <i class="fas fa-arrow-left"></i> Back to Reports
+            </button>
+            <h2><i class="fas fa-database"></i> Available Content Report</h2>
+        </div>
+        
+        <div id="reportResults" class="report-results">
+            <div class="report-loading">
+                <i class="fas fa-spinner fa-spin"></i> Generating report...
+            </div>
+        </div>
+    `;
+    
+    try {
+        const response = await window.API.post('/generate-report', {
+            report_type: 'available-content'
+        });
+        
+        if (response.success) {
+            reportsDisplayAvailableContentResults(response.data);
+        } else {
+            throw new Error(response.message || 'Failed to generate report');
+        }
+    } catch (error) {
+        document.getElementById('reportResults').innerHTML = `
+            <div class="report-error">
+                <i class="fas fa-exclamation-triangle"></i> 
+                ${error.message || 'Failed to generate report'}
+            </div>
+        `;
+    }
+}
+
+// Display Available Content Results
+function reportsDisplayAvailableContentResults(data) {
+    const resultsDiv = document.getElementById('reportResults');
+    
+    // Format category names
+    const categoryLabels = {
+        'id': 'ID (Station IDs)',
+        'spots': 'Spots (30s)',
+        'short_form': 'Short Form (30s-15m)',
+        'long_form': 'Long Form (15m+)'
+    };
+    
+    let html = `
+        <div class="report-results-content">
+            <div class="report-timestamp">
+                Generated: ${new Date(data.generated_at).toLocaleString()}
+            </div>
+    `;
+    
+    // Overview Summary
+    html += `
+        <div class="report-section">
+            <h3>Content Overview</h3>
+            <div class="report-stats-grid">
+                <div class="stat-card success">
+                    <div class="stat-value">${data.totals.active.count}</div>
+                    <div class="stat-label">Active Content Items</div>
+                    <div class="stat-sublabel">${data.totals.active.hours.toFixed(1)} hours</div>
+                </div>
+                <div class="stat-card danger">
+                    <div class="stat-value">${data.totals.expired.count}</div>
+                    <div class="stat-label">Expired Content Items</div>
+                    <div class="stat-sublabel">${data.totals.expired.hours.toFixed(1)} hours</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="stat-value">${data.totals.not_yet_live.count}</div>
+                    <div class="stat-label">Not Yet Live</div>
+                    <div class="stat-sublabel">${data.totals.not_yet_live.hours.toFixed(1)} hours</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-value">${(data.totals.active.count + data.totals.expired.count + data.totals.not_yet_live.count)}</div>
+                    <div class="stat-label">Total Content Items</div>
+                    <div class="stat-sublabel">${(data.totals.active.hours + data.totals.expired.hours + data.totals.not_yet_live.hours).toFixed(1)} hours</div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Additional Statistics
+    html += `
+        <div class="report-section">
+            <h3>Active Content Statistics</h3>
+            <div class="report-stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">${data.additional_stats.content_types}</div>
+                    <div class="stat-label">Content Types</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.additional_stats.themes}</div>
+                    <div class="stat-label">Unique Themes</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.additional_stats.avg_engagement.toFixed(0)}%</div>
+                    <div class="stat-label">Avg. Engagement Score</div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Detailed Breakdown by Category
+    html += `
+        <div class="report-section">
+            <h3>Content by Duration Category</h3>
+            <div class="category-breakdown">
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>Duration Category</th>
+                            <th colspan="2">Active</th>
+                            <th colspan="2">Expired</th>
+                            <th colspan="2">Not Yet Live</th>
+                            <th colspan="2">Total</th>
+                        </tr>
+                        <tr class="subheader">
+                            <th></th>
+                            <th>Count</th>
+                            <th>Hours</th>
+                            <th>Count</th>
+                            <th>Hours</th>
+                            <th>Count</th>
+                            <th>Hours</th>
+                            <th>Count</th>
+                            <th>Hours</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+    
+    // Add rows for each category
+    ['id', 'spots', 'short_form', 'long_form'].forEach(category => {
+        const catData = data.categories[category];
+        const totalCount = catData.active.count + catData.expired.count + catData.not_yet_live.count;
+        const totalHours = catData.active.hours + catData.expired.hours + catData.not_yet_live.hours;
+        
+        html += `
+            <tr>
+                <td class="category-name">${categoryLabels[category]}</td>
+                <td class="active">${catData.active.count}</td>
+                <td class="active">${catData.active.hours.toFixed(1)}</td>
+                <td class="expired">${catData.expired.count}</td>
+                <td class="expired">${catData.expired.hours.toFixed(1)}</td>
+                <td class="not-yet-live">${catData.not_yet_live.count}</td>
+                <td class="not-yet-live">${catData.not_yet_live.hours.toFixed(1)}</td>
+                <td class="total">${totalCount}</td>
+                <td class="total">${totalHours.toFixed(1)}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                    </tbody>
+                    <tfoot>
+                        <tr class="total-row">
+                            <td>Total</td>
+                            <td class="active">${data.totals.active.count}</td>
+                            <td class="active">${data.totals.active.hours.toFixed(1)}</td>
+                            <td class="expired">${data.totals.expired.count}</td>
+                            <td class="expired">${data.totals.expired.hours.toFixed(1)}</td>
+                            <td class="not-yet-live">${data.totals.not_yet_live.count}</td>
+                            <td class="not-yet-live">${data.totals.not_yet_live.hours.toFixed(1)}</td>
+                            <td class="total">${data.totals.active.count + data.totals.expired.count + data.totals.not_yet_live.count}</td>
+                            <td class="total">${(data.totals.active.hours + data.totals.expired.hours + data.totals.not_yet_live.hours).toFixed(1)}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    `;
+    
+    // Visual Charts
+    html += `
+        <div class="report-section">
+            <h3>Content Distribution</h3>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <h4>Active Content by Category</h4>
+                    <canvas id="activeContentChart" width="400" height="300"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h4>Content Status Distribution</h4>
+                    <canvas id="contentStatusChart" width="400" height="300"></canvas>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add export buttons
+    html += `
+        <div class="report-actions">
+            <button class="button primary" onclick="reportsExportToCSV()">
+                <i class="fas fa-file-csv"></i> Export to CSV
+            </button>
+            <button class="button secondary" onclick="reportsPrint()">
+                <i class="fas fa-print"></i> Print Report
+            </button>
+        </div>
+    `;
+    
+    html += '</div>';
+    resultsDiv.innerHTML = html;
+    
+    // Initialize charts
+    setTimeout(() => {
+        initAvailableContentCharts(data);
+    }, 100);
+}
+
+// Initialize Available Content Charts
+function initAvailableContentCharts(data) {
+    // Active Content by Category Chart
+    const activeCtx = document.getElementById('activeContentChart').getContext('2d');
+    new Chart(activeCtx, {
+        type: 'bar',
+        data: {
+            labels: ['ID', 'Spots', 'Short Form', 'Long Form'],
+            datasets: [{
+                label: 'Hours',
+                data: [
+                    data.categories.id.active.hours,
+                    data.categories.spots.active.hours,
+                    data.categories.short_form.active.hours,
+                    data.categories.long_form.active.hours
+                ],
+                backgroundColor: '#28a745'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Hours of Content'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Content Status Distribution Chart
+    const statusCtx = document.getElementById('contentStatusChart').getContext('2d');
+    new Chart(statusCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Active', 'Expired', 'Not Yet Live'],
+            datasets: [{
+                data: [
+                    data.totals.active.count,
+                    data.totals.expired.count,
+                    data.totals.not_yet_live.count
+                ],
+                backgroundColor: ['#28a745', '#dc3545', '#ffc107']
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value} items (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 // Export report to CSV

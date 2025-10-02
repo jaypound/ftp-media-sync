@@ -9768,6 +9768,87 @@ function showLoadMonthlyTemplateModal() {
     }
 }
 
+// Global variable to track fill gaps progress interval
+let fillGapsProgressInterval = null;
+
+// Function to show fill gaps progress modal
+function showFillGapsProgress() {
+    const modal = document.getElementById('fillGapsProgressModal');
+    if (modal) {
+        modal.style.display = 'block';
+        
+        // Reset progress values
+        document.getElementById('filesSearched').textContent = '0';
+        document.getElementById('filesAccepted').textContent = '0';
+        document.getElementById('filesRejected').textContent = '0';
+        document.getElementById('gapsFilled').textContent = '0';
+        document.getElementById('fillGapsProgress').style.width = '0%';
+        document.getElementById('fillGapsMessage').textContent = 'Initializing content search...';
+        
+        // Start polling for progress
+        fillGapsProgressInterval = setInterval(updateFillGapsProgress, 500);
+    }
+}
+
+// Function to hide fill gaps progress modal
+function hideFillGapsProgress() {
+    const modal = document.getElementById('fillGapsProgressModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    // Stop polling
+    if (fillGapsProgressInterval) {
+        clearInterval(fillGapsProgressInterval);
+        fillGapsProgressInterval = null;
+    }
+}
+
+// Function to update fill gaps progress
+async function updateFillGapsProgress() {
+    try {
+        const response = await fetch('/api/fill-gaps-progress');
+        if (response.ok) {
+            const progress = await response.json();
+            
+            // Update stats
+            document.getElementById('filesSearched').textContent = progress.files_searched;
+            document.getElementById('filesAccepted').textContent = progress.files_accepted;
+            document.getElementById('filesRejected').textContent = progress.files_rejected;
+            document.getElementById('gapsFilled').textContent = progress.gaps_filled;
+            
+            // Update progress bar
+            if (progress.total_files > 0) {
+                const percentage = (progress.files_searched / progress.total_files) * 100;
+                document.getElementById('fillGapsProgress').style.width = `${percentage}%`;
+            }
+            
+            // Update message
+            document.getElementById('fillGapsMessage').textContent = progress.message || 'Processing...';
+        }
+    } catch (error) {
+        console.error('Error updating fill gaps progress:', error);
+    }
+}
+
+// Function to cancel fill gaps operation
+async function cancelFillGaps() {
+    try {
+        const response = await fetch('/api/cancel-fill-gaps', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            log('Fill gaps operation cancelled', 'warning');
+            hideFillGapsProgress();
+        }
+    } catch (error) {
+        console.error('Error cancelling fill gaps:', error);
+        log(`Error cancelling fill gaps: ${error.message}`, 'error');
+    }
+}
+
 async function fillScheduleGaps() {
     try {
         log('fillScheduleGaps: Function called', 'info');
@@ -10331,6 +10412,9 @@ async function fillScheduleGaps() {
                     // Test JSON serialization before sending
                     const testStringify = JSON.stringify(requestBody);
                     
+                    // Show progress modal
+                    showFillGapsProgress();
+                    
                     response = await fetch('/api/fill-template-gaps', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -10414,6 +10498,16 @@ async function fillScheduleGaps() {
                 }
                 
                 const result = await response.json();
+                
+                // Hide progress modal
+                hideFillGapsProgress();
+                
+                // Check if operation was cancelled
+                if (result.cancelled) {
+                    log('Fill gaps operation was cancelled', 'warning');
+                    alert('Fill gaps operation was cancelled');
+                    return;
+                }
                 
                 if (result.success && result.items_added && result.items_added.length > 0) {
                     log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
@@ -10515,6 +10609,8 @@ async function fillScheduleGaps() {
                     }
                 }
             } catch (error) {
+                // Hide progress modal on error
+                hideFillGapsProgress();
                 log(`fillScheduleGaps: Error filling gaps - ${error.message}`, 'error');
                 alert(`Error filling schedule gaps: ${error.message}`);
             }
@@ -10522,6 +10618,8 @@ async function fillScheduleGaps() {
             log('fillScheduleGaps: User cancelled gap filling', 'info');
         }
     } catch (error) {
+        // Hide progress modal on any error
+        hideFillGapsProgress();
         log(`fillScheduleGaps: ERROR - ${error.message}`, 'error');
         console.error('Error in fillScheduleGaps:', error);
     }
