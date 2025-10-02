@@ -1541,22 +1541,7 @@ function reportsDisplayAvailableContentResults(data) {
         </div>
     `;
     
-    // Visual Charts
-    html += `
-        <div class="report-section">
-            <h3>Content Distribution</h3>
-            <div class="chart-grid">
-                <div class="chart-container">
-                    <h4>Active Content by Category</h4>
-                    <canvas id="activeContentChart" width="400" height="300"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h4>Content Status Distribution</h4>
-                    <canvas id="contentStatusChart" width="400" height="300"></canvas>
-                </div>
-            </div>
-        </div>
-    `;
+    // Visual Charts section removed per user request
     
     // Add export buttons
     html += `
@@ -1573,10 +1558,7 @@ function reportsDisplayAvailableContentResults(data) {
     html += '</div>';
     resultsDiv.innerHTML = html;
     
-    // Initialize charts
-    setTimeout(() => {
-        initAvailableContentCharts(data);
-    }, 100);
+    // Charts removed per user request - no initialization needed
 }
 
 // Initialize Available Content Charts
