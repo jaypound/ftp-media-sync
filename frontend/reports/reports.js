@@ -69,6 +69,13 @@ const reportsState = {
             requiresScheduleId: false
         },
         {
+            id: 'schedule-content-search',
+            name: 'Schedule Content Search',
+            description: 'Search for specific content within a schedule by file name or title',
+            icon: 'fas fa-search',
+            requiresScheduleId: true
+        },
+        {
             id: 'content-rotation',
             name: 'Content Rotation Report',
             description: 'Analysis of content rotation patterns and replay delays',
@@ -178,6 +185,9 @@ async function reportsOpenReport(reportId) {
             break;
         case 'available-content':
             await reportsLoadAvailableContent();
+            break;
+        case 'schedule-content-search':
+            await reportsLoadScheduleContentSearch();
             break;
         default:
             window.showNotification('Report not yet implemented', 'info');
@@ -1559,6 +1569,297 @@ function reportsDisplayAvailableContentResults(data) {
     resultsDiv.innerHTML = html;
     
     // Charts removed per user request - no initialization needed
+}
+
+// Load Schedule Content Search Report
+async function reportsLoadScheduleContentSearch() {
+    const reportContent = document.getElementById('reportContent');
+    
+    // First, show schedule selector
+    reportContent.innerHTML = `
+        <div class="report-header">
+            <button class="button secondary" onclick="reportsBackToMenu()">
+                <i class="fas fa-arrow-left"></i> Back to Reports
+            </button>
+            <h2><i class="fas fa-search"></i> Schedule Content Search</h2>
+        </div>
+        
+        <div class="report-selector">
+            <h3>Select Schedule</h3>
+            <div class="schedule-selector-container">
+                <select id="scheduleSelect" class="form-select">
+                    <option value="">Loading schedules...</option>
+                </select>
+            </div>
+        </div>
+        
+        <div id="searchContainer" style="display: none;" class="report-selector">
+            <h3>Search Content</h3>
+            <div class="search-input-container">
+                <input type="text" id="searchInput" class="form-input" placeholder="Enter search term (e.g., file name, title, content type)">
+                <button class="button primary" onclick="reportsSearchScheduleContent()">
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+        </div>
+        
+        <div id="reportResults" class="report-results" style="display: none;">
+        </div>
+    `;
+    
+    // Load available schedules
+    try {
+        const response = await window.API.get('/schedules/list');
+        
+        if (response.success && response.schedules) {
+            const select = document.getElementById('scheduleSelect');
+            const schedules = response.schedules.sort((a, b) => 
+                new Date(b.schedule_date) - new Date(a.schedule_date)
+            );
+            
+            if (schedules.length === 0) {
+                select.innerHTML = '<option value="">No schedules available</option>';
+            } else {
+                select.innerHTML = '<option value="">Select a schedule...</option>';
+                schedules.forEach(schedule => {
+                    const date = new Date(schedule.schedule_date);
+                    const createdAt = schedule.created_at ? new Date(schedule.created_at) : null;
+                    const option = document.createElement('option');
+                    option.value = schedule.id;
+                    
+                    // Format the display text with creation time
+                    let displayText = `${date.toLocaleDateString()} - ${schedule.schedule_name || 'Unnamed Schedule'} (${schedule.total_items} items)`;
+                    if (createdAt) {
+                        displayText += ` - Created: ${createdAt.toLocaleDateString()} ${createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+                    }
+                    option.textContent = displayText;
+                    select.appendChild(option);
+                });
+                
+                // Add change event listener
+                select.addEventListener('change', function() {
+                    const searchContainer = document.getElementById('searchContainer');
+                    const resultsDiv = document.getElementById('reportResults');
+                    if (this.value) {
+                        searchContainer.style.display = 'block';
+                        resultsDiv.style.display = 'none';
+                        document.getElementById('searchInput').value = '';
+                        document.getElementById('searchInput').focus();
+                    } else {
+                        searchContainer.style.display = 'none';
+                        resultsDiv.style.display = 'none';
+                    }
+                });
+            }
+        } else {
+            document.getElementById('scheduleSelect').innerHTML = '<option value="">Failed to load schedules</option>';
+        }
+    } catch (error) {
+        console.error('Error loading schedules:', error);
+        document.getElementById('scheduleSelect').innerHTML = '<option value="">Error loading schedules</option>';
+    }
+}
+
+// Search Schedule Content
+async function reportsSearchScheduleContent() {
+    const scheduleId = document.getElementById('scheduleSelect').value;
+    const searchTerm = document.getElementById('searchInput').value.trim();
+    
+    if (!scheduleId) {
+        alert('Please select a schedule first');
+        return;
+    }
+    
+    if (!searchTerm) {
+        alert('Please enter a search term');
+        return;
+    }
+    
+    const resultsDiv = document.getElementById('reportResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = `
+        <div class="report-loading">
+            <i class="fas fa-spinner fa-spin"></i> Searching schedule content...
+        </div>
+    `;
+    
+    try {
+        const response = await window.API.post('/generate-report', {
+            report_type: 'schedule-content-search',
+            schedule_id: scheduleId,
+            search_term: searchTerm
+        });
+        
+        if (response.success) {
+            reportsDisplayScheduleContentSearchResults(response.data);
+        } else {
+            throw new Error(response.message || 'Failed to search schedule');
+        }
+    } catch (error) {
+        resultsDiv.innerHTML = `
+            <div class="report-error">
+                <i class="fas fa-exclamation-triangle"></i> 
+                ${error.message || 'Failed to search schedule content'}
+            </div>
+        `;
+    }
+}
+
+// Display Schedule Content Search Results
+function reportsDisplayScheduleContentSearchResults(data) {
+    const resultsDiv = document.getElementById('reportResults');
+    
+    let html = `
+        <div class="report-results-content">
+            <div class="report-timestamp">
+                Search Term: "<strong>${data.search_term}</strong>" | 
+                Schedule: ${data.schedule_name || 'Unnamed'} (${new Date(data.schedule_date).toLocaleDateString()})
+            </div>
+    `;
+    
+    if (data.matches.length === 0) {
+        html += `
+            <div class="report-note">
+                <i class="fas fa-info-circle"></i> No content found matching "${data.search_term}"
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="report-section">
+                <h3>Search Results (${data.matches.length} items found)</h3>
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>File Name</th>
+                            <th>Content Title</th>
+                            <th>Day</th>
+                            <th>Start Time</th>
+                            <th>Duration</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        // Format and display each match
+        data.matches.forEach(item => {
+            // Parse scheduled time - this is the correct datetime from backend
+            const scheduledTime = new Date(item.scheduled_start);
+            const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][scheduledTime.getDay()];
+            const timeStr = scheduledTime.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit',
+                hour12: false 
+            });
+            
+            // Format duration
+            const duration = item.scheduled_duration_seconds;
+            const hours = Math.floor(duration / 3600);
+            const minutes = Math.floor((duration % 3600) / 60);
+            const seconds = Math.floor(duration % 60);
+            let durationStr = '';
+            if (hours > 0) durationStr += `${hours}h `;
+            if (minutes > 0) durationStr += `${minutes}m `;
+            durationStr += `${seconds}s`;
+            
+            // Highlight search term in file name and title
+            const highlightTerm = (text) => {
+                if (!text) return '';
+                const regex = new RegExp(`(${data.search_term})`, 'gi');
+                return text.replace(regex, '<mark>$1</mark>');
+            };
+            
+            html += `
+                <tr>
+                    <td>${highlightTerm(item.file_name)}</td>
+                    <td>${highlightTerm(item.content_title || '')}</td>
+                    <td>${dayOfWeek}</td>
+                    <td>${timeStr}</td>
+                    <td>${durationStr}</td>
+                    <td><span class="category-badge ${item.duration_category}">${item.duration_category || 'N/A'}</span></td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        // Summary statistics
+        html += `
+            <div class="report-section">
+                <h3>Summary</h3>
+                <div class="report-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">${data.matches.length}</div>
+                        <div class="stat-label">Total Matches</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.unique_days}</div>
+                        <div class="stat-label">Days with Matches</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${typeof data.total_duration_hours === 'number' ? data.total_duration_hours.toFixed(1) : '0.0'}</div>
+                        <div class="stat-label">Total Hours</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Add export button if there are results
+    if (data.matches.length > 0) {
+        html += `
+            <div class="report-actions">
+                <button class="button primary" onclick="reportsExportScheduleSearchToCSV()">
+                    <i class="fas fa-file-csv"></i> Export to CSV
+                </button>
+                <button class="button secondary" onclick="reportsPrint()">
+                    <i class="fas fa-print"></i> Print Report
+                </button>
+            </div>
+        `;
+    }
+    
+    html += '</div>';
+    resultsDiv.innerHTML = html;
+    
+    // Store data for export
+    window.currentReportData = data;
+}
+
+// Export Schedule Search to CSV
+function reportsExportScheduleSearchToCSV() {
+    if (!window.currentReportData) return;
+    
+    const data = window.currentReportData;
+    let csv = 'File Name,Content Title,Day,Start Date,Start Time,Duration (seconds),Duration Category\n';
+    
+    data.matches.forEach(item => {
+        const scheduledTime = new Date(item.scheduled_start);
+        const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][scheduledTime.getDay()];
+        const dateStr = scheduledTime.toLocaleDateString();
+        const timeStr = scheduledTime.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            hour12: false 
+        });
+        
+        csv += `"${item.file_name}","${item.content_title || ''}","${dayOfWeek}","${dateStr}","${timeStr}",${item.scheduled_duration_seconds},"${item.duration_category || ''}"\n`;
+    });
+    
+    // Download CSV
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `schedule_content_search_${data.search_term.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
 }
 
 // Initialize Available Content Charts

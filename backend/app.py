@@ -3120,6 +3120,168 @@ def reorder_schedule_items():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+def search_schedule_content(schedule_id, search_term):
+    """Search for content within a schedule"""
+    try:
+        from psycopg2.extras import RealDictCursor
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        try:
+            # First get schedule info
+            cursor.execute("""
+                SELECT schedule_name, air_date, total_duration_seconds
+                FROM schedules 
+                WHERE id = %s
+            """, (schedule_id,))
+            schedule_info = cursor.fetchone()
+            
+            if not schedule_info:
+                raise ValueError("Schedule not found")
+            
+            # Check if this is a weekly schedule (duration > 24 hours)
+            total_seconds = float(schedule_info.get('total_duration_seconds', 0) or 0)
+            is_weekly_schedule = total_seconds > 86400  # More than 24 hours
+            
+            # Search for content in schedule items
+            # Search in file_name, content_title, and content_type fields
+            search_pattern = f'%{search_term}%'
+            
+            # Get all schedule items first to calculate cumulative times
+            cursor.execute("""
+                SELECT 
+                    si.id,
+                    COALESCE(i.file_name, '') as file_name,
+                    COALESCE(a.content_title, '') as content_title,
+                    si.scheduled_start_time,
+                    si.scheduled_duration_seconds,
+                    a.duration_category,
+                    a.content_type,
+                    si.asset_id,
+                    si.sequence_number,
+                    s.air_date
+                FROM scheduled_items si
+                JOIN schedules s ON si.schedule_id = s.id
+                JOIN assets a ON si.asset_id = a.id
+                LEFT JOIN instances i ON si.instance_id = i.id OR (si.instance_id IS NULL AND i.asset_id = si.asset_id AND i.is_primary = true)
+                WHERE si.schedule_id = %s
+                ORDER BY si.sequence_number
+            """, (schedule_id,))
+            
+            all_items = cursor.fetchall()
+            
+            # Calculate cumulative start times for weekly schedules
+            cumulative_seconds = 0
+            item_start_times = {}
+            
+            for item in all_items:
+                item_start_times[item['id']] = cumulative_seconds
+                duration = float(item['scheduled_duration_seconds'] or 0)
+                cumulative_seconds += duration
+            
+            # Now search for matching items
+            cursor.execute("""
+                SELECT 
+                    si.id,
+                    COALESCE(i.file_name, '') as file_name,
+                    COALESCE(a.content_title, '') as content_title,
+                    si.scheduled_start_time,
+                    si.scheduled_duration_seconds,
+                    a.duration_category,
+                    a.content_type,
+                    si.asset_id,
+                    si.sequence_number,
+                    s.air_date
+                FROM scheduled_items si
+                JOIN schedules s ON si.schedule_id = s.id
+                JOIN assets a ON si.asset_id = a.id
+                LEFT JOIN instances i ON si.instance_id = i.id OR (si.instance_id IS NULL AND i.asset_id = si.asset_id AND i.is_primary = true)
+                WHERE si.schedule_id = %s
+                AND (
+                    LOWER(COALESCE(i.file_name, '')) LIKE LOWER(%s)
+                    OR LOWER(COALESCE(a.content_title, '')) LIKE LOWER(%s)
+                    OR LOWER(COALESCE(a.content_type::text, '')) LIKE LOWER(%s)
+                )
+                ORDER BY si.sequence_number
+            """, (schedule_id, search_pattern, search_pattern, search_pattern))
+            
+            matches = cursor.fetchall()
+            
+            # Calculate scheduled start datetime for each item
+            schedule_date = schedule_info['air_date']
+            processed_matches = []
+            unique_days = set()
+            total_duration = 0
+            
+            for match in matches:
+                if is_weekly_schedule:
+                    # For weekly schedules, use cumulative time to determine actual day
+                    cumulative_start = item_start_times.get(match['id'], 0)
+                    days_offset = int(cumulative_start // 86400)
+                    time_in_day = cumulative_start % 86400
+                    
+                    scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
+                    scheduled_datetime = scheduled_datetime + timedelta(days=days_offset, seconds=time_in_day)
+                else:
+                    # For daily schedules, use the scheduled_start_time directly
+                    scheduled_time = match['scheduled_start_time']
+                    if isinstance(scheduled_time, str):
+                        # Parse time string
+                        time_parts = scheduled_time.split(':')
+                        hours = int(time_parts[0])
+                        minutes = int(time_parts[1])
+                        seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                    else:
+                        # Handle time object
+                        hours = scheduled_time.hour
+                        minutes = scheduled_time.minute
+                        seconds = scheduled_time.second + (scheduled_time.microsecond / 1000000)
+                    
+                    # Calculate the actual datetime
+                    scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
+                    scheduled_datetime = scheduled_datetime + timedelta(hours=hours, minutes=minutes, seconds=seconds)
+                
+                # Track unique days
+                unique_days.add(scheduled_datetime.date())
+                
+                # Add to total duration
+                duration_seconds = match['scheduled_duration_seconds']
+                if duration_seconds is not None:
+                    total_duration += float(duration_seconds)
+                
+                processed_matches.append({
+                    'id': match['id'],
+                    'file_name': match['file_name'],
+                    'content_title': match['content_title'],
+                    'scheduled_start': scheduled_datetime.isoformat(),
+                    'scheduled_duration_seconds': match['scheduled_duration_seconds'],
+                    'duration_category': match['duration_category'],
+                    'content_type': match['content_type'],
+                    'asset_id': match['asset_id']
+                })
+            
+            return {
+                'search_term': search_term,
+                'schedule_id': schedule_id,
+                'schedule_name': schedule_info['schedule_name'],
+                'schedule_date': schedule_info['air_date'].isoformat(),
+                'matches': processed_matches,
+                'total_matches': len(matches),
+                'unique_days': len(unique_days),
+                'total_duration_hours': float(total_duration) / 3600 if total_duration > 0 else 0,
+                'generated_at': datetime.now().isoformat()
+            }
+            
+        finally:
+            cursor.close()
+    except Exception as e:
+        logger.error(f"Error searching schedule content: {str(e)}", exc_info=True)
+        raise
+    finally:
+        if 'conn' in locals() and conn:
+            db_manager._put_connection(conn)
+
 def generate_available_content_report():
     """Generate available content report by duration category"""
     try:
@@ -3280,6 +3442,19 @@ def generate_report():
                 'success': True,
                 'data': report_data
             })
+        elif report_type == 'schedule-content-search':
+            # Search schedule content
+            search_term = data.get('search_term', '')
+            if not schedule_id:
+                return jsonify({'success': False, 'message': 'Schedule ID required'})
+            if not search_term:
+                return jsonify({'success': False, 'message': 'Search term required'})
+            
+            report_data = search_schedule_content(schedule_id, search_term)
+            return jsonify({
+                'success': True,
+                'data': report_data
+            })
         else:
             return jsonify({
                 'success': False,
@@ -3362,6 +3537,41 @@ def toggle_schedule_item_availability():
         error_msg = f"Toggle item availability error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
+
+@app.route('/api/schedules/list', methods=['GET'])
+def list_schedules_api():
+    """List all schedules for API"""
+    logger.info("=== LIST SCHEDULES API REQUEST ===")
+    try:
+        # Use the same approach as the working list_schedules function
+        schedules = scheduler_postgres.get_active_schedules()
+        
+        # Convert to the expected format for the frontend
+        formatted_schedules = []
+        for schedule in schedules:
+            formatted_schedule = {
+                'id': schedule.get('id'),
+                'schedule_name': schedule.get('name') or schedule.get('schedule_name', ''),
+                'schedule_date': schedule['air_date'].isoformat() if schedule.get('air_date') else None,
+                'total_duration_seconds': float(schedule.get('total_duration', 0) or schedule.get('total_duration_seconds', 0)),
+                'total_items': schedule.get('total_items', 0),
+                'created_at': schedule['created_at'].isoformat() if schedule.get('created_at') else None
+            }
+            formatted_schedules.append(formatted_schedule)
+        
+        logger.info(f"Returning {len(formatted_schedules)} schedules")
+        
+        return jsonify({
+            'success': True,
+            'schedules': formatted_schedules
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in list_schedules_api: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': f'Error fetching schedules: {str(e)}'
+        })
 
 @app.route('/api/list-schedules', methods=['GET'])
 def list_schedules():

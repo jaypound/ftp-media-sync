@@ -145,6 +145,37 @@
     font-size: 1rem;
 }
 
+/* Search input styles */
+.search-input-container {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.form-input {
+    flex: 1;
+    padding: 0.75rem;
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+/* Highlight search results */
+mark {
+    background-color: #ffeb3b;
+    color: #000;
+    padding: 2px;
+    border-radius: 2px;
+}
+
 /* Report Results */
 .report-loading {
     text-align: center;
