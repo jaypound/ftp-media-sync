@@ -7319,6 +7319,7 @@ def fill_template_gaps():
             # If so, add a frame buffer to prevent overlap
             frame_buffer = 0.033367  # One frame at 29.97 fps (1001/30000 seconds)
             gap_starts_after_item = False
+            gap_starts_after_live_event = False
             
             for orig_item in original_items:
                 if not orig_item.get('is_gap', False):  # Skip gap items
@@ -7328,6 +7329,12 @@ def fill_template_gaps():
                         logger.info(f"  Gap starts immediately after item '{orig_item['title']}' that ends at {orig_end/3600:.6f}h")
                         logger.info(f"  Adding {frame_buffer}s buffer to prevent overlap")
                         gap_starts_after_item = True
+                        
+                        # Check if this was a live event
+                        if orig_item.get('is_live_input', False):
+                            logger.info(f"  Previous item was a LIVE EVENT - will reset rotation category")
+                            gap_starts_after_live_event = True
+                        
                         break
             
             # Log date calculation for this gap
@@ -7358,6 +7365,12 @@ def fill_template_gaps():
                                                  default=0,
                                                  name="initial current_position",
                                                  min_value=0)
+            
+            # Reset rotation if this gap follows a live event
+            if gap_starts_after_live_event:
+                scheduler._reset_rotation()
+                logger.info("  Rotation reset to start of sequence after live event")
+                logger.info(f"  Next category will be: {scheduler.duration_rotation[0]}")  # First in rotation
             
             # Track iterations to prevent infinite loops
             gap_iterations = 0
