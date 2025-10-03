@@ -7407,13 +7407,8 @@ def fill_template_gaps():
                 duration_categories = ['id', 'spots', 'short_form', 'long_form']
                 is_duration_category = duration_category in duration_categories
                 
-                # Check if we should skip long-form content after 10 PM
-                current_hour = (current_position % 86400) / 3600
-                if current_hour >= 22 and duration_category == 'long_form':
-                    logger.info(f"Skipping long-form content after 10 PM (current hour: {current_hour:.1f})")
-                    scheduler._advance_rotation()
-                    # Don't count this as an error - we're intentionally skipping
-                    continue
+                # Note: Long-form content is now allowed after 10 PM as long as it fits before midnight
+                # The midnight boundary check is handled later when checking if content fits
                 
                 # Filter available content by category and replay delays
                 category_content = []
@@ -7702,23 +7697,14 @@ def fill_template_gaps():
                         
                         # Define category priority for small gaps (prefer shorter content)
                         gap_minutes = remaining / 60
-                        current_hour = (current_position % 86400) / 3600
                         
-                        # Exclude long-form after 10 PM
-                        if current_hour >= 22:
-                            if gap_minutes < 2:
-                                category_priority = ['id', 'spots', 'short_form']
-                            elif gap_minutes < 20:
-                                category_priority = ['spots', 'short_form', 'id']
-                            else:
-                                category_priority = ['short_form', 'spots', 'id']
+                        # Include long-form in all time slots - midnight boundary check is handled elsewhere
+                        if gap_minutes < 2:
+                            category_priority = ['id', 'spots', 'short_form', 'long_form']
+                        elif gap_minutes < 20:
+                            category_priority = ['spots', 'short_form', 'id', 'long_form']
                         else:
-                            if gap_minutes < 2:
-                                category_priority = ['id', 'spots', 'short_form', 'long_form']
-                            elif gap_minutes < 20:
-                                category_priority = ['spots', 'short_form', 'id', 'long_form']
-                            else:
-                                category_priority = ['short_form', 'spots', 'long_form', 'id']
+                            category_priority = ['short_form', 'spots', 'long_form', 'id']
                         
                         # Try each category in priority order
                         for try_category in category_priority:
