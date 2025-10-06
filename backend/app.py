@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import uuid
 import subprocess
 import shutil
+import tempfile
 from psycopg2.extras import RealDictCursor
 
 # Load environment variables from .env file
@@ -10739,6 +10740,415 @@ def list_files():
             'success': False,
             'message': str(e)
         })
+
+@app.route('/api/generate-video', methods=['POST'])
+def generate_video():
+    """Generate a video file from selected graphics and music"""
+    try:
+        data = request.json
+        logger.info(f"Generate video request: {data.get('file_name')}")
+        
+        # Extract parameters
+        file_name = data.get('file_name')
+        export_path = data.get('export_path')
+        export_to_source = data.get('export_to_source', False)
+        export_to_target = data.get('export_to_target', False)
+        video_format = data.get('video_format', 'mp4')
+        
+        # Region data
+        region1_server = data.get('region1_server')
+        region1_path = data.get('region1_path')
+        region1_files = data.get('region1_files', [])
+        
+        region2_server = data.get('region2_server')
+        region2_path = data.get('region2_path')
+        region2_file = data.get('region2_file')
+        
+        region3_server = data.get('region3_server')
+        region3_path = data.get('region3_path')
+        region3_files = data.get('region3_files', [])
+        
+        if not file_name:
+            return jsonify({'success': False, 'message': 'File name is required'})
+        
+        # Ensure export path ends with /
+        if export_path and not export_path.endswith('/'):
+            export_path += '/'
+        
+        # Add extension if not present
+        if not file_name.endswith(f'.{video_format}'):
+            file_name = f"{file_name}.{video_format}"
+        
+        # Full export path
+        full_export_path = f"{export_path}{file_name}"
+        
+        # Get FTP configurations
+        config = config_manager.get_all_config()
+        servers = config.get('servers', {})
+        
+        # Prepare to download files
+        temp_dir = tempfile.mkdtemp(prefix='video_gen_')
+        logger.info(f"Created temp directory: {temp_dir}")
+        
+        try:
+            # Download graphics files from region 1
+            region1_temp_files = []
+            if region1_files and region1_server:
+                server_config = servers.get(region1_server, {})
+                ftp = FTPManager(server_config)
+                if ftp.connect():
+                    for file in region1_files:
+                        remote_path = f"{region1_path}/{file}"
+                        local_path = os.path.join(temp_dir, f"r1_{file}")
+                        if ftp.download_file(remote_path, local_path):
+                            region1_temp_files.append(local_path)
+                            logger.info(f"Downloaded region1 file: {file}")
+                    ftp.disconnect()
+            
+            # Download graphics file from region 2
+            region2_temp_file = None
+            if region2_file and region2_server:
+                server_config = servers.get(region2_server, {})
+                ftp = FTPManager(server_config)
+                if ftp.connect():
+                    remote_path = f"{region2_path}/{region2_file}"
+                    local_path = os.path.join(temp_dir, f"r2_{region2_file}")
+                    if ftp.download_file(remote_path, local_path):
+                        region2_temp_file = local_path
+                        logger.info(f"Downloaded region2 file: {region2_file}")
+                    ftp.disconnect()
+            
+            # Download music files from region 3
+            region3_temp_files = []
+            if region3_files and region3_server:
+                server_config = servers.get(region3_server, {})
+                ftp = FTPManager(server_config)
+                if ftp.connect():
+                    for file in region3_files:
+                        remote_path = f"{region3_path}/{file}"
+                        local_path = os.path.join(temp_dir, f"r3_{file}")
+                        if ftp.download_file(remote_path, local_path):
+                            region3_temp_files.append(local_path)
+                            logger.info(f"Downloaded region3 file: {file}")
+                    ftp.disconnect()
+            
+            # Generate video using FFmpeg
+            output_video = os.path.join(temp_dir, file_name)
+            
+            # Basic implementation - create a slideshow with music
+            # This is a simplified version - you may want to enhance this
+            ffmpeg_cmd = generate_ffmpeg_command(
+                region1_temp_files,
+                region2_temp_file,
+                region3_temp_files,
+                output_video,
+                video_format
+            )
+            
+            if not ffmpeg_cmd:
+                return jsonify({
+                    'success': False,
+                    'message': 'No valid 1920x800 graphics found in Region 1. Please select graphics with the correct dimensions.'
+                })
+            
+            logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            
+            # Create logs directory if it doesn't exist
+            logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Create timestamped log file for this FFmpeg command
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            log_filename = f"ffmpeg_video_gen_{timestamp}.log"
+            log_filepath = os.path.join(logs_dir, log_filename)
+            
+            # Write the FFmpeg command to the log file
+            with open(log_filepath, 'w') as log_file:
+                log_file.write(f"# FFmpeg Video Generation Log\n")
+                log_file.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log_file.write(f"# Output file: {output_video}\n")
+                log_file.write(f"# Video name: {file_name}\n")
+                log_file.write(f"\n# Command (formatted for readability):\n")
+                log_file.write("ffmpeg \\\n")
+                for i, arg in enumerate(ffmpeg_cmd[1:]):  # Skip 'ffmpeg' itself
+                    if arg.startswith('-'):
+                        log_file.write(f"  {arg}")
+                    else:
+                        # Quote arguments that contain spaces or special chars
+                        if ' ' in arg or '&' in arg or '|' in arg or ';' in arg:
+                            log_file.write(f" '{arg}'")
+                        else:
+                            log_file.write(f" {arg}")
+                    # Add line continuation for readability
+                    if i < len(ffmpeg_cmd) - 2 and ffmpeg_cmd[i+2].startswith('-'):
+                        log_file.write(" \\\n")
+                    else:
+                        log_file.write(" ")
+                log_file.write("\n\n# Raw command:\n")
+                log_file.write(' '.join(ffmpeg_cmd))
+                log_file.write("\n")
+            
+            logger.info(f"FFmpeg command logged to: {log_filepath}")
+            
+            # Run FFmpeg
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            
+            # Append FFmpeg output to the log file
+            with open(log_filepath, 'a') as log_file:
+                log_file.write("\n\n# FFmpeg Output:\n")
+                log_file.write("# Return code: {}\n".format(result.returncode))
+                if result.stdout:
+                    log_file.write("\n# STDOUT:\n")
+                    log_file.write(result.stdout)
+                if result.stderr:
+                    log_file.write("\n# STDERR:\n")
+                    log_file.write(result.stderr)
+                log_file.write(f"\n# Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            
+            if result.returncode != 0:
+                logger.error(f"FFmpeg error: {result.stderr}")
+                return jsonify({
+                    'success': False,
+                    'message': f'Video generation failed: {result.stderr}'
+                })
+            
+            # Upload the generated video to selected servers
+            uploaded_servers = []
+            failed_servers = []
+            
+            # Determine which servers to upload to
+            servers_to_upload = []
+            if export_to_source:
+                servers_to_upload.append(('source', servers.get('source', {})))
+            if export_to_target:
+                servers_to_upload.append(('target', servers.get('target', {})))
+            
+            # Upload to each selected server
+            for server_name, server_config in servers_to_upload:
+                logger.info(f"Uploading video to {server_name} server")
+                upload_ftp = FTPManager(server_config)
+                
+                if upload_ftp.connect():
+                    # Create directory if needed
+                    upload_ftp.create_directory(export_path)
+                    
+                    # Upload video file
+                    success = upload_ftp.upload_file(output_video, full_export_path)
+                    upload_ftp.disconnect()
+                    
+                    if success:
+                        logger.info(f"Video uploaded successfully to {server_name}: {full_export_path}")
+                        uploaded_servers.append(server_name)
+                    else:
+                        logger.warning(f"Failed to upload video to {server_name}")
+                        failed_servers.append(server_name)
+                else:
+                    logger.warning(f"Failed to connect to {server_name} for video upload")
+                    failed_servers.append(server_name)
+            
+            # Return result
+            if uploaded_servers:
+                message_parts = [f'Video generated and uploaded to {", ".join(uploaded_servers)}']
+                if failed_servers:
+                    message_parts.append(f'Failed to upload to: {", ".join(failed_servers)}')
+                
+                return jsonify({
+                    'success': True,
+                    'message': '. '.join(message_parts),
+                    'file_path': full_export_path,
+                    'uploaded_servers': uploaded_servers,
+                    'failed_servers': failed_servers
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': f'Failed to upload video to any server',
+                    'failed_servers': failed_servers
+                })
+                
+        finally:
+            # Clean up temp directory
+            import shutil
+            shutil.rmtree(temp_dir)
+            logger.info(f"Cleaned up temp directory: {temp_dir}")
+            
+    except Exception as e:
+        logger.error(f"Error generating video: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_path, format='mp4'):
+    """Generate FFmpeg command for video creation"""
+    import subprocess
+    from PIL import Image
+    
+    # Basic slideshow generation
+    # This creates a video with:
+    # - Upper graphics cycling through region1 files (only 1920x800)
+    # - Lower graphics as static overlay from region2
+    # - Background music from region3 files
+    
+    cmd = ['ffmpeg', '-y']
+    
+    # Separate region1 files by dimensions
+    region1_800_files = []  # 1920x800 graphics
+    region1_1080_files = []  # 1920x1080 full screen graphics
+    
+    if region1_files:
+        for img_path in region1_files:
+            try:
+                with Image.open(img_path) as img:
+                    width, height = img.size
+                    if width == 1920 and height == 800:
+                        region1_800_files.append(img_path)
+                        logger.info(f"Including 1920x800 image: {os.path.basename(img_path)}")
+                    elif width == 1920 and height == 1080:
+                        region1_1080_files.append(img_path)
+                        logger.info(f"Including 1920x1080 image: {os.path.basename(img_path)}")
+                    else:
+                        logger.info(f"Skipping image {os.path.basename(img_path)} ({width}x{height})")
+            except Exception as e:
+                logger.warning(f"Could not check image dimensions for {img_path}: {e}")
+    
+    # Use whichever type we have, prefer full screen if available
+    valid_region1_files = region1_1080_files if region1_1080_files else region1_800_files
+    use_fullscreen = bool(region1_1080_files)
+    
+    # Check if we have valid images to work with
+    if not valid_region1_files:
+        logger.error("No valid 1920x800 or 1920x1080 images found in region1 files")
+        return None
+    
+    # Initialize images_to_load
+    images_to_load = []
+    
+    # Input images from region1 (upper graphics)
+    if valid_region1_files:
+        # Calculate how many loops we need to cover typical audio duration
+        # Assuming max audio is ~12 minutes (720 seconds)
+        # Each image shows for 10 seconds
+        seconds_per_cycle = len(valid_region1_files) * 10
+        loops_needed = max(720 // seconds_per_cycle, 1) + 1  # Add 1 for safety
+        
+        # Create individual image inputs with proper frame rate
+        # Repeat the image list to ensure we have enough content
+        images_to_load = []
+        for _ in range(loops_needed):
+            images_to_load.extend(valid_region1_files)
+        
+        logger.info(f"Loading {len(images_to_load)} images ({loops_needed} loops of {len(valid_region1_files)} unique images)")
+        
+        for idx, img in enumerate(images_to_load):
+            cmd.extend(['-loop', '1', '-framerate', '29.97', '-t', '10', '-i', img])
+        
+        # We'll use a complex filter to concatenate these inputs
+    
+    # Input overlay from region2 (lower graphics)
+    if region2_file:
+        cmd.extend(['-i', region2_file])
+    
+    # Input audio from region3
+    if region3_files:
+        # Concatenate audio files
+        audio_concat = os.path.join(os.path.dirname(output_path), 'audio.txt')
+        with open(audio_concat, 'w') as f:
+            for audio in region3_files:
+                f.write(f"file '{audio}'\n")
+        cmd.extend(['-f', 'concat', '-safe', '0', '-i', audio_concat])
+    
+    # Video settings based on format
+    if format == 'mp4':
+        cmd.extend([
+            '-c:v', 'libx264',
+            '-preset', 'medium',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p'
+        ])
+    elif format == 'mov':
+        cmd.extend([
+            '-c:v', 'prores',
+            '-profile:v', '2'  # ProRes 422
+        ])
+    elif format == 'avi':
+        cmd.extend([
+            '-c:v', 'mjpeg',
+            '-q:v', '3'
+        ])
+    
+    # Audio codec and frame rate
+    cmd.extend(['-c:a', 'aac', '-b:a', '192k', '-r', '29.97'])
+    
+    # Complex filter for overlay if region2 exists
+    num_region1_inputs = len(images_to_load) if valid_region1_files else 0
+    
+    if region2_file and valid_region1_files:
+        # Build filter complex with concat and overlay
+        filter_parts = []
+        
+        # First concatenate all region1 inputs
+        concat_inputs = ''
+        for i in range(num_region1_inputs):
+            concat_inputs += f'[{i}:v]'
+        filter_parts.append(f'{concat_inputs}concat=n={num_region1_inputs}:v=1:a=0[region1]')
+        
+        # Now handle overlay based on dimensions
+        region2_idx = num_region1_inputs  # Region2 comes after all region1 inputs
+        
+        if use_fullscreen:
+            # Region 1 has 1920x1080 graphics - they go on TOP of region2
+            filter_parts.append(f'[{region2_idx}:v]scale=1920:1080,format=yuv420p[bg]')
+            filter_parts.append('[region1]scale=1920:1080,format=yuv420p[fg]')
+            filter_parts.append('[bg][fg]overlay=0:0:format=yuv420[out]')
+        else:
+            # Region 1 has 1920x800 graphics - original behavior
+            filter_parts.append(f'[{region2_idx}:v]scale=1920:1080,format=yuv420p[bg]')
+            filter_parts.append('[region1]scale=1920:800,format=yuv420p[fg]')
+            filter_parts.append('[bg][fg]overlay=(W-w)/2:0:format=yuv420[out]')
+        
+        cmd.extend([
+            '-filter_complex',
+            ';'.join(filter_parts),
+            '-map', '[out]'
+        ])
+    elif valid_region1_files:
+        # Just concatenate and scale the images
+        filter_parts = []
+        
+        # Concatenate all inputs
+        concat_inputs = ''
+        for i in range(num_region1_inputs):
+            concat_inputs += f'[{i}:v]'
+        filter_parts.append(f'{concat_inputs}concat=n={num_region1_inputs}:v=1:a=0[region1]')
+        filter_parts.append('[region1]scale=1920:1080,format=yuv420p[out]')
+        
+        cmd.extend([
+            '-filter_complex',
+            ';'.join(filter_parts),
+            '-map', '[out]'
+        ])
+    
+    # Map audio if available and use shortest input stream duration
+    if region3_files:
+        audio_index = num_region1_inputs + (1 if region2_file else 0)
+        cmd.extend(['-map', f'{audio_index}:a'])
+        # Make the output duration match the audio duration
+        cmd.extend(['-shortest'])
+    else:
+        # If no audio, limit to a reasonable duration
+        cmd.extend(['-t', '300'])  # 5 minutes max
+    
+    # Output file
+    cmd.append(output_path)
+    
+    # Log the command with proper formatting
+    logger.info("FFmpeg command generated")
+    logger.info(f"  Total inputs: {cmd.count('-i')}")
+    logger.info(f"  Output: {output_path}")
+    if '-filter_complex' in cmd:
+        filter_idx = cmd.index('-filter_complex')
+        logger.info(f"  Filter complex length: {len(cmd[filter_idx + 1])} chars")
+    
+    return cmd
 
 @app.route('/api/generate-prj-file', methods=['POST'])
 def generate_prj_file():

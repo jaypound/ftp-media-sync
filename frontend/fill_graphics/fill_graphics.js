@@ -270,10 +270,16 @@ function fillGraphicsUpdateGenerateButton() {
     
     fillGraphicsState.canGenerate = canGenerate;
     
-    const button = document.getElementById('generateProjectBtn');
-    if (button) {
-        console.log(`  Button found, setting disabled to: ${!canGenerate}`);
-        button.disabled = !canGenerate;
+    const projectButton = document.getElementById('generateProjectBtn');
+    if (projectButton) {
+        console.log(`  Project button found, setting disabled to: ${!canGenerate}`);
+        projectButton.disabled = !canGenerate;
+    }
+    
+    const videoButton = document.getElementById('generateVideoBtn');
+    if (videoButton) {
+        console.log(`  Video button found, setting disabled to: ${!canGenerate}`);
+        videoButton.disabled = !canGenerate;
     }
 }
 
@@ -381,6 +387,113 @@ function fillGraphicsCloseGenerateProjectModal() {
     if (modal) modal.style.display = 'none';
 }
 
+// Show generate video modal
+function fillGraphicsShowGenerateVideoModal() {
+    if (!fillGraphicsState.canGenerate) return;
+    
+    console.log('DEBUG: Opening generate video modal with state:', {
+        region1: fillGraphicsState.region1.selected,
+        region2: fillGraphicsState.region2.selected,
+        region3: fillGraphicsState.region3.selected
+    });
+    
+    // Update summary in modal
+    const summaryEl = document.getElementById('videoSummary');
+    if (summaryEl) {
+        summaryEl.innerHTML = `
+            <p><strong>Region 1 (Upper Graphics):</strong> ${fillGraphicsState.region1.selected.length} files selected</p>
+            <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected || 'None'}</p>
+            <p><strong>Region 3 (Music):</strong> ${fillGraphicsState.region3.selected.length} files selected</p>
+        `;
+    }
+    
+    // Show modal
+    const modal = document.getElementById('generateVideoModal');
+    if (modal) modal.style.display = 'block';
+}
+
+// Generate video file
+async function fillGraphicsGenerateVideoFile() {
+    const fileName = document.getElementById('videoFileName').value.trim();
+    const exportPath = document.getElementById('videoExportPath').value.trim();
+    const exportToSource = document.getElementById('videoExportToSource').checked;
+    const exportToTarget = document.getElementById('videoExportToTarget').checked;
+    const videoFormat = document.getElementById('videoFormat').value;
+    
+    if (!fileName) {
+        window.showNotification('Please enter a video file name', 'error');
+        return;
+    }
+    
+    if (!exportToSource && !exportToTarget) {
+        window.showNotification('Please select at least one server to export to', 'error');
+        return;
+    }
+    
+    // Disable button during generation
+    const button = document.querySelector('#generateVideoModal .button.primary');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    }
+    
+    try {
+        const requestData = {
+            file_name: fileName,
+            export_path: exportPath,
+            export_to_source: exportToSource,
+            export_to_target: exportToTarget,
+            video_format: videoFormat,
+            region1_server: fillGraphicsState.region1.server,
+            region1_path: fillGraphicsState.region1.path,
+            region1_files: fillGraphicsState.region1.selected,
+            region2_server: fillGraphicsState.region2.server,
+            region2_path: fillGraphicsState.region2.path,
+            region2_file: fillGraphicsState.region2.selected,
+            region3_server: fillGraphicsState.region3.server,
+            region3_path: fillGraphicsState.region3.path,
+            region3_files: fillGraphicsState.region3.selected
+        };
+        
+        console.log('DEBUG: Video generation request data:', requestData);
+        const response = await window.API.post('/generate-video', requestData);
+        console.log('DEBUG: Response received:', response);
+        
+        if (response && response.success) {
+            window.showNotification('Video generation started successfully!', 'success');
+            fillGraphicsCloseGenerateVideoModal();
+            
+            // Reset selections
+            fillGraphicsState.region1.selected = [];
+            fillGraphicsState.region2.selected = null;
+            fillGraphicsState.region3.selected = [];
+            
+            // Refresh displays
+            fillGraphicsDisplayFiles(1, fillGraphicsState.region1.files);
+            fillGraphicsDisplayFiles(2, fillGraphicsState.region2.files);
+            fillGraphicsDisplayFiles(3, fillGraphicsState.region3.files);
+            fillGraphicsUpdateGenerateButton();
+        } else {
+            console.error('DEBUG: Video generation failed:', response);
+            window.showNotification(`Failed to generate video: ${response.message || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        console.error('DEBUG: Video generation error:', error);
+        window.showNotification(`Failed to generate video: ${error.message}`, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-video"></i> Generate & Export';
+        }
+    }
+}
+
+// Close generate video modal
+function fillGraphicsCloseGenerateVideoModal() {
+    const modal = document.getElementById('generateVideoModal');
+    if (modal) modal.style.display = 'none';
+}
+
 // Format file size
 function fillGraphicsFormatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
@@ -401,6 +514,9 @@ window.fillGraphicsDeselectAllRegion1Graphics = fillGraphicsDeselectAllRegion1Gr
 window.fillGraphicsShowGenerateProjectModal = fillGraphicsShowGenerateProjectModal;
 window.fillGraphicsGenerateProjectFile = fillGraphicsGenerateProjectFile;
 window.fillGraphicsCloseGenerateProjectModal = fillGraphicsCloseGenerateProjectModal;
+window.fillGraphicsShowGenerateVideoModal = fillGraphicsShowGenerateVideoModal;
+window.fillGraphicsGenerateVideoFile = fillGraphicsGenerateVideoFile;
+window.fillGraphicsCloseGenerateVideoModal = fillGraphicsCloseGenerateVideoModal;
 
 // Legacy support
 window.loadRegion1Graphics = fillGraphicsLoadRegion1Graphics;

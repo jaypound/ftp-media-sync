@@ -1007,6 +1007,9 @@
                     <button class="button primary large" onclick="showGenerateProjectModal()" id="generateProjectBtn" disabled>
                         <i class="fas fa-magic"></i> Generate .PRJ File
                     </button>
+                    <button class="button primary large" onclick="fillGraphicsShowGenerateVideoModal()" id="generateVideoBtn" disabled style="margin-top: 10px;">
+                        <i class="fas fa-video"></i> Generate Video
+                    </button>
                     <p class="help-text">Select files from all three regions to enable project generation</p>
                 </div>
             </div>
@@ -1768,6 +1771,59 @@
                 <button class="button secondary" onclick="closeGenerateProjectModal()">Cancel</button>
                 <button class="button primary" onclick="generateProjectFile()">
                     <i class="fas fa-file-export"></i> Generate & Export
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generate Video Modal -->
+    <div id="generateVideoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Generate Video File</h2>
+                <button class="close-button" onclick="fillGraphicsCloseGenerateVideoModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="videoFileName">Video File Name</label>
+                    <input type="text" id="videoFileName" class="form-control" placeholder="Enter video name (without extension)" required>
+                </div>
+                <div class="form-group">
+                    <label for="videoExportPath">Export Path</label>
+                    <input type="text" id="videoExportPath" class="form-control" value="/mnt/main/Videos/" required>
+                </div>
+                <div class="form-group">
+                    <label>Export to Servers</label>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="videoExportToSource" value="source" checked>
+                            <span>Source Server</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="videoExportToTarget" value="target" checked>
+                            <span>Target Server</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="videoFormat">Video Format</label>
+                    <select id="videoFormat" class="form-control">
+                        <option value="mp4">MP4 (H.264)</option>
+                        <option value="mov">MOV (ProRes)</option>
+                        <option value="avi">AVI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Summary</label>
+                    <div class="summary-box" id="videoSummary">
+                        <!-- Summary will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="fillGraphicsCloseGenerateVideoModal()">Cancel</button>
+                <button class="button primary" onclick="fillGraphicsGenerateVideoFile()">
+                    <i class="fas fa-video"></i> Generate & Export
                 </button>
             </div>
         </div>
