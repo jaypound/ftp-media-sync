@@ -12142,6 +12142,7 @@ def list_project_files():
         data = request.json
         path = data.get('path', '/mnt/main/Projects/Master')
         extension = data.get('extension', '.prj')
+        include_videos = data.get('include_videos', True)
         
         # Use the source FTP server to list files
         source_config = config_manager.get_server_config('source')
@@ -12152,26 +12153,46 @@ def list_project_files():
         
         try:
             ftp.connect()
-            files = ftp.list_files(path)
             
-            # Filter for .prj files
-            prj_files = []
+            # Get .prj files from the main path
+            files = ftp.list_files(path)
+            project_files = []
+            
             for file in files:
                 if file.get('name', '').endswith(extension) and not file.get('is_directory', False):
-                    prj_files.append({
+                    project_files.append({
                         'name': file['name'],
                         'path': f"{path}/{file['name']}",
                         'size': file.get('size', 0),
-                        'modified': file.get('modified', '')
+                        'modified': file.get('modified', ''),
+                        'type': 'project'
                     })
             
-            # Sort by name
-            prj_files.sort(key=lambda x: x['name'])
+            # If include_videos is True, also get MP4 files from /mnt/main/Videos
+            if include_videos:
+                videos_path = '/mnt/main/Videos'
+                try:
+                    video_files = ftp.list_files(videos_path)
+                    for file in video_files:
+                        if file.get('name', '').lower().endswith('.mp4') and not file.get('is_directory', False):
+                            project_files.append({
+                                'name': f"[VIDEO] {file['name']}",
+                                'path': f"{videos_path}/{file['name']}",
+                                'size': file.get('size', 0),
+                                'modified': file.get('modified', ''),
+                                'type': 'video'
+                            })
+                except Exception as e:
+                    logger.warning(f"Could not list videos from {videos_path}: {str(e)}")
+            
+            # Sort by type and name
+            project_files.sort(key=lambda x: (x['type'], x['name']))
             
             return jsonify({
                 'success': True,
-                'files': prj_files,
-                'count': len(prj_files)
+                'files': project_files,
+                'count': len(project_files),
+                'has_videos': any(f['type'] == 'video' for f in project_files)
             })
             
         finally:

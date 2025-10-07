@@ -13485,7 +13485,8 @@ async function loadProjectFiles() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 path: '/mnt/main/Projects/Master',
-                extension: '.prj'
+                extension: '.prj',
+                include_videos: true
             })
         });
         
@@ -13495,14 +13496,47 @@ async function loadProjectFiles() {
             select.innerHTML = '';
             
             if (result.files.length === 0) {
-                select.innerHTML = '<option value="" disabled>No .prj files found in /mnt/main/Projects/Master</option>';
+                select.innerHTML = '<option value="" disabled>No files found</option>';
             } else {
-                result.files.forEach(file => {
-                    const option = document.createElement('option');
-                    option.value = file.path;
-                    option.textContent = file.name;
-                    select.appendChild(option);
-                });
+                // Add a default option
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Select a project or video file...';
+                defaultOption.disabled = true;
+                defaultOption.selected = true;
+                select.appendChild(defaultOption);
+                
+                // Group files by type
+                const projectFiles = result.files.filter(f => f.type === 'project');
+                const videoFiles = result.files.filter(f => f.type === 'video');
+                
+                // Add project files
+                if (projectFiles.length > 0) {
+                    const projectGroup = document.createElement('optgroup');
+                    projectGroup.label = 'Project Files (.prj)';
+                    projectFiles.forEach(file => {
+                        const option = document.createElement('option');
+                        option.value = file.path;
+                        option.textContent = file.name;
+                        option.dataset.type = file.type;
+                        projectGroup.appendChild(option);
+                    });
+                    select.appendChild(projectGroup);
+                }
+                
+                // Add video files
+                if (videoFiles.length > 0) {
+                    const videoGroup = document.createElement('optgroup');
+                    videoGroup.label = 'Video Files (MP4)';
+                    videoFiles.forEach(file => {
+                        const option = document.createElement('option');
+                        option.value = file.path;
+                        option.textContent = file.name;
+                        option.dataset.type = file.type;
+                        videoGroup.appendChild(option);
+                    });
+                    select.appendChild(videoGroup);
+                }
                 
                 // Add change event listener
                 select.onchange = function() {

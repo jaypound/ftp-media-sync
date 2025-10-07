@@ -1608,7 +1608,12 @@
                         </div>
                         <div class="form-group">
                             <label for="meetingRoom">Room</label>
-                            <input type="text" id="meetingRoom" placeholder="e.g., Council Chamber">
+                            <select id="meetingRoom" class="form-control" required>
+                                <option value="">Select a room...</option>
+                                <option value="Council Chambers">Council Chambers</option>
+                                <option value="Committee Room 1">Committee Room 1</option>
+                                <option value="Committee Room 2">Committee Room 2</option>
+                            </select>
                         </div>
                     </div>
                     <div class="form-group">
@@ -2025,21 +2030,20 @@
                     <p><strong>This process will:</strong></p>
                     <ol>
                         <li>Use the current weekly template (ensure you've imported weekly meetings first)</li>
-                        <li>Select a default project file for filling schedule gaps</li>
+                        <li>Select a default project file or video for filling schedule gaps</li>
                         <li>Automatically fill all gaps in the schedule</li>
                         <li>Export the schedule to both Castus servers</li>
                     </ol>
                 </div>
                 
                 <div class="form-group" style="margin-top: 20px;">
-                    <label for="projectFileSelect">Select Default Project File</label>
+                    <label for="projectFileSelect">Select Default Project or Video File</label>
                     <div class="file-browser-container">
                         <select id="projectFileSelect" class="form-control" size="8" style="width: 100%; height: 200px;">
                             <option value="" disabled>Loading project files...</option>
                         </select>
                     </div>
                     <div class="file-path-display" style="margin-top: 10px;">
-                        <small>Path: /mnt/main/Projects/Master/</small>
                         <div id="selectedProjectFile" style="margin-top: 5px; font-weight: bold; color: #0066cc;"></div>
                     </div>
                 </div>

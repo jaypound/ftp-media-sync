@@ -332,6 +332,14 @@ async function meetingScheduleEditMeeting(meetingId) {
 async function meetingScheduleSaveMeeting() {
     const meetingId = document.getElementById('meetingId').value;
     
+    // Validate meeting name
+    const meetingName = document.getElementById('meetingName').value.trim();
+    if (!meetingName) {
+        window.showNotification('Meeting name is required', 'error');
+        document.getElementById('meetingName').focus();
+        return;
+    }
+    
     // Get start and end times in 24-hour format from the time inputs
     let startTimeValue = document.getElementById('meetingTime').value;
     let endTimeValue = document.getElementById('meetingEndTime').value;
@@ -346,7 +354,7 @@ async function meetingScheduleSaveMeeting() {
     }
     
     const formData = {
-        meeting_name: document.getElementById('meetingName').value,
+        meeting_name: meetingName,
         meeting_date: document.getElementById('meetingDate').value,
         start_time: startTimeValue,
         end_time: endTimeValue,
