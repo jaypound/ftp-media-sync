@@ -16144,9 +16144,9 @@ window.editCurrentMeeting = async function() {
                 setTimeout(() => {
                     const endTimeInput = document.getElementById('meetingEndTime');
                     if (endTimeInput) {
-                        // Calculate current time + 1 minute
+                        // Calculate current time + 2 minutes
                         const now = new Date();
-                        now.setMinutes(now.getMinutes() + 1);
+                        now.setMinutes(now.getMinutes() + 2);
                         
                         // Format as HH:MM for the time input
                         const hours = String(now.getHours()).padStart(2, '0');
