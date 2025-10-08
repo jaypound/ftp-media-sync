@@ -2039,12 +2039,21 @@
                 <div class="form-group" style="margin-top: 20px;">
                     <label for="projectFileSelect">Select Default Project or Video File</label>
                     <div class="file-browser-container">
-                        <select id="projectFileSelect" class="form-control" size="8" style="width: 100%; height: 200px;">
+                        <select id="projectFileSelect" class="form-control" size="4" style="width: 100%; height: 100px;">
                             <option value="" disabled>Loading project files...</option>
                         </select>
                     </div>
                     <div class="file-path-display" style="margin-top: 10px;">
                         <div id="selectedProjectFile" style="margin-top: 5px; font-weight: bold; color: #0066cc;"></div>
+                    </div>
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px;">
+                    <label for="programmingDelayInput">Delay programming start: </label>
+                    <input type="number" id="programmingDelayInput" class="form-control" value="120" min="0" max="3600" style="width: 100px; display: inline-block;">
+                    <span> seconds</span>
+                    <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
+                        <i class="fas fa-info-circle"></i> Delay applied after the meeting that just ended
                     </div>
                 </div>
             </div>

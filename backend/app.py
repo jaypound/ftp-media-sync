@@ -6328,6 +6328,7 @@ def fill_template_gaps():
         template = data.get('template')
         available_content = data.get('available_content', [])
         gaps = data.get('gaps', [])
+        post_meeting_delay = data.get('post_meeting_delay', 0)
         
         # Debug: Log what content was received
         logger.info(f"Fill gaps request received with {len(available_content)} content items")
@@ -6342,6 +6343,8 @@ def fill_template_gaps():
         
         log_expiration(f"Template type: {template.get('type')}")
         log_expiration(f"Schedule start date: {schedule_date}")
+        if post_meeting_delay > 0:
+            log_expiration(f"Post-meeting delay: {post_meeting_delay} seconds")
         
         # Debug: Log the template items
         logger.info(f"Received template type: {template.get('type')}")
@@ -6821,6 +6824,64 @@ def fill_template_gaps():
                 gap_logger.info(f"           Duration: {gap['end'] - gap['start']}s")
             total_gap_seconds = sum(gap['end'] - gap['start'] for gap in gaps)
             logger.info(f"Total gap time to fill: {total_gap_seconds/3600:.1f} hours")
+            
+            # Apply post-meeting delay if specified
+            if post_meeting_delay > 0 and gaps:
+                # Get current time
+                current_time = datetime.now()
+                current_seconds_since_midnight = (current_time.hour * 3600 + 
+                                                current_time.minute * 60 + 
+                                                current_time.second)
+                
+                # For weekly schedules, calculate seconds since start of week
+                if schedule_type == 'weekly':
+                    days_since_sunday = current_time.weekday() + 1 if current_time.weekday() != 6 else 0
+                    current_seconds_since_start = days_since_sunday * 86400 + current_seconds_since_midnight
+                else:
+                    current_seconds_since_start = current_seconds_since_midnight
+                
+                logger.info(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S')}, seconds since schedule start: {current_seconds_since_start}")
+                
+                # Debug: Log all SDI/Live Input items
+                logger.info("All SDI/Live Input items in template:")
+                for item in original_items:
+                    if 'SDI' in item['title'] or 'Live Input' in item['title']:
+                        logger.info(f"  - '{item['title']}': start={item['start']}s ({item['start']/3600:.2f}h), end={item['end']}s ({item['end']/3600:.2f}h), start_time='{item.get('start_time')}'")
+                
+                # Find meetings (Live Input/SDI items) with end time close to current time
+                # The edited end time will always be within 5 minutes of current time
+                recently_ended_meeting = None
+                for item in original_items:
+                    # Check if this is a meeting (Live Input or SDI)
+                    if 'SDI' in item['title'] or 'Live Input' in item['title']:
+                        # Check if meeting end time is within 5 minutes of current time
+                        time_diff = abs(current_seconds_since_start - item['end'])
+                        if time_diff <= 300:  # Within 5 minutes (300 seconds)
+                            if recently_ended_meeting is None or time_diff < abs(current_seconds_since_start - recently_ended_meeting['end']):
+                                recently_ended_meeting = item
+                
+                if recently_ended_meeting:
+                    logger.info(f"Found meeting with end time close to current: '{recently_ended_meeting['title']}' ended at {recently_ended_meeting['end']/3600:.2f}h")
+                    logger.info(f"Meeting end time in seconds: {recently_ended_meeting['end']}s")
+                    logger.info(f"Applying {post_meeting_delay}s delay to gaps after this meeting")
+                    
+                    # Find and adjust gaps that start right after this meeting
+                    meeting_end_time = recently_ended_meeting['end']
+                    gaps_adjusted = 0
+                    for i, gap in enumerate(gaps):
+                        logger.info(f"Checking gap {i+1}: starts at {gap['start']}s (diff from meeting end: {abs(gap['start'] - meeting_end_time)}s)")
+                        # Check if gap starts near the meeting end time (within 1 second tolerance)
+                        if abs(gap['start'] - meeting_end_time) < 1.0:
+                            old_start = gap['start']
+                            gap['start'] = gap['start'] + post_meeting_delay
+                            gaps_adjusted += 1
+                            logger.info(f"✓ Adjusted gap {i+1} start from {old_start}s to {gap['start']}s (added {post_meeting_delay}s delay)")
+                            gap_logger.info(f"Applied post-meeting delay to gap {i+1}: gap now starts at {gap['start']}s instead of {old_start}s")
+                    
+                    if gaps_adjusted == 0:
+                        logger.warning(f"No gaps found starting immediately after the meeting at {meeting_end_time}s")
+                else:
+                    logger.info("No recently ended meeting found, post-meeting delay not applied")
         else:
             # Calculate total template duration and gaps (old method)
             total_duration = 0

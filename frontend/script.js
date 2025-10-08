@@ -9849,9 +9849,12 @@ async function cancelFillGaps() {
     }
 }
 
-async function fillScheduleGaps() {
+async function fillScheduleGaps(postMeetingDelay = 0) {
     try {
         log('fillScheduleGaps: Function called', 'info');
+        if (postMeetingDelay > 0) {
+            log(`fillScheduleGaps: Post-meeting delay set to ${postMeetingDelay} seconds`, 'info');
+        }
         
         // Debug logging
         console.log('fillScheduleGaps debug:');
@@ -10406,7 +10409,8 @@ async function fillScheduleGaps() {
                         template: sanitizeForJSON(cleanTemplate),
                         available_content: sanitizeForJSON(availableContent),
                         gaps: sanitizeForJSON(manuallySplitGaps),  // Use manually split gaps
-                        schedule_date: scheduleDate
+                        schedule_date: scheduleDate,
+                        post_meeting_delay: postMeetingDelay
                     };
                     
                     // Test JSON serialization before sending
@@ -13558,6 +13562,7 @@ async function loadProjectFiles() {
 async function startAutomation() {
     const projectFileSelect = document.getElementById('projectFileSelect');
     const selectedProjectFile = projectFileSelect.value;
+    const programmingDelay = parseInt(document.getElementById('programmingDelayInput').value) || 120;
     
     if (!selectedProjectFile) {
         alert('Please select a project file');
@@ -13642,8 +13647,8 @@ async function startAutomation() {
         
         // Call the existing fillScheduleGaps function
         if (typeof fillScheduleGaps === 'function') {
-            log('Calling fillScheduleGaps function...', 'info');
-            await fillScheduleGaps();
+            log(`Calling fillScheduleGaps function with ${programmingDelay}s delay...`, 'info');
+            await fillScheduleGaps(programmingDelay);
             log('fillScheduleGaps function completed', 'info');
             
             // Get the updated template after filling gaps
@@ -16140,9 +16145,11 @@ window.editCurrentMeeting = async function() {
                 // We're currently in a meeting or it ended recently - open the edit modal and focus on end time
                 meetingScheduleEditMeeting(currentMeeting.id);
                 
-                // Wait for modal to open, then update and focus on end time
+                // Wait for modal to open, then update end time and broadcast setting
                 setTimeout(() => {
                     const endTimeInput = document.getElementById('meetingEndTime');
+                    const broadcastCheckbox = document.getElementById('meetingBroadcast');
+                    
                     if (endTimeInput) {
                         // Calculate current time + 2 minutes
                         const now = new Date();
@@ -16156,9 +16163,17 @@ window.editCurrentMeeting = async function() {
                         // Set the new end time
                         endTimeInput.value = newEndTime;
                         
-                        // Focus and select the field
+                        // Focus and select the field so operator can review/adjust
                         endTimeInput.focus();
                         endTimeInput.select();
+                        
+                        log('Meeting end time updated to 2 minutes from now. Click Save to apply.', 'info');
+                    }
+                    
+                    // Ensure broadcast on ATL26 is checked
+                    if (broadcastCheckbox && !broadcastCheckbox.checked) {
+                        broadcastCheckbox.checked = true;
+                        log('Broadcast on ATL26 enabled', 'info');
                     }
                 }, 150);
             } else {
