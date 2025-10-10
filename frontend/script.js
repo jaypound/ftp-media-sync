@@ -3956,6 +3956,8 @@ function showScheduleConfig(configType) {
             bodyContent = generateExpirationConfigHTML();
             console.log('Generated HTML length:', bodyContent.length);
             console.log('First 200 chars:', bodyContent.substring(0, 200));
+            // Load scheduler status after modal is shown
+            setTimeout(() => loadSchedulerStatus(), 100);
             break;
         case 'rotation':
             titleText = 'Category Rotation Configuration';
@@ -4245,6 +4247,31 @@ function generateExpirationConfigHTML() {
                     </button>
                     <button class="button warning" onclick="copyAllExpirationsToCastus()">
                         <i class="fas fa-upload"></i> Copy All To Castus
+                    </button>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                <h5>Automatic Sync Schedule</h5>
+                <p style="margin-bottom: 10px;">Automatically sync all expirations from Castus at scheduled times.</p>
+                <div id="schedulerStatus" style="margin-bottom: 15px;">
+                    <span class="status-label">Status: </span>
+                    <span id="schedulerStatusText">Loading...</span>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <span class="status-label">Schedule: </span>
+                    <span>9:00 AM, 12:00 PM, 3:00 PM, 6:00 PM daily</span>
+                </div>
+                <div id="lastSyncInfo" style="margin-bottom: 15px; display: none;">
+                    <span class="status-label">Last sync: </span>
+                    <span id="lastSyncText"></span>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="toggleSchedulerBtn" class="button info" onclick="toggleScheduler()">
+                        <i class="fas fa-power-off"></i> <span id="toggleSchedulerText">Enable</span>
+                    </button>
+                    <button class="button secondary" onclick="runSyncNow()">
+                        <i class="fas fa-sync"></i> Sync Now
                     </button>
                 </div>
             </div>
@@ -5110,6 +5137,104 @@ window.copyExpirationFromCastus = copyExpirationFromCastus;
 window.copyExpirationToCastus = copyExpirationToCastus;
 window.copyAllExpirationsFromCastus = copyAllExpirationsFromCastus;
 window.copyAllExpirationsToCastus = copyAllExpirationsToCastus;
+
+// Scheduler control functions
+async function loadSchedulerStatus() {
+    try {
+        const response = await fetch('/api/scheduler/status');
+        const result = await response.json();
+        
+        if (result.success) {
+            const statusText = document.getElementById('schedulerStatusText');
+            const toggleBtn = document.getElementById('toggleSchedulerBtn');
+            const toggleText = document.getElementById('toggleSchedulerText');
+            const lastSyncInfo = document.getElementById('lastSyncInfo');
+            const lastSyncText = document.getElementById('lastSyncText');
+            
+            if (statusText) {
+                statusText.textContent = result.enabled ? 'Enabled' : 'Disabled';
+                statusText.style.color = result.enabled ? '#4CAF50' : '#666';
+            }
+            
+            if (toggleBtn && toggleText) {
+                toggleText.textContent = result.enabled ? 'Disable' : 'Enable';
+                toggleBtn.className = result.enabled ? 'button danger' : 'button info';
+            }
+            
+            // Show last sync info if available
+            if (result.last_run && lastSyncInfo && lastSyncText) {
+                const lastRun = result.last_run;
+                if (lastRun.last_run_at) {
+                    const date = new Date(lastRun.last_run_at);
+                    lastSyncText.textContent = `${date.toLocaleDateString()} ${date.toLocaleTimeString()} - ${lastRun.last_run_status}`;
+                    lastSyncInfo.style.display = 'block';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load scheduler status:', error);
+    }
+}
+
+async function toggleScheduler() {
+    const statusText = document.getElementById('schedulerStatusText');
+    const currentEnabled = statusText && statusText.textContent === 'Enabled';
+    
+    try {
+        const response = await fetch('/api/scheduler/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ enable: !currentEnabled })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification(result.message, 'success');
+            await loadSchedulerStatus();
+        } else {
+            showNotification(result.message || 'Failed to toggle scheduler', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to toggle scheduler:', error);
+        showNotification('Failed to toggle scheduler', 'error');
+    }
+}
+
+async function runSyncNow() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
+    
+    try {
+        const response = await fetch('/api/scheduler/run-now', {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification(result.message, 'success');
+            // Wait a bit then reload status to see updated last run
+            setTimeout(() => loadSchedulerStatus(), 2000);
+        } else {
+            showNotification(result.message || 'Failed to start sync', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to run sync:', error);
+        showNotification('Failed to start sync', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync"></i> Sync Now';
+    }
+}
+
+// Export scheduler functions
+window.loadSchedulerStatus = loadSchedulerStatus;
+window.toggleScheduler = toggleScheduler;
+window.runSyncNow = runSyncNow;
 
 function saveRotationConfig() {
     const rotationList = document.getElementById('rotationList');
@@ -17196,3 +17321,79 @@ window.proceedWithMissingFiles = proceedWithMissingFiles;
 window.removeMissingFiles = removeMissingFiles;
 window.continueCreateSchedule = continueCreateSchedule;
 window.updateFileAnalysisStatus = updateFileAnalysisStatus;
+
+// FTP Keep-Alive System for Scheduling Tab
+let ftpKeepAliveInterval = null;
+
+// Function to maintain FTP connections
+async function maintainFTPConnections() {
+    try {
+        const response = await fetch('/api/keep-ftp-alive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                servers: ['source', 'target']
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+                // Log any reconnections
+                Object.entries(result.servers).forEach(([server, status]) => {
+                    if (status.status === 'reconnected') {
+                        log(`FTP connection to ${server} was restored`, 'warning');
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        console.error('FTP keep-alive error:', error);
+    }
+}
+
+// Start keep-alive when scheduling tab is active
+function startFTPKeepAlive() {
+    if (!ftpKeepAliveInterval) {
+        // Initial connection check
+        maintainFTPConnections();
+        
+        // Set up periodic keep-alive (every 30 seconds)
+        ftpKeepAliveInterval = setInterval(maintainFTPConnections, 30000);
+        console.log('FTP keep-alive started for scheduling operations');
+    }
+}
+
+// Stop keep-alive when leaving scheduling tab
+function stopFTPKeepAlive() {
+    if (ftpKeepAliveInterval) {
+        clearInterval(ftpKeepAliveInterval);
+        ftpKeepAliveInterval = null;
+        console.log('FTP keep-alive stopped');
+    }
+}
+
+// Override showPanel to manage FTP keep-alive
+const originalShowPanel = window.showPanel;
+window.showPanel = function(panelName) {
+    // Call original function if it exists
+    if (typeof originalShowPanel === 'function') {
+        originalShowPanel(panelName);
+    } else {
+        // Basic panel switching if no original function exists
+        document.querySelectorAll('.panel').forEach(panel => {
+            panel.style.display = 'none';
+        });
+        const targetPanel = document.getElementById(panelName);
+        if (targetPanel) {
+            targetPanel.style.display = 'block';
+        }
+    }
+    
+    // Manage FTP keep-alive based on panel
+    if (panelName === 'scheduling') {
+        startFTPKeepAlive();
+    } else {
+        stopFTPKeepAlive();
+    }
+};

@@ -10,6 +10,7 @@ from file_analyzer import file_analyzer
 from database import db_manager
 # from scheduler import scheduler  # MongoDB scheduler - no longer used
 from scheduler_postgres import scheduler_postgres
+from scheduler_jobs import SchedulerJobs
 import logging
 from bson import ObjectId
 from datetime import datetime, timedelta
@@ -60,6 +61,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Initialize scheduler (will be started later)
+scheduler_jobs = None
 
 # Utility function to validate numeric values and prevent NaN
 def validate_numeric(value, default=0, name="value", min_value=None, max_value=None):
@@ -205,9 +209,9 @@ def should_block_content_for_theme(content, recent_items, current_position, sche
     theme_logger = get_theme_logger()
     
     try:
-        # Only check spots and ID content (not long_form or short_form)
+        # Only check spots, ID, and short_form content (not long_form)
         content_category = content.get('duration_category', '')
-        if content_category not in ['spots', 'id']:
+        if content_category not in ['spots', 'id', 'short_form']:
             return False, None
             
         theme_logger.info("\n" + "="*80)
@@ -246,6 +250,21 @@ def should_block_content_for_theme(content, recent_items, current_position, sche
         
         for i, item in enumerate(reversed(recent_items[-items_to_check:])):
             item_title = item.get('title', item.get('content_title', ''))
+            
+            # Skip meetings from theme checking
+            # Check for: SDI, Live Input, MTG content type, or _MTG_ in filename
+            item_content_type = item.get('content_type', '')
+            item_file_name = item.get('file_name', '')
+            
+            is_meeting = ('SDI' in item_title or 
+                         'Live Input' in item_title or 
+                         item_content_type == 'MTG' or 
+                         '_MTG_' in item_file_name)
+            
+            if is_meeting:
+                theme_logger.info(f"  Skipping meeting from theme check: '{item_title}' (type={item_content_type})")
+                continue
+            
             item_themes = extract_theme_from_title(item_title)
             
             if item_themes:
@@ -950,6 +969,10 @@ def copy_expirations_from_castus():
         else:
             content_types_to_sync = [content_type]
         
+        # Get content expiration configuration
+        scheduling_config = config_manager.get_scheduling_settings()
+        content_expiration_config = scheduling_config.get('content_expiration', {})
+        
         # Import here to avoid circular imports
         from castus_metadata import CastusMetadataHandler
         
@@ -973,12 +996,16 @@ def copy_expirations_from_castus():
             for ct in content_types_to_sync:
                 logger.info(f"Processing content type: {ct}")
                 
+                # Get expiration days setting for this content type
+                expiration_days = content_expiration_config.get(ct, 0)
+                logger.info(f"Expiration days for {ct}: {expiration_days}")
+                
                 # Get all assets of this content type
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     # Convert content type to lowercase for PostgreSQL enum
                     ct_lower = ct.lower()
                     cursor.execute("""
-                        SELECT a.id, i.file_path, i.file_name, a.content_title, a.content_type
+                        SELECT a.id, i.file_path, i.file_name, a.content_title, a.content_type, i.encoded_date
                         FROM assets a
                         JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
                         WHERE a.content_type = %s
@@ -1000,63 +1027,109 @@ def copy_expirations_from_castus():
                             continue
                         
                         try:
-                            # Connect to FTP
-                            ftp = FTPManager(config)
-                            if not ftp.connect():
-                                logger.error(f"Failed to connect to {server} server")
-                                total_errors += 1
-                                continue
+                            expiry_date = None
+                            go_live_date = None
                             
-                            try:
-                                # Get Castus metadata
-                                handler = CastusMetadataHandler(ftp)
-                                expiry_date = handler.get_content_window_close(file_path)
-                                go_live_date = handler.get_content_window_open(file_path)
+                            # If expiration_days is 0, copy from Castus metadata
+                            if expiration_days == 0:
+                                # Connect to FTP
+                                ftp = FTPManager(config)
+                                if not ftp.connect():
+                                    logger.error(f"Failed to connect to {server} server")
+                                    total_errors += 1
+                                    continue
                                 
-                                # Update database - set or clear both dates
-                                with conn.cursor() as update_cursor:
-                                    update_cursor.execute("""
-                                            UPDATE scheduling_metadata 
-                                            SET content_expiry_date = %s,
-                                                go_live_date = %s,
-                                                metadata_synced_at = CURRENT_TIMESTAMP
-                                            WHERE asset_id = %s
-                                    """, (expiry_date, go_live_date, asset_id))
+                                try:
+                                    # Get Castus metadata
+                                    handler = CastusMetadataHandler(ftp)
+                                    expiry_date = handler.get_content_window_close(file_path)
+                                    go_live_date = handler.get_content_window_open(file_path)
+                                    logger.info(f"Copying Castus metadata for {asset['file_name']}: go_live={go_live_date}, expiry={expiry_date}")
                                     
-                                    if update_cursor.rowcount == 0:
-                                        # Create scheduling_metadata record if it doesn't exist
-                                        update_cursor.execute("""
-                                            INSERT INTO scheduling_metadata 
-                                            (asset_id, content_expiry_date, go_live_date, metadata_synced_at)
-                                            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-                                        """, (asset_id, expiry_date, go_live_date))
+                                finally:
+                                    ftp.disconnect()
+                            else:
+                                # Calculate expiration based on creation date + expiration_days
+                                creation_date = None
                                 
-                                conn.commit()
-                                total_updated += 1
+                                if asset['encoded_date']:
+                                    creation_date = asset['encoded_date']
+                                elif asset['file_name']:
+                                    # Try to extract from filename (YYMMDD format)
+                                    filename = asset['file_name']
+                                    if len(filename) >= 6 and filename[:6].isdigit():
+                                        try:
+                                            yy = int(filename[0:2])
+                                            mm = int(filename[2:4])
+                                            dd = int(filename[4:6])
+                                            
+                                            # Validate date components
+                                            if 1 <= mm <= 12 and 1 <= dd <= 31:
+                                                # Convert 2-digit year to 4-digit
+                                                if yy >= 90:
+                                                    year = 1900 + yy
+                                                else:
+                                                    year = 2000 + yy
+                                                
+                                                try:
+                                                    creation_date = datetime(year, mm, dd)
+                                                except ValueError:
+                                                    logger.warning(f"Invalid date in filename: {filename}")
+                                        except (ValueError, IndexError):
+                                            logger.warning(f"Could not parse date from filename: {filename}")
                                 
-                                if expiry_date or go_live_date:
-                                    details.append({
-                                        'asset_id': asset_id,
-                                        'title': asset['content_title'] or asset['file_name'],
-                                        'expiry_date': expiry_date.strftime('%Y-%m-%d %H:%M:%S') if expiry_date else None,
-                                        'go_live_date': go_live_date.strftime('%Y-%m-%d %H:%M:%S') if go_live_date else None,
-                                        'status': 'updated'
-                                    })
-                                    logger.info(f"Updated metadata for {asset['file_name']}: go_live={go_live_date}, expiry={expiry_date}")
+                                if creation_date:
+                                    # Calculate expiration date
+                                    if isinstance(creation_date, datetime):
+                                        expiry_date = creation_date + timedelta(days=expiration_days)
+                                    else:
+                                        # If creation_date is already a date object, convert to datetime
+                                        expiry_date = datetime.combine(creation_date, datetime.min.time()) + timedelta(days=expiration_days)
+                                    logger.info(f"Calculated expiration for {asset['file_name']}: creation={creation_date}, expiry={expiry_date} ({expiration_days} days)")
                                 else:
-                                    details.append({
-                                        'asset_id': asset_id,
-                                        'title': asset['content_title'] or asset['file_name'],
-                                        'expiry_date': None,
-                                        'go_live_date': None,
-                                        'status': 'cleared'
-                                    })
-                                    logger.info(f"Cleared metadata for {asset['file_name']} (no Castus metadata)")
+                                    logger.warning(f"Could not determine creation date for {asset['file_name']}, skipping expiration calculation")
+                            
+                            # Update database - set or clear both dates
+                            with conn.cursor() as update_cursor:
+                                update_cursor.execute("""
+                                        UPDATE scheduling_metadata 
+                                        SET content_expiry_date = %s,
+                                            go_live_date = %s,
+                                            metadata_synced_at = CURRENT_TIMESTAMP
+                                        WHERE asset_id = %s
+                                """, (expiry_date, go_live_date, asset_id))
                                 
-                                total_synced += 1
-                                
-                            finally:
-                                ftp.disconnect()
+                                if update_cursor.rowcount == 0:
+                                    # Create scheduling_metadata record if it doesn't exist
+                                    update_cursor.execute("""
+                                        INSERT INTO scheduling_metadata 
+                                        (asset_id, content_expiry_date, go_live_date, metadata_synced_at)
+                                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                                    """, (asset_id, expiry_date, go_live_date))
+                            
+                            conn.commit()
+                            total_updated += 1
+                            
+                            if expiry_date or go_live_date:
+                                details.append({
+                                    'asset_id': asset_id,
+                                    'title': asset['content_title'] or asset['file_name'],
+                                    'expiry_date': expiry_date.strftime('%Y-%m-%d %H:%M:%S') if expiry_date else None,
+                                    'go_live_date': go_live_date.strftime('%Y-%m-%d %H:%M:%S') if go_live_date else None,
+                                    'status': 'updated'
+                                })
+                                logger.info(f"Updated metadata for {asset['file_name']}: go_live={go_live_date}, expiry={expiry_date}")
+                            else:
+                                details.append({
+                                    'asset_id': asset_id,
+                                    'title': asset['content_title'] or asset['file_name'],
+                                    'expiry_date': None,
+                                    'go_live_date': None,
+                                    'status': 'cleared'
+                                })
+                                logger.info(f"Cleared metadata for {asset['file_name']} (no metadata available)")
+                            
+                            total_synced += 1
                                 
                         except Exception as e:
                             logger.error(f"Error syncing asset {asset_id}: {str(e)}")
@@ -7239,9 +7312,10 @@ def fill_template_gaps():
             content_id = content.get('id', 'Unknown')
             
             # Log the evaluation
+            content_filename = content.get('file_name', 'Unknown')
             log_expiration(f"\n--- EVALUATING CONTENT ---")
             log_expiration(f"Content ID: {content_id}")
-            log_expiration(f"Title: {content_title}")
+            log_expiration(f"Filename: {content_filename}")
             log_expiration(f"Air date: {air_date.strftime('%Y-%m-%d')}")
             log_expiration(f"Position: {position/3600:.2f}h ({position}s)")
             
@@ -7281,9 +7355,9 @@ def fill_template_gaps():
                 log_expiration(f"Expiration date: NONE")
                 if 'MTG' in content_title or 'Meeting' in content_title:
                     logger.warning(f"  MEETING WITHOUT EXPIRATION: '{content_title}' - This content has no expiration date set!")
-                    log_expiration(f"DECISION: ACCEPTED (no expiration date)")
+                    log_expiration(f"DECISION: ACCEPTED (no expiration date) - Scheduled at position {position/3600:.2f}h")
                 else:
-                    log_expiration(f"DECISION: ACCEPTED (no expiration date)")
+                    log_expiration(f"DECISION: ACCEPTED (no expiration date) - Scheduled at position {position/3600:.2f}h")
                 return False  # No expiration date means not expired
                 
             try:
@@ -7319,11 +7393,11 @@ def fill_template_gaps():
                     if 'MTG' in content_title or 'Meeting' in content_title:
                         logger.warning(f"  MEETING ALLOWED: '{content_title}' - Expiry={expiry_date.strftime('%Y-%m-%d')}, Air date={air_date.strftime('%Y-%m-%d')}, Position={position/3600:.1f}h")
                         logger.warning(f"    This may indicate an issue with expiration date calculation")
-                    log_expiration(f"DECISION: ACCEPTED (not expired - {expiry_date.strftime('%Y-%m-%d')} > {air_date.strftime('%Y-%m-%d')})")
+                    log_expiration(f"DECISION: ACCEPTED (not expired - {expiry_date.strftime('%Y-%m-%d')} > {air_date.strftime('%Y-%m-%d')}) - Scheduled at position {position/3600:.2f}h")
             except Exception as e:
                 logger.warning(f"Error parsing expiration date: {e}")
                 log_expiration(f"Expiration date: ERROR - {e}")
-                log_expiration(f"DECISION: ACCEPTED (error)")
+                log_expiration(f"DECISION: ACCEPTED (error) - Scheduled at position {position/3600:.2f}h")
             return False
         
         # Process each gap individually
@@ -8163,8 +8237,8 @@ def fill_template_gaps():
                         new_item_start = current_position
                         new_item_end = current_position + duration
                     
-                    # Check theme conflicts for spots and ID content
-                    if selected.get('duration_category') in ['spots', 'id']:
+                    # Check theme conflicts for spots, ID, and short_form content (not long_form)
+                    if selected.get('duration_category') in ['spots', 'id', 'short_form']:
                         should_block, block_reason = should_block_content_for_theme(
                             selected, items_added, current_position, schedule_type
                         )
@@ -8793,9 +8867,40 @@ def export_template():
             # Full path for export
             full_path = f"{export_path}/{filename}"
             
-            # Upload to FTP server
+            # Upload to FTP server - ensure fresh connection
+            # Check if FTP manager exists and is connected
+            if export_server not in ftp_managers:
+                # Get server config
+                server_config = config_manager.get_all_config().get('servers', {}).get(export_server)
+                if not server_config:
+                    raise Exception(f"Server configuration not found for '{export_server}'")
+                ftp_managers[export_server] = FTPManager(server_config)
+            
             ftp_manager = ftp_managers[export_server]
-            success = ftp_manager.upload_file(temp_file_path, full_path)
+            
+            # Ensure connection is active (reconnect if needed)
+            if not ftp_manager.connected:
+                logger.info(f"FTP connection to {export_server} not active, reconnecting...")
+                if not ftp_manager.connect():
+                    raise Exception(f"Failed to connect to {export_server} server")
+            
+            # Try upload with reconnection on failure
+            success = False
+            try:
+                success = ftp_manager.upload_file(temp_file_path, full_path)
+            except Exception as upload_error:
+                # If upload fails, try reconnecting once and retry
+                logger.warning(f"Upload failed: {str(upload_error)}. Attempting reconnection...")
+                try:
+                    ftp_manager.disconnect()
+                    if ftp_manager.connect():
+                        logger.info("Reconnected successfully, retrying upload...")
+                        success = ftp_manager.upload_file(temp_file_path, full_path)
+                    else:
+                        raise Exception("Failed to reconnect to FTP server")
+                except Exception as retry_error:
+                    logger.error(f"Upload retry failed: {str(retry_error)}")
+                    raise
             
             if success:
                 file_size = os.path.getsize(temp_file_path)
@@ -8822,6 +8927,44 @@ def export_template():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'message': 'FTP Sync Backend is running'})
+
+@app.route('/api/keep-ftp-alive', methods=['POST'])
+def keep_ftp_alive():
+    """Keep FTP connections alive by sending NOOP commands"""
+    try:
+        data = request.json
+        servers = data.get('servers', ['source', 'target'])
+        results = {}
+        
+        for server in servers:
+            if server in ftp_managers:
+                ftp_manager = ftp_managers[server]
+                if ftp_manager.connected:
+                    try:
+                        # Send NOOP command to keep connection alive
+                        ftp_manager.ftp.voidcmd("NOOP")
+                        results[server] = {'status': 'alive', 'message': 'Connection active'}
+                    except Exception as e:
+                        # Connection lost, try to reconnect
+                        logger.warning(f"FTP connection to {server} lost: {str(e)}")
+                        try:
+                            ftp_manager.disconnect()
+                            if ftp_manager.connect():
+                                results[server] = {'status': 'reconnected', 'message': 'Connection restored'}
+                            else:
+                                results[server] = {'status': 'failed', 'message': 'Reconnection failed'}
+                        except Exception as reconnect_error:
+                            results[server] = {'status': 'error', 'message': str(reconnect_error)}
+                else:
+                    results[server] = {'status': 'disconnected', 'message': 'Not connected'}
+            else:
+                results[server] = {'status': 'not_initialized', 'message': 'FTP manager not created'}
+        
+        return jsonify({'success': True, 'servers': results})
+        
+    except Exception as e:
+        logger.error(f"Keep-alive error: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 # Meeting Trimmer endpoints
@@ -12312,8 +12455,109 @@ def update_template_defaults():
         return jsonify({'success': False, 'message': error_msg}), 500
 
 
+@app.route('/api/scheduler/status', methods=['GET'])
+def get_scheduler_status():
+    """Get the current status of the automatic sync scheduler"""
+    try:
+        scheduler_config = config_manager.get_scheduling_settings()
+        is_enabled = scheduler_config.get('auto_sync_enabled', False)
+        
+        # Get last run info from database
+        conn = db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT job_name, last_run_at, last_run_status, last_run_details
+                    FROM sync_jobs
+                    WHERE job_name = 'castus_expiration_sync_all'
+                """)
+                job_info = cursor.fetchone()
+                
+        finally:
+            db_manager._put_connection(conn)
+            
+        return jsonify({
+            'success': True,
+            'enabled': is_enabled,
+            'running': scheduler_jobs is not None and scheduler_jobs.enabled,
+            'last_run': job_info if job_info else None,
+            'schedule': '9:00 AM, 12:00 PM, 3:00 PM, 6:00 PM daily'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting scheduler status: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/scheduler/toggle', methods=['POST'])
+def toggle_scheduler():
+    """Enable or disable the automatic sync scheduler"""
+    global scheduler_jobs
+    
+    try:
+        data = request.json
+        enable = data.get('enable', False)
+        
+        # Update configuration
+        scheduler_config = config_manager.get_scheduling_settings()
+        scheduler_config['auto_sync_enabled'] = enable
+        config_manager.update_scheduling_settings(scheduler_config)
+        
+        # Start or stop scheduler
+        if enable:
+            if scheduler_jobs is None:
+                scheduler_jobs = SchedulerJobs(db_manager, config_manager)
+            scheduler_jobs.start()
+            message = "Automatic sync scheduler enabled"
+        else:
+            if scheduler_jobs:
+                scheduler_jobs.stop()
+            message = "Automatic sync scheduler disabled"
+            
+        return jsonify({
+            'success': True,
+            'enabled': enable,
+            'message': message
+        })
+        
+    except Exception as e:
+        logger.error(f"Error toggling scheduler: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/scheduler/run-now', methods=['POST'])
+def run_sync_now():
+    """Manually trigger the sync all expirations job"""
+    global scheduler_jobs
+    
+    try:
+        # Initialize scheduler if needed
+        if scheduler_jobs is None:
+            scheduler_jobs = SchedulerJobs(db_manager, config_manager)
+            
+        # Run the sync job
+        scheduler_jobs.sync_all_expirations_from_castus()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Sync job started successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error running sync job: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")
     print("Backend will be available at: http://127.0.0.1:5000")
     print("Watch this terminal for detailed connection logs...")
+    
+    # Initialize scheduler on startup only in the main process
+    # Flask's reloader creates multiple processes, so we check if this is the main one
+    import os
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        scheduler_config = config_manager.get_scheduling_settings()
+        if scheduler_config.get('auto_sync_enabled', False):
+            scheduler_jobs = SchedulerJobs(db_manager, config_manager)
+            scheduler_jobs.start()
+            print("Automatic sync scheduler started")
+    
     app.run(debug=True, host='127.0.0.1', port=5000)
