@@ -11,6 +11,8 @@ from database import db_manager
 # from scheduler import scheduler  # MongoDB scheduler - no longer used
 from scheduler_postgres import scheduler_postgres
 from scheduler_jobs import SchedulerJobs
+from email_notifier import EmailNotifier
+from meeting_logger import MeetingLogger
 import logging
 from bson import ObjectId
 from datetime import datetime, timedelta
@@ -64,6 +66,102 @@ logger = logging.getLogger(__name__)
 
 # Initialize scheduler (will be started later)
 scheduler_jobs = None
+
+# Initialize email notifier for meeting notifications
+meeting_notifier = None
+try:
+    smtp_password = os.getenv('SMTP_PASSWORD')
+    if smtp_password:
+        meeting_notifier = EmailNotifier({
+            'smtp_password': smtp_password
+        })
+        logger.info("Email notifier initialized for meeting notifications")
+    else:
+        logger.warning("SMTP_PASSWORD not set, meeting notifications disabled")
+except Exception as e:
+    logger.error(f"Failed to initialize email notifier: {str(e)}")
+    meeting_notifier = None
+
+# Initialize meeting logger
+meeting_logger = MeetingLogger()
+
+def send_meeting_change_notification(action, meeting_data, old_data=None):
+    """
+    Send email notification for meeting changes/deletions and log the action
+    
+    Args:
+        action: 'updated' or 'deleted'
+        meeting_data: Current meeting data
+        old_data: Previous meeting data (for updates)
+    """
+    # Get client IP address
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if client_ip and ',' in client_ip:
+        # If there are multiple IPs (proxy chain), get the first one
+        client_ip = client_ip.split(',')[0].strip()
+    
+    email_sent = False
+    email_error = None
+    
+    if not meeting_notifier:
+        logger.debug("Meeting notifier not available, skipping notification")
+        email_error = "Email notifier not configured"
+    else:
+        try:
+            # Format the email
+            subject = f"Meeting Schedule {action.title()}: {meeting_data.get('meeting_name', 'Unknown Meeting')}"
+            
+            body = f"""
+Meeting Schedule Notification
+
+Action: {action.upper()}
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Client IP Address: {client_ip}
+
+Meeting Details:
+- Name: {meeting_data.get('meeting_name', 'N/A')}
+- Date: {meeting_data.get('meeting_date', 'N/A')}
+- Time: {meeting_data.get('start_time', 'N/A')} - {meeting_data.get('end_time', meeting_data.get('start_time', 'N/A'))}
+- Room: {meeting_data.get('room', 'N/A')}
+- ATL26 Broadcast: {'Yes' if meeting_data.get('atl26_broadcast') else 'No'}
+"""
+            
+            if action == 'updated' and old_data:
+                body += "\nChanges Made:\n"
+                for field in ['meeting_name', 'meeting_date', 'start_time', 'end_time', 'room', 'atl26_broadcast']:
+                    old_val = old_data.get(field)
+                    new_val = meeting_data.get(field)
+                    if old_val != new_val:
+                        body += f"- {field}: {old_val} → {new_val}\n"
+            
+            body += f"\nThis notification was sent automatically by the FTP Media Sync system."
+            
+            # Send to jpound@atlantaga.gov
+            email_sent = meeting_notifier.send_email(
+                to_emails=['jpound@atlantaga.gov'],
+                subject=subject,
+                body=body
+            )
+            
+            if email_sent:
+                logger.info(f"Meeting {action} notification sent for: {meeting_data.get('meeting_name')}")
+            else:
+                email_error = "Email send failed"
+                logger.error(f"Failed to send meeting notification for: {meeting_data.get('meeting_name')}")
+                
+        except Exception as e:
+            email_error = str(e)
+            logger.error(f"Exception sending meeting notification: {email_error}")
+    
+    # Log the meeting change
+    meeting_logger.log_meeting_change(
+        action=action,
+        meeting_data=meeting_data,
+        client_ip=client_ip,
+        email_sent=email_sent,
+        email_error=email_error,
+        old_data=old_data
+    )
 
 # Utility function to validate numeric values and prevent NaN
 def validate_numeric(value, default=0, name="value", min_value=None, max_value=None):
@@ -10309,6 +10407,22 @@ def create_meeting():
             room=data.get('room'),
             atl26_broadcast=data.get('atl26_broadcast', True)
         )
+        
+        # Log the meeting creation (no email sent)
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if client_ip and ',' in client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+        
+        meeting_data = data.copy()
+        meeting_data['id'] = meeting_id
+        meeting_logger.log_meeting_change(
+            action='created',
+            meeting_data=meeting_data,
+            client_ip=client_ip,
+            email_sent=False,
+            email_error="No email sent for new meetings (policy)"
+        )
+        
         return jsonify({
             'status': 'success',
             'message': 'Meeting created successfully',
@@ -10323,6 +10437,14 @@ def update_meeting(meeting_id):
     """Update a meeting"""
     try:
         data = request.json
+        
+        # Get the current meeting data before updating
+        old_meeting = None
+        try:
+            old_meetings = db_manager.get_all_meetings()
+            old_meeting = next((m for m in old_meetings if m.get('id') == meeting_id), None)
+        except Exception as e:
+            logger.warning(f"Could not fetch old meeting data: {str(e)}")
         
         # Handle both end_time and duration_hours for backward compatibility
         end_time = data.get('end_time')
@@ -10373,6 +10495,13 @@ def update_meeting(meeting_id):
             atl26_broadcast=data.get('atl26_broadcast', True)
         )
         if updated:
+            # Send email notification for the update
+            if old_meeting:
+                # Ensure the meeting_id is included in the data
+                update_data = data.copy()
+                update_data['id'] = meeting_id
+                send_meeting_change_notification('updated', update_data, old_meeting)
+            
             return jsonify({
                 'status': 'success',
                 'message': 'Meeting updated successfully'
@@ -10390,8 +10519,19 @@ def update_meeting(meeting_id):
 def delete_meeting(meeting_id):
     """Delete a meeting"""
     try:
+        # Get the meeting data before deleting
+        meeting_to_delete = None
+        try:
+            meetings = db_manager.get_all_meetings()
+            meeting_to_delete = next((m for m in meetings if m.get('id') == meeting_id), None)
+        except Exception as e:
+            logger.warning(f"Could not fetch meeting data before deletion: {str(e)}")
+        
         deleted = db_manager.delete_meeting(meeting_id)
         if deleted:
+            # Send email notification for the deletion
+            if meeting_to_delete:
+                send_meeting_change_notification('deleted', meeting_to_delete)
             return jsonify({
                 'status': 'success',
                 'message': 'Meeting deleted successfully'

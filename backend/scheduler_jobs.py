@@ -16,6 +16,7 @@ import psycopg2
 from config_manager import ConfigManager
 from ftp_manager import FTPManager
 from castus_metadata import CastusMetadataHandler
+from email_notifier import EmailNotifier
 
 # Setup dedicated logger for scheduler with file output
 logger = logging.getLogger(__name__)
@@ -49,7 +50,37 @@ class SchedulerJobs:
         self.scheduler = BackgroundScheduler()
         self.hostname = socket.gethostname()
         self.enabled = False
+        self.email_notifier = None
+        self._setup_email_notifier()
         
+    def _setup_email_notifier(self):
+        """Setup email notifier from configuration"""
+        scheduling_config = self.config_manager.get_scheduling_settings()
+        email_config = scheduling_config.get('email_notifications', {})
+        
+        if email_config.get('enabled', False):
+            # Get SMTP config from environment or config
+            smtp_password = os.environ.get('SMTP_PASSWORD', '')
+            if not smtp_password:
+                logger.warning("Email notifications enabled but SMTP_PASSWORD not set")
+                return
+            
+            smtp_config = {
+                'smtp_server': email_config.get('smtp_server', 'mail.smtp2go.com'),
+                'smtp_port': email_config.get('smtp_port', 2525),
+                'smtp_username': email_config.get('smtp_username', 'alerts@atl26.atlantaga.gov'),
+                'smtp_password': smtp_password,
+                'from_email': email_config.get('from_email', 'alerts@atl26.atlantaga.gov'),
+                'use_tls': email_config.get('use_tls', True),
+                'use_ssl': email_config.get('use_ssl', False)
+            }
+            
+            self.email_notifier = EmailNotifier(smtp_config)
+            self.notification_recipients = email_config.get('recipients', [])
+            logger.info(f"Email notifications enabled for {len(self.notification_recipients)} recipients")
+        else:
+            logger.info("Email notifications disabled")
+    
     def start(self):
         """Start the scheduler with configured jobs"""
         # Check if scheduler is enabled in config
