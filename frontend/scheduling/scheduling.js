@@ -71,17 +71,17 @@ function schedulingDisplayScheduleDetails(schedule) {
                     // Fallback: detect day change by hour crossing midnight
                     if (index === 0) {
                         dayNumber = 0;
+                        currentDay = 0;
                         showDayHeader = true;
-                    } else if (previousStartHour > 20 && startHour < 4) {
+                    } else if (previousStartHour >= 0 && previousStartHour > 20 && startHour < 4) {
                         // Crossed midnight (e.g., from 23:xx to 00:xx)
                         currentDay++;
                         dayNumber = currentDay;
                         showDayHeader = true;
-                    } else if (index > 0 && currentDay === -1) {
-                        // First item might not start at midnight
-                        currentDay = 0;
-                        dayNumber = 0;
-                        showDayHeader = true;
+                    } else {
+                        // Continue with current day
+                        dayNumber = currentDay;
+                        showDayHeader = false;
                     }
                 }
                 

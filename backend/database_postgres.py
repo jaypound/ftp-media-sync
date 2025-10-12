@@ -323,6 +323,118 @@ class PostgreSQLDatabaseManager:
         finally:
             self._put_connection(conn)
     
+    def find_assets_by_filenames_batch(self, filenames: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+        """Find multiple assets by filenames in a single query - much more efficient for bulk operations"""
+        if not self.connected or not filenames:
+            return {filename: None for filename in filenames}
+        
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Log the batch search
+            logger.info(f"Batch searching for {len(filenames)} assets")
+            
+            # Log a sample of filenames for debugging
+            if filenames:
+                logger.debug(f"Sample filenames being searched: {filenames[:3]}")
+                
+                # Debug: Check what's actually in the database for the first filename
+                debug_filename = filenames[0]
+                cursor.execute("""
+                    SELECT i.file_name, LENGTH(i.file_name) as name_length
+                    FROM instances i
+                    WHERE i.file_name LIKE %s
+                    LIMIT 5
+                """, (f"%{debug_filename[:20]}%",))
+                debug_results = cursor.fetchall()
+                if debug_results:
+                    logger.info(f"Debug: Found similar filenames in DB for '{debug_filename}':")
+                    for dr in debug_results:
+                        if isinstance(dr, dict):
+                            logger.info(f"  DB: '{dr['file_name']}' (length: {dr['name_length']})")
+                        else:
+                            logger.info(f"  DB: '{dr[0]}' (length: {dr[1]})")
+                else:
+                    logger.warning(f"Debug: No similar filenames found in DB for '{debug_filename}'")
+            
+            # Use ANY array for efficient batch lookup
+            cursor.execute("""
+                SELECT DISTINCT ON (i.file_name)
+                    a.id,
+                    a.guid,
+                    a.content_type,
+                    a.content_title,
+                    a.duration_seconds,
+                    i.file_name,
+                    i.file_path,
+                    i.file_size,
+                    i.file_duration
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id
+                WHERE i.file_name = ANY(%s)
+                ORDER BY i.file_name, i.is_primary DESC, i.created_at DESC
+            """, (filenames,))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            
+            # Build result dictionary
+            found_assets = {}
+            for row in results:
+                # Handle both tuple and dict-like results
+                if hasattr(row, 'get'):  # Dictionary-like
+                    asset_data = {
+                        'id': row.get('id'),
+                        'guid': str(row.get('guid')),
+                        'content_type': row.get('content_type'),
+                        'content_title': row.get('content_title'),
+                        'duration_seconds': float(row.get('file_duration') or row.get('duration_seconds') or 0),
+                        'file_name': row.get('file_name'),
+                        'file_path': row.get('file_path'),
+                        'file_size': row.get('file_size'),
+                        'file_duration': float(row.get('file_duration') or 0)
+                    }
+                    found_assets[row.get('file_name')] = asset_data
+                else:  # Tuple
+                    asset_data = {
+                        'id': row[0],
+                        'guid': str(row[1]),
+                        'content_type': row[2],
+                        'content_title': row[3],
+                        'duration_seconds': float(row[8]) if row[8] else float(row[4]) if row[4] else 0,
+                        'file_name': row[5],
+                        'file_path': row[6],
+                        'file_size': row[7],
+                        'file_duration': float(row[8]) if row[8] else 0
+                    }
+                    found_assets[row[5]] = asset_data
+            
+            # Return dictionary with None for not found files
+            result = {}
+            for filename in filenames:
+                result[filename] = found_assets.get(filename)
+            
+            logger.info(f"Batch search complete: found {len(found_assets)} of {len(filenames)} assets")
+            
+            # Debug: Log some of the not found files
+            not_found = [f for f in filenames if result[f] is None]
+            if not_found:
+                logger.warning(f"Files not found in batch search (first 5): {not_found[:5]}")
+                if found_assets:
+                    logger.info(f"Sample of found filenames (first 5): {list(found_assets.keys())[:5]}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in batch asset search: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {filename: None for filename in filenames}
+        finally:
+            self._put_connection(conn)
+    
     def upsert_analysis(self, analysis_data: Dict[str, Any]) -> bool:
         """Insert or update analysis result"""
         if not self.connected:
@@ -1253,11 +1365,9 @@ class PostgreSQLDatabaseManager:
         if not self.connected:
             return None
         
-        # Validate that meeting is not on Sunday
+        # Parse the meeting date for potential future use
         from datetime import datetime
         meeting_datetime = datetime.strptime(meeting_date, '%Y-%m-%d')
-        if meeting_datetime.weekday() == 6:  # Sunday
-            raise ValueError(f"Cannot create meeting on Sunday ({meeting_date})")
         
         # If end_time is provided but duration_hours is not, calculate duration
         if end_time and not duration_hours:

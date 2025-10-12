@@ -6947,27 +6947,29 @@ function displayScheduleDetails(schedule) {
             
             // For weekly or monthly schedules, detect day changes
             if (isWeeklySchedule || isMonthlySchedule) {
-                let dayNumber = 0;
+                let shouldAddDayHeader = false;
+                
+                // Debug logging
+                if (index < 5) {
+                    console.log(`Item ${index}: startTime=${startTime}, startHour=${startHour}, previousStartHour=${previousStartHour}, currentDay=${currentDay}`);
+                }
                 
                 // Detect day change: when hour goes from high (e.g., 23) to low (e.g., 0, 1, 2)
                 // or this is the first item
                 if (index === 0) {
-                    dayNumber = 0;
-                } else if (previousStartHour > 20 && startHour < 4) {
+                    currentDay = 0;
+                    shouldAddDayHeader = true;
+                } else if (previousStartHour >= 0 && previousStartHour > 20 && startHour < 4) {
                     // Crossed midnight (e.g., from 23:xx to 00:xx)
                     currentDay++;
-                    dayNumber = currentDay;
-                } else if (index > 0 && currentDay === -1) {
-                    // First item might not start at midnight
-                    currentDay = 0;
-                    dayNumber = 0;
+                    shouldAddDayHeader = true;
                 }
                 
                 // Add day header if we've moved to a new day
-                if ((index === 0) || (previousStartHour > 20 && startHour < 4)) {
-                    if (index === 0) {
-                        currentDay = 0;
-                    }
+                if (shouldAddDayHeader && index < 5) {
+                    console.log(`Adding day header at index ${index}`);
+                }
+                if (shouldAddDayHeader) {
                     
                     // Parse air_date properly to avoid timezone issues
                     const airDateStr = schedule.air_date.split('T')[0];
@@ -9575,8 +9577,14 @@ let selectedScheduleFile = null;
 
 function showLoadScheduleFromFTPModal() {
     document.getElementById('loadScheduleFromFTPModal').style.display = 'block';
-    // Set default date to today
-    document.getElementById('scheduleLoadDate').value = new Date().toISOString().split('T')[0];
+    // Set default date to Sunday of this week
+    const today = new Date();
+    const daysSinceSunday = today.getDay(); // 0 for Sunday, 1 for Monday, etc.
+    const thisSunday = new Date(today);
+    thisSunday.setDate(today.getDate() - daysSinceSunday);
+    document.getElementById('scheduleLoadDate').value = thisSunday.toISOString().split('T')[0];
+    // Set default server to target
+    document.getElementById('scheduleLoadServer').value = 'target';
 }
 
 function closeLoadScheduleFromFTPModal() {
@@ -9602,7 +9610,7 @@ async function loadScheduleFilesFromFTP() {
             body: JSON.stringify({ server, path })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             displayScheduleFiles(result.files);
@@ -9699,7 +9707,7 @@ async function loadSelectedScheduleFromFTP() {
             })
         });
         
-        
+        const result = await response.json();
         
         if (result.success) {
             log(`✅ Schedule loaded successfully!`);

@@ -3294,8 +3294,10 @@ def reorder_schedule_items():
 
 def search_schedule_content(schedule_id, search_term):
     """Search for content within a schedule"""
+    logger.info(f"=== SEARCH SCHEDULE CONTENT: schedule_id={schedule_id}, search_term='{search_term}' ===")
     try:
         from psycopg2.extras import RealDictCursor
+        import json
         
         conn = db_manager._get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -3332,7 +3334,8 @@ def search_schedule_content(schedule_id, search_term):
                     a.content_type,
                     si.asset_id,
                     si.sequence_number,
-                    s.air_date
+                    s.air_date,
+                    si.metadata
                 FROM scheduled_items si
                 JOIN schedules s ON si.schedule_id = s.id
                 JOIN assets a ON si.asset_id = a.id
@@ -3364,7 +3367,8 @@ def search_schedule_content(schedule_id, search_term):
                     a.content_type,
                     si.asset_id,
                     si.sequence_number,
-                    s.air_date
+                    s.air_date,
+                    si.metadata
                 FROM scheduled_items si
                 JOIN schedules s ON si.schedule_id = s.id
                 JOIN assets a ON si.asset_id = a.id
@@ -3386,15 +3390,51 @@ def search_schedule_content(schedule_id, search_term):
             unique_days = set()
             total_duration = 0
             
+            # Log first few items to debug
+            if len(matches) > 0:
+                logger.info(f"Total matches: {len(matches)}, is_weekly: {is_weekly_schedule}")
+                for i, match in enumerate(matches[:3]):
+                    logger.info(f"Match {i}: id={match['id']}, file={match['file_name']}, metadata={match.get('metadata')}")
+            
             for match in matches:
                 if is_weekly_schedule:
-                    # For weekly schedules, use cumulative time to determine actual day
-                    cumulative_start = item_start_times.get(match['id'], 0)
-                    days_offset = int(cumulative_start // 86400)
-                    time_in_day = cumulative_start % 86400
+                    # Check if we have metadata with day_offset first
+                    metadata = match.get('metadata')
                     
-                    scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
-                    scheduled_datetime = scheduled_datetime + timedelta(days=days_offset, seconds=time_in_day)
+                    # Handle JSON string metadata
+                    if metadata and isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except:
+                            metadata = None
+                    
+                    if metadata and isinstance(metadata, dict) and 'day_offset' in metadata:
+                        # Use metadata day_offset
+                        days_offset = metadata['day_offset']
+                        logger.info(f"File: {match['file_name']}, using metadata day_offset: {days_offset}")
+                        # Parse the scheduled time
+                        scheduled_time = match['scheduled_start_time']
+                        if isinstance(scheduled_time, str):
+                            time_parts = scheduled_time.split(':')
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1])
+                            seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                        else:
+                            hours = scheduled_time.hour
+                            minutes = scheduled_time.minute
+                            seconds = scheduled_time.second + (scheduled_time.microsecond / 1000000)
+                        
+                        scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
+                        scheduled_datetime = scheduled_datetime + timedelta(days=days_offset, hours=hours, minutes=minutes, seconds=seconds)
+                    else:
+                        # Fallback: use cumulative time to determine actual day
+                        cumulative_start = item_start_times.get(match['id'], 0)
+                        days_offset = int(cumulative_start // 86400)
+                        time_in_day = cumulative_start % 86400
+                        logger.info(f"File: {match['file_name']}, fallback - cumulative_start: {cumulative_start}, days_offset: {days_offset}")
+                        
+                        scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
+                        scheduled_datetime = scheduled_datetime + timedelta(days=days_offset, seconds=time_in_day)
                 else:
                     # For daily schedules, use the scheduled_start_time directly
                     scheduled_time = match['scheduled_start_time']
@@ -3576,6 +3616,8 @@ def generate_report():
         data = request.json
         report_type = data.get('report_type')
         schedule_id = data.get('schedule_id')
+        
+        logger.info(f"=== GENERATE REPORT: type={report_type}, schedule_id={schedule_id} ===")
         
         if report_type == 'schedule-analysis':
             if not schedule_id:
@@ -5326,7 +5368,7 @@ def list_schedule_files():
     try:
         data = request.json
         server = data.get('server')
-        path = data.get('path', '/mnt/md127/Schedules')
+        path = data.get('path', '/mnt/md127/Schedules/Master')
         
         if not server or server not in ftp_managers:
             return jsonify({
@@ -5423,12 +5465,19 @@ def load_schedule_template():
                 for i, item in enumerate(schedule_data['items'][:3]):
                     logger.info(f"  Item {i}: start_time='{item.get('start_time')}', filename='{item.get('filename')}'")
             
-            # Try to match items with database assets
+            # Try to match items with database assets using batch lookup
+            filenames = [item.get('filename') for item in schedule_data['items'] if item.get('filename')]
+            if filenames:
+                logger.info(f"Batch looking up {len(filenames)} assets for template")
+                asset_matches = db_manager.find_assets_by_filenames_batch(filenames)
+            else:
+                asset_matches = {}
+            
             for item in schedule_data['items']:
                 filename = item.get('filename')
                 if filename:
-                    logger.debug(f"Looking up asset for: {filename}")
-                    asset_match = db_manager.find_asset_by_filename(filename)
+                    logger.debug(f"Processing asset for: {filename}")
+                    asset_match = asset_matches.get(filename)
                     if asset_match:
                         item['asset_id'] = asset_match['id']
                         item['content_id'] = asset_match['id']  # For backwards compatibility
@@ -6220,7 +6269,7 @@ def load_schedule_from_ftp():
     try:
         data = request.json
         server_type = data.get('server')
-        path = data.get('path', '/mnt/md127/Schedules')
+        path = data.get('path', '/mnt/md127/Schedules/Master')
         filename = data.get('filename')
         schedule_date = data.get('schedule_date')
         
@@ -6260,16 +6309,31 @@ def load_schedule_from_ftp():
             # Parse the Castus schedule format
             schedule_data = parse_castus_schedule(content)
             
+            # For weekly schedules, adjust the date to the Sunday of that week
+            if schedule_data['type'] == 'weekly':
+                from datetime import datetime, timedelta
+                schedule_date_obj = datetime.strptime(schedule_date, '%Y-%m-%d')
+                # Get the Sunday of the week (weekday() returns 0 for Monday, 6 for Sunday)
+                days_since_sunday = (schedule_date_obj.weekday() + 1) % 7
+                sunday_date = schedule_date_obj - timedelta(days=days_since_sunday)
+                original_date = schedule_date
+                schedule_date = sunday_date.strftime('%Y-%m-%d')
+                logger.info(f"Weekly schedule: Adjusted date from {original_date} to {schedule_date} (Sunday)")
+            
             # Process the schedule items
             schedule_items = []
             matched_count = 0
             unmatched_count = 0
             
+            # For now, use individual lookups until batch lookup is fixed
+            # This is safer to avoid breaking existing functionality
+            logger.info(f"Looking up {len(schedule_data['items'])} assets individually")
+            
             for item in schedule_data['items']:
                 file_path = item['file_path']
                 file_name = item['filename']
                 
-                # Try to match with analyzed content
+                # Use individual lookup for now (batch lookup needs fixing)
                 asset_match = db_manager.find_asset_by_filename(file_name)
                 
                 if asset_match:
@@ -6304,22 +6368,16 @@ def load_schedule_from_ftp():
             if not schedule_items:
                 return jsonify({'success': False, 'message': 'No valid items found in schedule file'})
             
-            # Check if schedule already exists for this date
-            existing_schedule = scheduler_postgres.get_schedule_by_date(schedule_date)
-            if existing_schedule:
-                return jsonify({
-                    'success': False, 
-                    'message': f'A schedule already exists for {schedule_date}. Please delete it first or choose a different date.',
-                    'schedule_exists': True
-                })
+            # Allow multiple schedules for the same date (for revisions)
             
             # Create schedule in database
             logger.info(f"Creating schedule for {schedule_date} with {len(schedule_items)} items")
             
             # Create empty schedule
+            schedule_type_label = "Weekly" if schedule_data['type'] == 'weekly' else "Daily"
             result = scheduler_postgres.create_empty_schedule(
                 schedule_date=schedule_date,
-                schedule_name=f"Imported from {filename}"
+                schedule_name=f"{schedule_type_label} - Imported from {filename}"
             )
             
             if not result.get('success'):
@@ -6329,12 +6387,35 @@ def load_schedule_from_ftp():
             
             # Add items to schedule
             success_count = 0
+            failed_count = 0
+            skipped_count = 0
             for idx, item in enumerate(schedule_items):
                 if item['asset_id']:
+                    logger.info(f"Processing item {idx}: {item['file_name']} with asset_id {item['asset_id']}")
                     # Use the start time from the Castus file or calculate if not available
+                    metadata = {}
                     if item.get('start_time'):
-                        # Convert Castus time format (e.g., "12:30:45.123 am") to 24-hour format
-                        start_time = convert_to_24hour_format(item['start_time'])
+                        # Check if it's a weekly schedule with day prefix
+                        start_time_str = item['start_time']
+                        if ' ' in start_time_str and len(start_time_str.split(' ')[0]) <= 3:
+                            # Extract just the time part for weekly schedules (e.g., "sat 09:56:45.128" -> "09:56:45.128")
+                            parts = start_time_str.split(' ', 1)
+                            day_prefix = parts[0].lower() if len(parts) > 1 else ''
+                            time_part = parts[1] if len(parts) > 1 else start_time_str
+                            start_time = convert_to_24hour_format(time_part)
+                            
+                            # Add metadata for weekly schedules
+                            if day_prefix and schedule_data['type'] == 'weekly':
+                                day_map = {'sun': 0, 'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5, 'sat': 6}
+                                day_offset = day_map.get(day_prefix, 0)
+                                metadata = {
+                                    'day_prefix': day_prefix,
+                                    'day_offset': day_offset
+                                }
+                            logger.debug(f"Weekly schedule time conversion: '{start_time_str}' -> '{start_time}', day_offset={metadata.get('day_offset', 0)}")
+                        else:
+                            # Convert Castus time format (e.g., "12:30:45.123 am") to 24-hour format
+                            start_time = convert_to_24hour_format(start_time_str)
                     else:
                         # Fallback: calculate based on previous items
                         start_seconds = sum(float(schedule_items[i].get('duration_seconds', 0)) for i in range(idx))
@@ -6348,10 +6429,20 @@ def load_schedule_from_ftp():
                         asset_id=item['asset_id'],
                         order_index=idx,
                         scheduled_start_time=start_time,
-                        scheduled_duration_seconds=item['duration_seconds']
+                        scheduled_duration_seconds=item['duration_seconds'],
+                        metadata=metadata if metadata else None
                     )
                     if success:
                         success_count += 1
+                        logger.info(f"Successfully added item {idx}")
+                    else:
+                        failed_count += 1
+                        logger.error(f"Failed to add item {idx}")
+                else:
+                    skipped_count += 1
+                    logger.warning(f"Skipping item {idx}: {item['file_name']} - no asset_id")
+            
+            logger.info(f"Schedule creation summary: success={success_count}, failed={failed_count}, skipped={skipped_count}")
             
             # Recalculate times
             scheduler_postgres.recalculate_schedule_times(schedule_id)
@@ -10610,19 +10701,25 @@ def get_meetings_by_week():
         if not year or not week:
             return jsonify({'status': 'error', 'message': 'Year and week parameters are required'}), 400
         
-        # Calculate start and end dates for the week using ISO week date
+        # Calculate start and end dates for the week using Sunday as the first day
+        # This must match the frontend's getWeekNumber() logic exactly
         from datetime import datetime, timedelta
         
-        # Find the first Monday of the year
+        # Find the first Sunday of the year
         jan1 = datetime(year, 1, 1)
-        # Days until first Monday (0 = Monday, 6 = Sunday)
-        days_to_first_monday = (7 - jan1.weekday()) % 7
-        if days_to_first_monday == 0 and jan1.weekday() != 0:
-            days_to_first_monday = 7
-        first_monday = jan1 + timedelta(days=days_to_first_monday)
+        # In Python weekday(): 0=Monday, 6=Sunday
+        # In JS getDay(): 0=Sunday, 6=Saturday
+        # So we need to convert: Python Sunday (6) = JS Sunday (0)
+        jan1_day_of_week = (jan1.weekday() + 1) % 7  # Convert to JS style where 0=Sunday
         
-        # Calculate the start of the requested week
-        week_start = first_monday + timedelta(weeks=week - 1)
+        # Calculate days to first Sunday (matching JS: dayOfWeek === 0 ? 0 : 7 - dayOfWeek)
+        days_to_first_sunday = 0 if jan1_day_of_week == 0 else 7 - jan1_day_of_week
+        first_sunday = jan1 + timedelta(days=days_to_first_sunday)
+        
+        # Calculate the start of the requested week (Sunday)
+        # JS does: firstSunday.getDate() + (weekNumber - 1) * 7
+        week_start = first_sunday + timedelta(days=(week - 1) * 7)
+        # End of week is Saturday (6 days later)
         week_end = week_start + timedelta(days=6)
         
         logger.info(f"Week {week} of {year}: {week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
