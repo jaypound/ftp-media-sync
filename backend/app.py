@@ -7853,6 +7853,10 @@ def fill_template_gaps():
                                 category_match = content.get('content_type', '').upper() == duration_category.upper()
                                 
                             if category_match:
+                                # ALWAYS check expiration first, even with reduced delays
+                                if is_content_expired_at_position(content, current_position, schedule_type, base_date):
+                                    continue  # Skip expired content
+                                
                                 # Check with reduced delay
                                 if content_id in asset_schedule_times:
                                     last_times = asset_schedule_times[content_id]
