@@ -124,32 +124,82 @@
 }
 
 /* Dark Mode Support */
+body.dark-mode .meeting-trimmer-recordings-list,
+body.dark-mode .recordings-list {
+    background-color: #1a1a1a;
+    border-color: #333;
+}
+
+body.dark-mode .meeting-trimmer-recording-item,
+body.dark-mode .recording-item {
+    background-color: #2a2a2a;
+    border-color: #333;
+}
+
+body.dark-mode .meeting-trimmer-recording-item:hover,
+body.dark-mode .recording-item:hover {
+    background-color: #3a3a3a;
+}
+
+body.dark-mode .meeting-trimmer-recording-name,
+body.dark-mode .recording-name {
+    color: #e0e0e0;
+}
+
+body.dark-mode .meeting-trimmer-recording-meta,
+body.dark-mode .recording-meta {
+    color: #999;
+}
+
+body.dark-mode .meeting-trimmer-no-recordings,
+body.dark-mode .no-recordings {
+    color: #666;
+}
+
+body.dark-mode .meeting-trimmer-status-badge.trimmed,
+body.dark-mode .status-badge.trimmed {
+    background-color: #1b5e20;
+    color: #81c784;
+}
+
+/* Also support system preference for users without manual toggle */
 @media (prefers-color-scheme: dark) {
-    .meeting-trimmer-recordings-list,
-    .recordings-list {
+    body:not(.light-mode) .meeting-trimmer-recordings-list,
+    body:not(.light-mode) .recordings-list {
         background-color: #1a1a1a;
         border-color: #333;
     }
     
-    .meeting-trimmer-recording-item,
-    .recording-item {
+    body:not(.light-mode) .meeting-trimmer-recording-item,
+    body:not(.light-mode) .recording-item {
         background-color: #2a2a2a;
         border-color: #333;
     }
     
-    .meeting-trimmer-recording-item:hover,
-    .recording-item:hover {
+    body:not(.light-mode) .meeting-trimmer-recording-item:hover,
+    body:not(.light-mode) .recording-item:hover {
         background-color: #3a3a3a;
     }
     
-    .meeting-trimmer-recording-name,
-    .recording-name {
+    body:not(.light-mode) .meeting-trimmer-recording-name,
+    body:not(.light-mode) .recording-name {
         color: #e0e0e0;
     }
     
-    .meeting-trimmer-recording-meta,
-    .recording-meta {
+    body:not(.light-mode) .meeting-trimmer-recording-meta,
+    body:not(.light-mode) .recording-meta {
         color: #999;
+    }
+    
+    body:not(.light-mode) .meeting-trimmer-no-recordings,
+    body:not(.light-mode) .no-recordings {
+        color: #666;
+    }
+    
+    body:not(.light-mode) .meeting-trimmer-status-badge.trimmed,
+    body:not(.light-mode) .status-badge.trimmed {
+        background-color: #1b5e20;
+        color: #81c784;
     }
 }
 
