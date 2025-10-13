@@ -2102,7 +2102,7 @@ class PostgreSQLScheduler:
             
             schedule_id = self._create_schedule_record(
                 schedule_date=start_date_obj.date(),
-                schedule_name=schedule_name or f"Weekly Schedule: {start_date_obj.strftime('%Y-%m-%d')} - {end_date_obj.strftime('%Y-%m-%d')}"
+                schedule_name=schedule_name or f"[WEEKLY] Schedule: {start_date_obj.strftime('%Y-%m-%d')} - {end_date_obj.strftime('%Y-%m-%d')}"
             )
             
             if not schedule_id:
