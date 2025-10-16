@@ -10116,8 +10116,13 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
         
         log(`fillScheduleGaps: Gap to fill: ${gapHours}h ${gapMinutes}m (${gapSeconds} seconds)`, 'info');
 
-        if (confirm(`Current template duration: ${formatDuration(totalDuration)}\nGap to fill: ${gapHours}h ${gapMinutes}m\n\nFill the gaps with available content?`)) {
-            log(`fillScheduleGaps: User confirmed - filling ${gapHours}h ${gapMinutes}m of schedule gaps`, 'info');
+        // Show notification instead of confirmation dialog
+        window.showNotification(`Filling schedule gaps: ${gapHours}h ${gapMinutes}m`, 'info');
+        log(`fillScheduleGaps: Auto-filling ${gapHours}h ${gapMinutes}m of schedule gaps`, 'info');
+        
+        // Always proceed without confirmation
+        if (true) {
+            log(`fillScheduleGaps: Filling ${gapHours}h ${gapMinutes}m of schedule gaps`, 'info');
             
             // Get schedule date - skip prompt if template is from meetings import
             let scheduleDate = currentTemplate.schedule_date;
@@ -10646,6 +10651,19 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
                     return;
                 }
                 
+                // Check for overlaps first
+                if (result.items_with_overlaps && result.items_with_overlaps.length > 0) {
+                    log(`fillScheduleGaps: ERROR - ${result.items_with_overlaps.length} items have overlaps`, 'error');
+                    const overlapMsg = 'Schedule validation failed: Items with overlaps detected:\n';
+                    const details = result.items_with_overlaps.map(item => 
+                        `- ${item.title || item.file_name} at ${item.start_time}`
+                    ).join('\n');
+                    
+                    // Show alert and throw error to abort automation
+                    alert(overlapMsg + details);
+                    throw new Error('Schedule validation failed: Overlaps detected. Please check the template.');
+                }
+                
                 if (result.success && result.items_added && result.items_added.length > 0) {
                     log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
                     
@@ -10717,7 +10735,8 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
                         console.error('Stack trace:', displayError.stack);
                     }
                     
-                    alert(`Successfully added ${result.items_added.length} items to fill the schedule gaps.`);
+                    // Show notification instead of alert
+                    window.showNotification(`Added ${result.items_added.length} items to fill schedule gaps`, 'success');
                     log(`fillScheduleGaps: Template now has ${currentTemplate.items.length} items`, 'success');
                     
                     // Force a refresh of the display
@@ -10741,15 +10760,29 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
                         const errorMsg = result.message + '\n\nVerification Errors:\n' + result.verification_errors.join('\n');
                         alert(errorMsg);
                         console.error('Verification failed:', result.verification_errors);
+                        // Throw error to abort automation
+                        throw new Error('Schedule validation failed: Verification errors detected.');
                     } else {
                         alert(result.message || 'Could not find suitable content to fill the schedule gaps. Try analyzing more content.');
+                        // Throw error to abort automation if fill gaps failed
+                        throw new Error(result.message || 'Failed to fill schedule gaps.');
                     }
                 }
             } catch (error) {
                 // Hide progress modal on error
                 hideFillGapsProgress();
                 log(`fillScheduleGaps: Error filling gaps - ${error.message}`, 'error');
-                alert(`Error filling schedule gaps: ${error.message}`);
+                
+                // Only show alert if this is an unexpected error
+                // (Overlap and validation errors already show their own alerts)
+                if (!error.message.includes('Schedule validation failed') && 
+                    !error.message.includes('Overlaps detected') &&
+                    !error.message.includes('Verification errors detected')) {
+                    alert(`Error filling schedule gaps: ${error.message}`);
+                }
+                
+                // Re-throw to abort automation
+                throw error;
             }
         } else {
             log('fillScheduleGaps: User cancelled gap filling', 'info');
@@ -10759,6 +10792,8 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
         hideFillGapsProgress();
         log(`fillScheduleGaps: ERROR - ${error.message}`, 'error');
         console.error('Error in fillScheduleGaps:', error);
+        // Re-throw to abort automation
+        throw error;
     }
 }
 
@@ -13595,11 +13630,52 @@ async function confirmTemplateExport() {
 
 // Return to Automation Functions
 function showReturnToAutomationModal() {
-    const modal = document.getElementById('returnToAutomationModal');
-    modal.style.display = 'block';
-    
-    // Load project files from /mnt/main/Projects/Master
-    loadProjectFiles();
+    // Streamlined automation - automatically select newest video and start
+    autoStartAutomation();
+}
+
+// Automatically start automation with newest video file
+async function autoStartAutomation() {
+    try {
+        // Load video files from /mnt/main/Videos
+        const response = await fetch('/api/list-project-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: '/mnt/main/Videos',
+                extension: '.mp4,.avi,.mov,.mkv,.wmv',
+                include_videos: true
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success || !result.files || result.files.length === 0) {
+            alert('No video files found in /mnt/main/Videos folder');
+            return;
+        }
+        
+        // Sort files by modification time to get the newest
+        const newestFile = result.files.sort((a, b) => b.mtime - a.mtime)[0];
+        const selectedFile = newestFile.path;
+        const programmingDelay = 120; // Default 120 seconds
+        
+        // Get the current template
+        const currentTemplate = window.currentTemplate;
+        if (!currentTemplate || !currentTemplate.items) {
+            alert('No weekly template loaded. Please import weekly meetings first.');
+            return;
+        }
+        
+        log(`Starting automated process with video: ${newestFile.name}`, 'info');
+        
+        // Execute the automation process directly
+        await executeAutomation(selectedFile, newestFile.name, programmingDelay, currentTemplate);
+        
+    } catch (error) {
+        log(`Automation error: ${error.message}`, 'error');
+        alert(`Automation failed: ${error.message}`);
+    }
 }
 
 function closeReturnToAutomationModal() {
@@ -13714,6 +13790,21 @@ async function startAutomation() {
     startBtn.disabled = true;
     startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
     
+    const projectName = projectFileSelect.options[projectFileSelect.selectedIndex].textContent;
+    
+    try {
+        await executeAutomation(selectedProjectFile, projectName, programmingDelay, currentTemplate);
+    } catch (error) {
+        log(`Automation error: ${error.message}`, 'error');
+        alert(`Automation failed: ${error.message}`);
+    } finally {
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<i class="fas fa-play"></i> Start Automation';
+    }
+}
+
+// Common automation execution logic
+async function executeAutomation(selectedFile, fileName, programmingDelay, currentTemplate) {
     try {
         log('Starting automation process...', 'info');
         
@@ -13724,8 +13815,8 @@ async function startAutomation() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 template: currentTemplate,
-                defaultProject: selectedProjectFile,
-                projectName: projectFileSelect.options[projectFileSelect.selectedIndex].textContent
+                defaultProject: selectedFile,
+                projectName: fileName
             })
         });
         
@@ -13781,8 +13872,15 @@ async function startAutomation() {
         // Call the existing fillScheduleGaps function
         if (typeof fillScheduleGaps === 'function') {
             log(`Calling fillScheduleGaps function with ${programmingDelay}s delay...`, 'info');
-            await fillScheduleGaps(programmingDelay);
-            log('fillScheduleGaps function completed', 'info');
+            
+            try {
+                await fillScheduleGaps(programmingDelay);
+                log('fillScheduleGaps function completed', 'info');
+            } catch (fillError) {
+                log(`Fill gaps failed: ${fillError.message}`, 'error');
+                // Re-throw to stop the automation process
+                throw fillError;
+            }
             
             // Get the updated template after filling gaps
             const filledTemplate = window.currentTemplate;
@@ -13804,8 +13902,36 @@ async function startAutomation() {
             throw new Error('Fill schedule gaps function not available');
         }
         
-        // Step 4: Export to both Castus servers
-        log('Exporting schedule to Castus servers...', 'info');
+        // Step 4: Validate template before export
+        log('Validating template before export...', 'info');
+        
+        // Validate that all files exist on the FTP servers
+        try {
+            const validateResponse = await fetch('/api/validate-template-files', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    items: updatedTemplate.items
+                })
+            });
+            
+            const validateResult = await validateResponse.json();
+            
+            if (!validateResult.success || (validateResult.missing_files && validateResult.missing_files.length > 0)) {
+                const missingCount = validateResult.missing_files ? validateResult.missing_files.length : 0;
+                log(`Validation failed: ${missingCount} missing files`, 'error');
+                const errorMsg = `Cannot export schedule: ${missingCount} files are missing on the FTP servers.\n\nPlease verify all content exists before exporting.`;
+                alert(errorMsg);
+                throw new Error('Template validation failed: Missing files detected');
+            }
+        } catch (validateError) {
+            log(`Template validation error: ${validateError.message}`, 'error');
+            throw validateError;
+        }
+        
+        // Step 5: Export to both Castus servers (only if validation passed)
+        log('Validation passed. Exporting schedule to Castus servers...', 'info');
+        window.showNotification('Generating schedules for Castus1 and Castus2', 'info');
         
         // Export to both servers
         const exportServers = ['source', 'target']; // Castus1 and Castus2
@@ -13854,14 +13980,18 @@ async function startAutomation() {
         
         log('Automation process completed successfully!', 'success');
         
-        // Create detailed success message
-        let successMessage = 'Automation completed!\n\nSchedule has been updated and exported to both Castus servers.';
+        // Create detailed message with exported file names
+        let successMessage = 'Automation completed!\n\nSchedules have been exported:';
         if (exportedPaths.length > 0) {
-            successMessage += '\n\nExported files:';
             exportedPaths.forEach(path => {
                 successMessage += `\n• ${path}`;
+                log(`Exported: ${path}`, 'success');
             });
+        } else {
+            successMessage += '\n\nNo files were exported.';
         }
+        
+        // Show alert with export details for user acknowledgment
         alert(successMessage);
         
         // Refresh the template display
@@ -13877,11 +14007,7 @@ async function startAutomation() {
         closeReturnToAutomationModal();
         
     } catch (error) {
-        log(`Automation error: ${error.message}`, 'error');
-        alert(`Automation failed: ${error.message}`);
-    } finally {
-        startBtn.disabled = false;
-        startBtn.innerHTML = '<i class="fas fa-play"></i> Start Automation';
+        throw error;
     }
 }
 

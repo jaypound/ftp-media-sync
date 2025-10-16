@@ -316,6 +316,7 @@ async function meetingScheduleEditMeeting(meetingId) {
             endTimeInput.value = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
         }
     }
+    
     document.getElementById('meetingRoom').value = meeting.room || '';
     document.getElementById('meetingBroadcast').checked = meeting.broadcast_on_atl26;
     
@@ -330,7 +331,12 @@ async function meetingScheduleEditMeeting(meetingId) {
 
 // Save meeting
 async function meetingScheduleSaveMeeting() {
+    
     const meetingId = document.getElementById('meetingId').value;
+    
+    // Get the save button to show loading state
+    const saveBtn = event.target || document.querySelector('[onclick*="meetingScheduleSaveMeeting"]');
+    const originalBtnText = saveBtn ? saveBtn.innerHTML : '';
     
     // Validate meeting name
     const meetingName = document.getElementById('meetingName').value.trim();
@@ -362,6 +368,12 @@ async function meetingScheduleSaveMeeting() {
         broadcast_on_atl26: document.getElementById('meetingBroadcast').checked
     };
     
+    // Show loading state
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    }
+    
     try {
         let response;
         if (meetingId) {
@@ -388,6 +400,12 @@ async function meetingScheduleSaveMeeting() {
         }
     } catch (error) {
         window.showNotification('Failed to save meeting', 'error');
+    } finally {
+        // Restore button state
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnText;
+        }
     }
 }
 
@@ -554,6 +572,7 @@ window.meetingScheduleEditMeeting = meetingScheduleEditMeeting;
 window.meetingScheduleSaveMeeting = meetingScheduleSaveMeeting;
 window.meetingScheduleDeleteMeeting = meetingScheduleDeleteMeeting;
 window.meetingScheduleCloseMeetingModal = meetingScheduleCloseMeetingModal;
+window.meetingScheduleLoadMeetings = meetingScheduleLoadMeetings;
 window.meetingScheduleShowTrimSettings = meetingScheduleShowTrimSettings;
 window.meetingScheduleSaveTrimSettings = meetingScheduleSaveTrimSettings;
 window.meetingScheduleRefreshRecordingsList = meetingScheduleRefreshRecordingsList;

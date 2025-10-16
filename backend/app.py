@@ -20,6 +20,7 @@ import uuid
 import subprocess
 import shutil
 import tempfile
+import threading
 from psycopg2.extras import RealDictCursor
 
 # Load environment variables from .env file
@@ -94,24 +95,36 @@ def send_meeting_change_notification(action, meeting_data, old_data=None):
         meeting_data: Current meeting data
         old_data: Previous meeting data (for updates)
     """
-    # Get client IP address
+    # Get client IP address from the current request context
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
     if client_ip and ',' in client_ip:
         # If there are multiple IPs (proxy chain), get the first one
         client_ip = client_ip.split(',')[0].strip()
     
-    email_sent = False
-    email_error = None
+    # Immediately log the meeting change (this is fast)
+    meeting_logger.log_meeting_change(
+        action=action,
+        meeting_data=meeting_data,
+        client_ip=client_ip,
+        email_sent=False,  # Will be updated if email is sent
+        email_error="Email pending",  # Will be updated after email attempt
+        old_data=old_data
+    )
     
-    if not meeting_notifier:
-        logger.debug("Meeting notifier not available, skipping notification")
-        email_error = "Email notifier not configured"
-    else:
-        try:
-            # Format the email
-            subject = f"Meeting Schedule {action.title()}: {meeting_data.get('meeting_name', 'Unknown Meeting')}"
-            
-            body = f"""
+    # Send email notification asynchronously (in background thread)
+    def send_email_async():
+        email_sent = False
+        email_error = None
+        
+        if not meeting_notifier:
+            logger.debug("Meeting notifier not available, skipping notification")
+            email_error = "Email notifier not configured"
+        else:
+            try:
+                # Format the email
+                subject = f"Meeting Schedule {action.title()}: {meeting_data.get('meeting_name', 'Unknown Meeting')}"
+                
+                body = f"""
 Meeting Schedule Notification
 
 Action: {action.upper()}
@@ -125,43 +138,46 @@ Meeting Details:
 - Room: {meeting_data.get('room', 'N/A')}
 - ATL26 Broadcast: {'Yes' if meeting_data.get('atl26_broadcast') else 'No'}
 """
-            
-            if action == 'updated' and old_data:
-                body += "\nChanges Made:\n"
-                for field in ['meeting_name', 'meeting_date', 'start_time', 'end_time', 'room', 'atl26_broadcast']:
-                    old_val = old_data.get(field)
-                    new_val = meeting_data.get(field)
-                    if old_val != new_val:
-                        body += f"- {field}: {old_val} → {new_val}\n"
-            
-            body += f"\nThis notification was sent automatically by the FTP Media Sync system."
-            
-            # Send to jpound@atlantaga.gov
-            email_sent = meeting_notifier.send_email(
-                to_emails=['jpound@atlantaga.gov'],
-                subject=subject,
-                body=body
-            )
-            
-            if email_sent:
-                logger.info(f"Meeting {action} notification sent for: {meeting_data.get('meeting_name')}")
-            else:
-                email_error = "Email send failed"
-                logger.error(f"Failed to send meeting notification for: {meeting_data.get('meeting_name')}")
                 
-        except Exception as e:
-            email_error = str(e)
-            logger.error(f"Exception sending meeting notification: {email_error}")
+                if action == 'updated' and old_data:
+                    body += "\nChanges Made:\n"
+                    for field in ['meeting_name', 'meeting_date', 'start_time', 'end_time', 'room', 'atl26_broadcast']:
+                        old_val = old_data.get(field)
+                        new_val = meeting_data.get(field)
+                        if old_val != new_val:
+                            body += f"- {field}: {old_val} → {new_val}\n"
+                
+                body += f"\nThis notification was sent automatically by the FTP Media Sync system."
+                
+                # Send to jpound@atlantaga.gov
+                email_sent = meeting_notifier.send_email(
+                    to_emails=['jpound@atlantaga.gov'],
+                    subject=subject,
+                    body=body
+                )
+                
+                if email_sent:
+                    logger.info(f"Meeting {action} notification sent for: {meeting_data.get('meeting_name')}")
+                else:
+                    email_error = "Email send failed"
+                    logger.error(f"Failed to send meeting notification for: {meeting_data.get('meeting_name')}")
+                    
+            except Exception as e:
+                email_error = str(e)
+                logger.error(f"Exception sending meeting notification: {email_error}")
+        
+        # Update the log with email status (optional - could update database if needed)
+        if email_sent:
+            logger.info(f"Email notification completed successfully for {action}: {meeting_data.get('meeting_name')}")
+        elif email_error:
+            logger.warning(f"Email notification failed for {action}: {meeting_data.get('meeting_name')} - {email_error}")
     
-    # Log the meeting change
-    meeting_logger.log_meeting_change(
-        action=action,
-        meeting_data=meeting_data,
-        client_ip=client_ip,
-        email_sent=email_sent,
-        email_error=email_error,
-        old_data=old_data
-    )
+    # Start the email sending in a background thread
+    email_thread = threading.Thread(target=send_email_async, daemon=True)
+    email_thread.start()
+    logger.debug(f"Started background email thread for {action}: {meeting_data.get('meeting_name')}")
+    
+    # Return immediately without waiting for email to complete
 
 # Utility function to validate numeric values and prevent NaN
 def validate_numeric(value, default=0, name="value", min_value=None, max_value=None):
