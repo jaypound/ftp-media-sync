@@ -1913,10 +1913,10 @@ def get_connection_status():
     try:
         status = {
             'source': {
-                'connected': 'source' in ftp_managers and ftp_managers['source'].connected
+                'connected': 'source' in ftp_managers and ftp_managers['source'].is_connection_alive()
             },
             'target': {
-                'connected': 'target' in ftp_managers and ftp_managers['target'].connected
+                'connected': 'target' in ftp_managers and ftp_managers['target'].is_connection_alive()
             }
         }
         
@@ -1947,6 +1947,17 @@ def test_connection():
         }
         
         logger.info(f"FTP config: host={ftp_config['host']}, port={ftp_config['port']}, user={ftp_config['user']}, path={ftp_config['path']}")
+        
+        # Check if we already have a connection
+        if server_type in ftp_managers:
+            existing_manager = ftp_managers[server_type]
+            # Check if existing connection is still alive
+            if existing_manager.is_connection_alive():
+                # Connection is still good, but let's disconnect and reconnect with new credentials
+                logger.info(f"Existing connection found for {server_type}, disconnecting to use new credentials")
+                existing_manager.disconnect()
+            else:
+                logger.info(f"Existing connection for {server_type} is stale")
         
         # Create FTP manager with actual password
         ftp_config['password'] = data.get('password')
@@ -1985,8 +1996,8 @@ def scan_files():
         
         logger.info(f"Server: {server_type}, Path: {path}, Filters: {filters}")
         
-        if server_type not in ftp_managers:
-            error_msg = f'{server_type} server not connected'
+        if server_type not in ftp_managers or not ftp_managers[server_type].is_connection_alive():
+            error_msg = f'{server_type} server not connected or connection lost'
             logger.error(error_msg)
             return jsonify({'success': False, 'message': error_msg})
         

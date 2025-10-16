@@ -671,6 +671,33 @@ body {
     overflow-y: auto;
 }
 
+/* Reduce margin on File Scanning card since we hid the auto-restart buttons */
+#dashboard .card:first-child {
+    margin-bottom: 0.5rem;
+}
+
+/* Ensure the file list in the File Scanning card doesn't have extra bottom spacing */
+#dashboard .card:first-child #fileList {
+    margin-bottom: 0;
+}
+
+/* Hide unused trim analysis buttons and words detected sections */
+#findTrimPointsBtn,
+#findTrimPointsAIBtn,
+.detected-words {
+    display: none !important;
+}
+
+/* Remove the form-row containing the hidden buttons to reclaim space */
+#trimAnalysisModal .trim-section .form-row:first-child {
+    display: none !important;
+}
+
+/* Adjust spacing for the trim inputs section */
+#trimAnalysisModal .trim-section .form-row {
+    margin-top: 0;
+}
+
 .file-item {
     padding: 0.75rem;
     border-bottom: 1px solid var(--border-color);

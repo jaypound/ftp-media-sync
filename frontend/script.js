@@ -1665,6 +1665,7 @@ async function testConnection(serverType) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
+        const result = await response.json();
         
         console.log('Test connection result:', result);
         
