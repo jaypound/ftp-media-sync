@@ -27,3 +27,5 @@ pip install -r "$REL/backend/requirements.txt"
 ln -sfn $REL /opt/ftp-media-sync/current
 
 brew services restart caddy
+
+date
