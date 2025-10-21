@@ -87,6 +87,25 @@ If the UI configuration isn't working, you can manually edit the config file:
 
 ⚠️ **Important**: Make sure to save your configuration to avoid using mismatched defaults!
 
+### Content Type Rotation
+
+You can also add specific content types (like PSA, MAF, BMP) to the rotation order. When using content types:
+- They should be added in lowercase (e.g., 'maf', 'psa', 'bmp')
+- Each content type has its own replay delay to prevent excessive repetition
+- Default replay delays for content types range from 2-8 hours depending on content
+
+**Default Replay Delays (hours)**:
+- Duration Categories:
+  - `id`: 1 hour
+  - `spots`: 2 hours  
+  - `short_form`: 4 hours
+  - `long_form`: 8 hours
+- Content Types:
+  - `psa`, `an`, `atld`: 2 hours
+  - `bmp`, `im`, `lm`, `pkg`, `pmo`, `szl`, `spp`: 3 hours
+  - `maf`, `imow`, `ia`: 4 hours
+  - `mtg`: 8 hours (meetings need longer delays)
+
 ## Common Issues and Solutions
 
 ### Issue 1: Rotation Order Not Saving

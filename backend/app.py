@@ -7491,12 +7491,32 @@ def fill_template_gaps():
                 'id': 1,
                 'spots': 2,
                 'short_form': 4,
-                'long_form': 8
+                'long_form': 8,
+                # Content type delays (lowercase)
+                'an': 2,
+                'atld': 2,
+                'bmp': 3,
+                'imow': 4,
+                'im': 3,
+                'ia': 4,
+                'lm': 3,
+                'mtg': 8,  # Meetings need longer delays
+                'maf': 4,  # Moving Atlanta Forward
+                'pkg': 3,
+                'pmo': 3,
+                'psa': 2,
+                'szl': 3,
+                'spp': 3
             })
             logger.info(f"Replay delays: {replay_delays}")
         except Exception as e:
             logger.warning(f"Could not load replay delays, using defaults: {e}")
-            replay_delays = {'id': 1, 'spots': 2, 'short_form': 4, 'long_form': 8}
+            replay_delays = {
+                'id': 1, 'spots': 2, 'short_form': 4, 'long_form': 8,
+                'an': 2, 'atld': 2, 'bmp': 3, 'imow': 4, 'im': 3, 'ia': 4,
+                'lm': 3, 'mtg': 8, 'maf': 4, 'pkg': 3, 'pmo': 3, 'psa': 2,
+                'szl': 3, 'spp': 3
+            }
         
         # Update progress
         fill_gaps_progress['message'] = 'Analyzing schedule gaps...'
@@ -7775,7 +7795,9 @@ def fill_template_gaps():
                 no_expiry_date = 0
                 
                 # Get replay delay for this category (in hours)
-                replay_delay_hours = replay_delays.get(duration_category, 24)
+                # For content types (not duration categories), use a shorter default delay
+                default_delay = 4 if duration_category.upper() in ['AN', 'ATLD', 'BMP', 'IMOW', 'IM', 'IA', 'LM', 'MTG', 'MAF', 'PKG', 'PMO', 'PSA', 'SZL', 'SPP'] else 24
+                replay_delay_hours = replay_delays.get(duration_category.lower(), default_delay)
                 
                 # Progressive delay reduction after 10 PM
                 current_hour = (current_position % 86400) / 3600
