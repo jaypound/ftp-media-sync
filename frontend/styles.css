@@ -688,6 +688,47 @@ body {
     display: none !important;
 }
 
+/* Loudness badge styles */
+.loudness-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.loudness-badge.compliant {
+    background-color: rgba(0, 128, 0, 0.1);
+    color: #008000;
+}
+
+.loudness-badge.non-compliant {
+    background-color: rgba(255, 165, 0, 0.1);
+    color: #ff8c00;
+}
+
+.loudness-badge.processing {
+    background-color: rgba(0, 123, 255, 0.1);
+    color: #007bff;
+}
+
+.loudness-badge.pending {
+    background-color: rgba(108, 117, 125, 0.1);
+    color: #6c757d;
+}
+
+.loudness-badge.error {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+}
+
+.loudness-badge.not-analyzed {
+    background-color: rgba(108, 117, 125, 0.1);
+    color: #6c757d;
+}
+
 /* Remove the form-row containing the hidden buttons to reclaim space */
 #trimAnalysisModal .trim-section .form-row:first-child {
     display: none !important;
@@ -696,6 +737,170 @@ body {
 /* Adjust spacing for the trim inputs section */
 #trimAnalysisModal .trim-section .form-row {
     margin-top: 0;
+}
+
+/* Loudness analysis styles */
+.loudness-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-small);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.loudness-badge.compliant {
+    background-color: rgba(40, 167, 69, 0.15);
+    color: #28a745;
+}
+
+.loudness-badge.non-compliant {
+    background-color: rgba(220, 53, 69, 0.15);
+    color: #dc3545;
+}
+
+.loudness-badge.not-analyzed {
+    background-color: rgba(108, 117, 125, 0.15);
+    color: #6c757d;
+}
+
+.loudness-badge i {
+    font-size: 0.7rem;
+}
+
+/* Loudness Range Color Coding */
+.loudness-range-low {
+    color: #dc3545;  /* Red for < 5 LU */
+    font-weight: 600;
+}
+
+.loudness-range-medium {
+    color: #28a745;  /* Green for 5-15 LU */
+    font-weight: 600;
+}
+
+.loudness-range-high {
+    color: #007bff;  /* Blue for > 15 LU */
+    font-weight: 600;
+}
+
+/* True Peak Color Coding */
+.loudness-peak-high {
+    color: #dc3545;  /* Red for > -2.0 dBTP (higher peaks than expected) */
+    font-weight: 600;
+}
+
+.loudness-peak-compliant {
+    color: #28a745;  /* Green for -6.0 to -2.0 dBTP (compliant) */
+    font-weight: 600;
+}
+
+.loudness-peak-low {
+    color: #007bff;  /* Blue for < -6.0 dBTP (lower peaks than expected) */
+    font-weight: 600;
+}
+
+/* LKFS Color Coding */
+.loudness-lkfs-loud {
+    color: #dc3545;  /* Red for > -22 LKFS (louder than expected) */
+    font-weight: 600;
+}
+
+.loudness-lkfs-compliant {
+    color: #28a745;  /* Green for -26 to -22 LKFS (compliant) */
+    font-weight: 600;
+}
+
+.loudness-lkfs-quiet {
+    color: #007bff;  /* Blue for < -26 LKFS (quieter than expected) */
+    font-weight: 600;
+}
+
+/* Sortable table headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+th.sortable:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+th.sortable i {
+    margin-left: 5px;
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
+/* Loudness queue status */
+.loudness-queue-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background-color: rgba(0, 123, 255, 0.1);
+    border-radius: var(--radius-small);
+    margin-bottom: 1rem;
+}
+
+.loudness-queue-info span {
+    font-size: 0.875rem;
+}
+
+/* Loudness analysis button */
+.loudness-analyze-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Content type section with loudness */
+.content-type-section {
+    margin-bottom: 2rem;
+    background-color: var(--background-secondary);
+    padding: 1rem;
+    border-radius: var(--radius);
+}
+
+.content-type-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.content-type-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.content-type-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.file-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.file-table th,
+.file-table td {
+    padding: 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.file-table th {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
 }
 
 .file-item {

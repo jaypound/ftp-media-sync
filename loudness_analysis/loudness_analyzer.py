@@ -116,8 +116,16 @@ class LoudnessAnalyzer:
         
         logger.info(f"Running ffmpeg command: {' '.join(cmd)}")
         
+        # Get file duration to set appropriate timeout
+        file_info = self._get_file_info(file_path)
+        duration = file_info.get('duration', 0)
+        
+        # Calculate timeout: 30% of duration + 60 seconds minimum, max 2 hours
+        timeout_seconds = min(7200, max(60, int(duration * 0.3))) if duration else 600
+        logger.info(f"Setting FFmpeg timeout to {timeout_seconds} seconds for {duration:.1f}s file")
+        
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=timeout_seconds)
             output = result.stderr
             
             # Log the raw output for debugging

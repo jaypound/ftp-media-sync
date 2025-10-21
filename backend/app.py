@@ -20,6 +20,11 @@ import uuid
 import subprocess
 import shutil
 import tempfile
+import asyncio
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from loudness_analysis.loudness_analyzer import LoudnessAnalyzer
 import threading
 from psycopg2.extras import RealDictCursor
 
@@ -12812,6 +12817,570 @@ def run_sync_now():
     except Exception as e:
         logger.error(f"Error running sync job: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
+
+# ============================================================================
+# LOUDNESS ANALYSIS ENDPOINTS
+# ============================================================================
+
+# Import loudness analysis modules
+import sys
+import os
+import tempfile
+import threading
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'loudness_analysis'))
+from loudness_analyzer import LoudnessAnalyzer
+import asyncio
+import json
+
+# Loudness analysis queue
+loudness_queue = []
+loudness_processing = False
+current_loudness_task = None
+
+# Setup loudness analysis logger
+loudness_logger = logging.getLogger('loudness_analysis')
+loudness_handler = logging.handlers.RotatingFileHandler(
+    'logs/loudness_analysis.log',  # No timestamp suffix
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+loudness_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+loudness_handler.setFormatter(loudness_formatter)
+loudness_logger.addHandler(loudness_handler)
+loudness_logger.setLevel(logging.INFO)
+
+@app.route('/api/loudness/analyze/<int:asset_id>', methods=['POST'])
+def analyze_loudness_single(asset_id):
+    """Analyze loudness for a single asset"""
+    try:
+        # Get asset info from database
+        asset = db_manager.get_asset_by_id(asset_id)
+        if not asset:
+            return jsonify({'success': False, 'message': 'Asset not found'})
+        
+        # Get primary instance file path
+        instances = db_manager.get_instances_by_asset_id(asset_id)
+        primary_instance = next((i for i in instances if i['is_primary']), None)
+        
+        if not primary_instance:
+            return jsonify({'success': False, 'message': 'No primary instance found'})
+        
+        # Add to queue
+        queue_item = {
+            'asset_id': asset_id,
+            'file_path': primary_instance['file_path'],
+            'file_name': primary_instance['file_name'],
+            'content_type': asset['content_type'],
+            'duration_seconds': asset.get('duration_seconds', 0),
+            'status': 'pending'
+        }
+        
+        loudness_queue.append(queue_item)
+        
+        # Start processing if not already running
+        if not loudness_processing:
+            import threading
+            thread = threading.Thread(target=process_loudness_queue_sync)
+            thread.daemon = True
+            thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Added to loudness analysis queue',
+            'queue_position': len(loudness_queue)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error adding to loudness queue: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/loudness/analyze-batch', methods=['POST'])
+def analyze_loudness_batch():
+    """Add multiple files to loudness analysis queue"""
+    try:
+        data = request.json
+        content_type = data.get('content_type')
+        duration_category = data.get('duration_category')
+        asset_ids = data.get('asset_ids', [])
+        
+        if content_type and not asset_ids:
+            # Get all assets of this content type
+            assets = db_manager.get_assets_by_content_type(content_type)
+            asset_ids = [a['id'] for a in assets]
+            if not assets:
+                return jsonify({
+                    'success': False,
+                    'message': f'No assets found with content type: {content_type}'
+                })
+        elif duration_category and not asset_ids:
+            # Get all assets of this duration category
+            assets = db_manager.get_assets_by_duration_category(duration_category)
+            asset_ids = [a['id'] for a in assets]
+            if not assets:
+                return jsonify({
+                    'success': False,
+                    'message': f'No assets found with duration category: {duration_category}'
+                })
+        
+        added_count = 0
+        for asset_id in asset_ids:
+            # Get asset info
+            asset = db_manager.get_asset_by_id(asset_id)
+            if not asset:
+                continue
+            
+            # Check if already analyzed
+            existing = db_manager.get_metadata_by_key(asset_id, 'loudness_integrated_lkfs')
+            if existing:
+                continue
+            
+            # Get primary instance
+            instances = db_manager.get_instances_by_asset_id(asset_id)
+            primary_instance = next((i for i in instances if i['is_primary']), None)
+            
+            if primary_instance:
+                queue_item = {
+                    'asset_id': asset_id,
+                    'file_path': primary_instance['file_path'],
+                    'file_name': primary_instance['file_name'],
+                    'content_type': asset['content_type'],
+                    'duration_seconds': asset.get('duration_seconds', 0),
+                    'status': 'pending'
+                }
+                loudness_queue.append(queue_item)
+                added_count += 1
+        
+        # Start processing if not already running
+        if not loudness_processing and loudness_queue:
+            import threading
+            thread = threading.Thread(target=lambda: asyncio.run(process_loudness_queue()))
+            thread.daemon = True
+            thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Added {added_count} files to loudness analysis queue',
+            'queue_length': len(loudness_queue)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in batch loudness analysis: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/loudness/queue', methods=['GET'])
+def get_loudness_queue():
+    """Get current loudness analysis queue status"""
+    try:
+        # Get counts by status
+        pending = sum(1 for item in loudness_queue if item['status'] == 'pending')
+        processing = sum(1 for item in loudness_queue if item['status'] == 'processing')
+        completed = sum(1 for item in loudness_queue if item['status'] == 'completed')
+        failed = sum(1 for item in loudness_queue if item['status'] == 'failed')
+        
+        return jsonify({
+            'success': True,
+            'queue': {
+                'total': len(loudness_queue),
+                'pending': pending,
+                'processing': processing,
+                'completed': completed,
+                'failed': failed,
+                'is_processing': loudness_processing,
+                'current_file': current_loudness_task,
+                'items': loudness_queue  # Include the actual queue items
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting loudness queue: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/loudness/queue', methods=['DELETE'])
+def clear_loudness_queue():
+    """Clear the loudness analysis queue"""
+    global loudness_queue
+    try:
+        # Only clear pending items
+        loudness_queue = [item for item in loudness_queue if item['status'] == 'processing']
+        
+        return jsonify({
+            'success': True,
+            'message': 'Loudness queue cleared'
+        })
+    except Exception as e:
+        logger.error(f"Error clearing loudness queue: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/loudness/stop', methods=['POST'])
+def stop_loudness_processing():
+    """Stop loudness processing"""
+    global loudness_processing
+    try:
+        loudness_processing = False
+        return jsonify({
+            'success': True,
+            'message': 'Loudness processing stopped'
+        })
+    except Exception as e:
+        logger.error(f"Error stopping loudness processing: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/loudness/export-csv', methods=['GET'])
+def export_loudness_csv():
+    """Export all loudness analysis results to CSV"""
+    try:
+        import csv
+        from io import StringIO
+        
+        # Get all assets with loudness data
+        content = db_manager.get_assets_with_loudness()
+        
+        # Create CSV
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write headers
+        headers = [
+            'Asset ID', 'File Name', 'Content Type', 'Duration', 
+            'Integrated LKFS', 'Range (LU)', 'True Peak (dBTP)',
+            'Short Term Max', 'Momentary Max', 'Target Offset',
+            'ATSC A/85 Compliant', 'EBU R128 Compliant', 
+            'Analysis Date'
+        ]
+        writer.writerow(headers)
+        
+        # Write data rows
+        for item in content:
+            if item.get('loudness'):
+                loudness = item['loudness']
+                writer.writerow([
+                    item.get('id', ''),
+                    item.get('file_name', item.get('content_title', '')),
+                    item.get('content_type', '').upper() if item.get('content_type') else '',
+                    format_duration_for_csv(item.get('duration_seconds', 0)),
+                    loudness.get('integrated_lkfs', loudness.get('integrated_lufs', '')),
+                    loudness.get('range_lu', ''),
+                    loudness.get('true_peak_dbtp', ''),
+                    loudness.get('short_term_max', ''),
+                    loudness.get('momentary_max', ''),
+                    loudness.get('target_offset', ''),
+                    'Yes' if loudness.get('atsc_a85_compliant') else 'No',
+                    'Yes' if loudness.get('ebu_r128_compliant') else 'No',
+                    loudness.get('analysis_date', '')
+                ])
+        
+        # Create response
+        output.seek(0)
+        response = make_response(output.getvalue())
+        response.headers['Content-Type'] = 'text/csv'
+        response.headers['Content-Disposition'] = f'attachment; filename=loudness_analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        loudness_logger.info(f"Exported {len([i for i in content if i.get('loudness')])} loudness results to CSV")
+        
+        return response
+        
+    except Exception as e:
+        error_msg = f"Error exporting loudness CSV: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        })
+
+def format_duration_for_csv(seconds):
+    """Format duration for CSV export"""
+    if not seconds:
+        return '00:00:00'
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+@app.route('/api/loudness/results/<int:asset_id>', methods=['GET'])
+def get_loudness_results(asset_id):
+    """Get loudness analysis results for an asset"""
+    try:
+        # Get all loudness metadata for this asset
+        metadata = db_manager.get_metadata_by_type(asset_id, 'loudness')
+        
+        if not metadata:
+            return jsonify({
+                'success': False,
+                'message': 'No loudness analysis found'
+            })
+        
+        # Convert metadata to structured results
+        results = {}
+        for item in metadata:
+            key = item['meta_key'].replace('loudness_', '')
+            value = item['meta_value']
+            
+            # Convert numeric values
+            if key in ['integrated_lkfs', 'range_lu', 'true_peak_dbtp', 
+                      'short_term_max', 'momentary_max', 'target_offset', 'target_lkfs']:
+                try:
+                    value = float(value)
+                except:
+                    pass
+            elif key in ['atsc_a85_compliant', 'ebu_r128_compliant']:
+                value = value.lower() == 'true'
+            
+            results[key] = value
+        
+        return jsonify({
+            'success': True,
+            'loudness': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting loudness results: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+def process_loudness_queue_sync():
+    """Synchronous wrapper for process_loudness_queue"""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(process_loudness_queue())
+    finally:
+        loop.close()
+
+async def process_loudness_queue():
+    """Process files in the loudness queue"""
+    global loudness_processing, current_loudness_task, loudness_queue
+    
+    loudness_processing = True
+    analyzer = LoudnessAnalyzer()
+    large_files_processing = 0  # Track how many large files are being processed
+    
+    while loudness_queue and loudness_processing:
+        # Sort pending items by duration (process smaller files first)
+        pending_items = [item for item in loudness_queue if item['status'] == 'pending']
+        if pending_items:
+            pending_items.sort(key=lambda x: x.get('duration_seconds', 0))
+        
+        # Get next pending item (smallest duration first)
+        pending_item = pending_items[0] if pending_items else None
+        
+        if not pending_item:
+            break
+        
+        pending_item['status'] = 'processing'
+        current_loudness_task = pending_item['file_name']
+        
+        try:
+            # Check if we should stop processing
+            if not loudness_processing:
+                logger.info("Processing stopped by user request")
+                pending_item['status'] = 'pending'  # Reset to pending
+                break
+            # Download file if needed
+            file_path = pending_item['file_path']
+            
+            # All files need to be downloaded from FTP (they're under /mnt/main/ATL26 On-Air Content/)
+            # Construct full FTP path if not already absolute
+            if not file_path.startswith('/'):
+                file_path = f"/mnt/main/ATL26 On-Air Content/{file_path}"
+            
+            # Download from FTP to temp location
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(suffix=os.path.splitext(file_path)[1], delete=False)
+            temp_path = temp_file.name
+            temp_file.close()
+            
+            # Always use target (Castus2) FTP to avoid loading primary server
+            ftp_manager = ftp_managers.get('target')
+            
+            # Ensure FTP connection is established
+            if not ftp_manager:
+                logger.info("Target FTP manager not found, creating new instance")
+                # Get target server config
+                config = config_manager.get_config()
+                target_config = config.get('servers', {}).get('target', {})
+                if target_config:
+                    # Create config dict for FTPManager
+                    ftp_config = {
+                        'host': target_config.get('host'),
+                        'port': target_config.get('port', 21),
+                        'user': target_config.get('username'),
+                        'password': target_config.get('password')
+                    }
+                    ftp_manager = FTPManager(ftp_config)
+                    # Connect to the FTP server
+                    if ftp_manager.connect():
+                        ftp_managers['target'] = ftp_manager
+                        logger.info("Successfully created and connected new target FTP manager")
+                    else:
+                        logger.error("Failed to connect new target FTP manager")
+                        pending_item['status'] = 'error'
+                        pending_item['error'] = 'Failed to connect to target FTP'
+                        continue
+                else:
+                    logger.error("Target server configuration not found")
+                    pending_item['status'] = 'error'
+                    pending_item['error'] = 'Target server configuration not found'
+                    continue
+                
+            if not ftp_manager.connected:
+                logger.info("Target FTP not connected, attempting to reconnect...")
+                try:
+                    if ftp_manager.connect():
+                        logger.info("Successfully reconnected to target FTP")
+                    else:
+                        logger.error("Failed to reconnect to target FTP")
+                        pending_item['status'] = 'error'
+                        pending_item['error'] = 'Failed to reconnect to target FTP'
+                        continue
+                except Exception as e:
+                    logger.error(f"Error reconnecting to target FTP: {str(e)}")
+                    pending_item['status'] = 'error'
+                    pending_item['error'] = f'FTP reconnection error: {str(e)}'
+                    continue
+            
+            # Now download the file with retry
+            logger.info(f"Downloading file from FTP: {file_path} to {temp_path}")
+            download_attempts = 0
+            max_download_attempts = 3
+            success = False
+            
+            while download_attempts < max_download_attempts and not success:
+                # Check if we should stop processing
+                if not loudness_processing:
+                    logger.info("Processing stopped by user during download")
+                    pending_item['status'] = 'pending'
+                    break
+                    
+                download_attempts += 1
+                if download_attempts > 1:
+                    logger.info(f"Download attempt {download_attempts}/{max_download_attempts}")
+                    # Wait a bit before retry
+                    await asyncio.sleep(2)
+                
+                success = ftp_manager.download_file(file_path, temp_path)
+                if success and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    file_path = temp_path
+                    break
+                else:
+                    logger.warning(f"Download attempt {download_attempts} failed")
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+            
+            if not success:
+                error_msg = f"Failed to download file from FTP after {max_download_attempts} attempts: {file_path}"
+                logger.error(error_msg)
+                loudness_logger.error(f"Download failed - File: {pending_item['file_name']}, {error_msg}")
+                pending_item['status'] = 'error'
+                pending_item['error'] = f'Failed to download file from FTP after {max_download_attempts} attempts'
+                continue
+            
+            # Analyze loudness
+            logger.info(f"Analyzing loudness for: {file_path}")
+            loudness_logger.info(f"Starting analysis - File: {pending_item['file_name']}, Asset ID: {pending_item['asset_id']}")
+            
+            try:
+                results = analyzer.analyze(file_path, target_lufs=-24.0)
+                logger.info(f"Analysis complete for: {pending_item['file_name']}")
+                
+                # Log results to loudness log
+                loudness_data = results['loudness']
+                loudness_logger.info(
+                    f"Analysis completed - File: {pending_item['file_name']}, "
+                    f"LKFS: {loudness_data.get('integrated_lufs', 'N/A')}, "
+                    f"Range: {loudness_data.get('loudness_range', 'N/A')} LU, "
+                    f"True Peak: {loudness_data.get('true_peak', 'N/A')} dBTP, "
+                    f"ATSC A/85 Compliant: {loudness_data.get('atsc_compliant', 'N/A')}"
+                )
+            except Exception as e:
+                error_msg = f"Analysis failed for {pending_item['file_name']}: {str(e)}"
+                logger.error(error_msg)
+                loudness_logger.error(error_msg)
+                pending_item['status'] = 'error'
+                pending_item['error'] = f'Analysis failed: {str(e)}'
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                continue
+            
+            # Store results in database
+            loudness_data = results['loudness']
+            metadata_mappings = {
+                'loudness_integrated_lkfs': loudness_data.get('integrated_lufs'),
+                'loudness_range_lu': loudness_data.get('loudness_range'),
+                'loudness_true_peak_dbtp': loudness_data.get('true_peak'),
+                'loudness_short_term_max': loudness_data.get('max_short_term'),
+                'loudness_momentary_max': loudness_data.get('max_momentary'),
+                'loudness_target_offset': loudness_data.get('target_offset'),
+                'loudness_atsc_a85_compliant': loudness_data.get('atsc_compliant'),
+                'loudness_ebu_r128_compliant': loudness_data.get('ebu_compliant'),
+                'loudness_analysis_date': datetime.now().isoformat(),
+                'loudness_target_lkfs': results.get('target_lufs', -24.0)
+            }
+            
+            # Store each metadata item
+            metadata_success = True
+            error_count = 0
+            for meta_key, meta_value in metadata_mappings.items():
+                if meta_value is not None:
+                    success = db_manager.set_metadata(
+                        pending_item['asset_id'],
+                        'loudness',
+                        meta_key,
+                        str(meta_value)
+                    )
+                    if not success:
+                        logger.error(f"Failed to save metadata {meta_key} for asset {pending_item['asset_id']}")
+                        metadata_success = False
+                        error_count += 1
+            
+            # Also store full analysis as JSON
+            if metadata_success:
+                success = db_manager.set_metadata(
+                    pending_item['asset_id'],
+                    'loudness',
+                    'loudness_full_analysis',
+                    json.dumps(results)
+                )
+                if not success:
+                    metadata_success = False
+                    error_count += 1
+            
+            if metadata_success:
+                pending_item['status'] = 'completed'
+                logger.info(f"Loudness analysis completed for {pending_item['file_name']}")
+            else:
+                pending_item['status'] = 'error'
+                pending_item['error'] = f'Failed to save analysis results to database ({error_count} errors)'
+                logger.error(f"Loudness analysis succeeded but metadata save failed for {pending_item['file_name']}")
+                logger.error(f"Queue item marked as error - Asset ID: {pending_item['asset_id']}, Status: {pending_item['status']}")
+            
+            # Clean up temp file
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                    logger.info(f"Cleaned up temporary file: {temp_path}")
+                except Exception as e:
+                    logger.warning(f"Could not clean up temporary file: {str(e)}")
+            
+        except Exception as e:
+            pending_item['status'] = 'failed'
+            logger.error(f"Loudness analysis failed for {pending_item['file_name']}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Delay between files to prevent resource exhaustion
+        # Longer delay for larger files
+        if 'duration_seconds' in pending_item and pending_item.get('duration_seconds', 0) > 3600:
+            # For files over 1 hour, wait 10 seconds between processing
+            await asyncio.sleep(10)
+        else:
+            # For shorter files, wait 2 seconds
+            await asyncio.sleep(2)
+    
+    current_loudness_task = None
+    loudness_processing = False
+    
+    # Clean up completed and failed items from queue after a delay
+    await asyncio.sleep(5)
+    loudness_queue[:] = [item for item in loudness_queue if item['status'] not in ['completed', 'error', 'failed']]
 
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")

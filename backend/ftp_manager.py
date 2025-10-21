@@ -85,7 +85,10 @@ class FTPManager:
         try:
             # Test connection first
             try:
-                self.ftp.voidcmd("NOOP")
+                if self.ftp:
+                    self.ftp.voidcmd("NOOP")
+                else:
+                    raise Exception("FTP connection is None")
             except:
                 logger.warning("Connection lost during CWD download attempt")
                 return False
@@ -352,6 +355,18 @@ class FTPManager:
             
             for i, (method_desc, attempt_func) in enumerate(download_attempts):
                 try:
+                    # Test connection before each download attempt
+                    try:
+                        if self.ftp:
+                            self.ftp.voidcmd("NOOP")
+                    except:
+                        logger.info(f"Connection lost before attempt {i+1}, reconnecting...")
+                        self.connected = False
+                        if not self.connect():
+                            logger.error("Failed to reconnect for download attempt")
+                            last_error = "Failed to reconnect to FTP server"
+                            continue
+                    
                     logger.info(f"Download method {i+1}: {method_desc}")
                     
                     with open(local_path, 'wb') as local_file:
@@ -371,6 +386,13 @@ class FTPManager:
                     # Clean up partial file for next attempt
                     if os.path.exists(local_path):
                         os.remove(local_path)
+                    
+                    # If it's a connection error, try to reconnect
+                    if "NoneType" in str(e) or "connection" in str(e).lower():
+                        logger.info("Detected connection issue, attempting to reconnect...")
+                        self.connected = False
+                        self.connect()
+                    
                     continue
             
             if not download_success:

@@ -163,6 +163,16 @@
                         </button>
                     </div>
                     
+                    <!-- Loudness Analysis Row -->
+                    <div class="action-buttons-row" style="margin-top: 15px;">
+                        <button class="button primary small" onclick="showLoudnessAnalysisModal()">
+                            <i class="fas fa-volume-up"></i> Loudness Analysis
+                        </button>
+                        <span style="margin-left: 10px; font-size: 0.875rem; color: var(--text-secondary);">
+                            Analyze audio loudness for ATSC A/85 compliance (-24 LKFS)
+                        </span>
+                    </div>
+                    
                     <!-- Fourth row: Auto toggles and settings (HIDDEN - unused functionality) -->
                     <div class="action-buttons-row" style="display: none;">
                         <button class="button success small" onclick="toggleAutoRestart()" id="autoRestartToggle">
@@ -2103,6 +2113,65 @@
             <div class="modal-footer">
                 <button class="button danger" onclick="cancelFillGaps()">
                     <i class="fas fa-stop"></i> Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loudness Analysis Modal -->
+    <div id="loudnessAnalysisModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 1200px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-volume-up"></i> Loudness Analysis (BS.1770-5)</h3>
+                <button class="modal-close" onclick="closeLoudnessAnalysisModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Loudness Queue Status -->
+                <div id="modalLoudnessQueueStatus" style="margin-bottom: 1rem;"></div>
+                
+                <!-- Content Filter -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h4>Content Analysis</h4>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <label style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>Content Type:</span>
+                            <select id="loudnessContentTypeFilter" onchange="filterLoudnessContent()" class="form-control" style="min-width: 150px;">
+                                <option value="ALL">All Types</option>
+                                <option value="PSA">PSA</option>
+                                <option value="AN">AN</option>
+                                <option value="ATLD">ATLD</option>
+                                <option value="BMP">BMP</option>
+                                <option value="IMOW">IMOW</option>
+                                <option value="IM">IM</option>
+                                <option value="IA">IA</option>
+                                <option value="LM">LM</option>
+                                <option value="MTG">MTG</option>
+                                <option value="MAF">MAF</option>
+                                <option value="PKG">PKG</option>
+                                <option value="PMO">PMO</option>
+                                <option value="SZL">SZL</option>
+                                <option value="SPP">SPP</option>
+                            </select>
+                        </label>
+                        <button class="button secondary" onclick="exportLoudnessCSV()" title="Export all results to CSV">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Content by Type -->
+                <div class="loudness-content-types">
+                    <div id="loudnessContentByType">
+                        <!-- Content type sections will be loaded here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeLoudnessAnalysisModal()">
+                    <i class="fas fa-times"></i> Close
+                </button>
+                <button class="button primary" onclick="refreshLoudnessDisplay()">
+                    <i class="fas fa-sync"></i> Refresh
                 </button>
             </div>
         </div>

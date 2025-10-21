@@ -16405,10 +16405,27 @@ window.editCurrentMeeting = async function() {
                 // We're currently in a meeting or it ended recently - open the edit modal and focus on end time
                 meetingScheduleEditMeeting(currentMeeting.id);
                 
-                // Wait for modal to open, then update end time and broadcast setting
+                // Wait for modal to open, then update start time, end time and broadcast setting
                 setTimeout(() => {
+                    const startTimeInput = document.getElementById('meetingTime');
                     const endTimeInput = document.getElementById('meetingEndTime');
                     const broadcastCheckbox = document.getElementById('meetingBroadcast');
+                    
+                    // Calculate start time (1 hour before current time)
+                    if (startTimeInput) {
+                        const startTime = new Date();
+                        startTime.setHours(startTime.getHours() - 1); // 1 hour before current time
+                        
+                        // Format as HH:MM for the time input
+                        const startHours = String(startTime.getHours()).padStart(2, '0');
+                        const startMinutes = String(startTime.getMinutes()).padStart(2, '0');
+                        const newStartTime = `${startHours}:${startMinutes}`;
+                        
+                        // Set the new start time
+                        startTimeInput.value = newStartTime;
+                        
+                        log('Meeting start time updated to 1 hour ago.', 'info');
+                    }
                     
                     if (endTimeInput) {
                         // Calculate current time + 2 minutes
@@ -17532,3 +17549,829 @@ window.showPanel = function(panelName) {
         stopFTPKeepAlive();
     }
 };
+
+
+// ============================================================================
+// LOUDNESS ANALYSIS FUNCTIONS
+// ============================================================================
+
+// Global loudness state
+let loudnessQueue = [];
+let loudnessProcessing = false;
+
+// Reanalyze loudness for a file
+async function reanalyzeLoudness(assetId, fileName) {
+    const confirmReanalyze = confirm(`Are you sure you want to reanalyze loudness for "${fileName || 'this file'}"?\n\nThis will overwrite the existing loudness data.`);
+    
+    if (!confirmReanalyze) {
+        return;
+    }
+    
+    // Use the same analyze function
+    await analyzeLoudness(assetId, fileName, true);
+}
+
+// Start loudness analysis for a single file
+async function analyzeLoudness(assetId, fileName, isReanalyze = false) {
+    // Update button to show processing
+    const btn = document.querySelector(`button[onclick*="analyzeLoudness(${assetId}"]`) || 
+                document.querySelector(`button[onclick*="reanalyzeLoudness(${assetId}"]`);
+    if (btn) {
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+        btn.disabled = true;
+    }
+    
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/analyze/${assetId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ Added ${fileName} to loudness analysis queue`, 'success');
+            showNotification(
+                isReanalyze ? 'Loudness Reanalysis Started' : 'Loudness Analysis Started', 
+                `${fileName} has been added to the processing queue`, 
+                'success'
+            );
+            updateLoudnessQueueStatus();
+            
+            // Start monitoring this specific asset
+            startMonitoringAsset(assetId);
+            
+            // Update row to show pending state
+            updateLoudnessRowStatus(assetId, 'pending');
+        } else {
+            log(`❌ Failed to add to loudness queue: ${result.message}`, 'error');
+            showNotification('Analysis Failed', result.message || 'Failed to start loudness analysis', 'error');
+            
+            // Restore button
+            if (btn) {
+                if (isReanalyze) {
+                    btn.innerHTML = '<i class="fas fa-sync-alt"></i> Reanalyze';
+                } else {
+                    btn.innerHTML = '<i class="fas fa-volume-up"></i> Analyze';
+                }
+                btn.disabled = false;
+            }
+        }
+    } catch (error) {
+        log(`❌ Error starting loudness analysis: ${error.message}`, 'error');
+        showNotification('Error', 'Failed to connect to loudness analysis service', 'error');
+        
+        // Restore button
+        if (btn) {
+            if (isReanalyze) {
+                btn.innerHTML = '<i class="fas fa-sync-alt"></i> Reanalyze';
+            } else {
+                btn.innerHTML = '<i class="fas fa-volume-up"></i> Analyze';
+            }
+            btn.disabled = false;
+        }
+    }
+}
+
+// Analyze all files of a content type
+async function analyzeLoudnessByType(contentType) {
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/analyze-batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content_type: contentType.toLowerCase() })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`, 'success');
+            showNotification('Batch Analysis Started', result.message || 'Files added to loudness analysis queue', 'success');
+            updateLoudnessQueueStatus();
+            
+            // Find all assets of this type and start monitoring
+            const typeAssets = allLoudnessContent.filter(item => 
+                (item.content_type || 'OTHER').toUpperCase() === contentType && !item.loudness
+            );
+            typeAssets.forEach(asset => {
+                startMonitoringAsset(asset.id);
+                updateLoudnessRowStatus(asset.id, 'pending');
+            });
+        } else {
+            log(`❌ Failed to start batch analysis: ${result.message}`, 'error');
+            showNotification('Batch Analysis Failed', result.message || 'Failed to start batch analysis', 'error');
+        }
+    } catch (error) {
+        log(`❌ Error in batch loudness analysis: ${error.message}`, 'error');
+    }
+}
+
+// Analyze all files of a duration category
+async function analyzeLoudnessByCategory(durationCategory) {
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/analyze-batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ duration_category: durationCategory })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`, 'success');
+            showNotification('Batch Analysis Started', result.message || 'Files added to loudness analysis queue', 'success');
+            updateLoudnessQueueStatus();
+        } else {
+            log(`❌ Failed to start batch analysis: ${result.message}`, 'error');
+            showNotification('Batch Analysis Failed', result.message || 'Failed to start batch analysis', 'error');
+        }
+    } catch (error) {
+        log(`❌ Error in batch loudness analysis: ${error.message}`, 'error');
+    }
+}
+
+// Get and display loudness queue status
+async function updateLoudnessQueueStatus() {
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/queue`);
+        const result = await response.json();
+        
+        if (result.success) {
+            const queue = result.queue;
+            loudnessProcessing = queue.is_processing;
+            
+            // Update queue display
+            const queueStatus = document.getElementById('loudnessQueueStatus');
+            if (queueStatus) {
+                if (queue.total > 0) {
+                    queueStatus.innerHTML = `
+                        <div class="loudness-queue-info">
+                            <span>Loudness Queue: ${queue.pending} pending, ${queue.processing} processing</span>
+                            ${queue.current_file ? `<span>Currently analyzing: ${queue.current_file}</span>` : ''}
+                            <button class="button danger small" onclick="clearLoudnessQueue()">
+                                <i class="fas fa-times"></i> Clear Queue
+                            </button>
+                        </div>
+                    `;
+                    queueStatus.style.display = 'block';
+                } else {
+                    queueStatus.style.display = 'none';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error updating loudness queue status:', error);
+    }
+}
+
+// Clear the loudness queue
+async function clearLoudnessQueue() {
+    try {
+        const response = await fetch('/api/loudness/queue', {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log('✅ Loudness queue cleared', 'success');
+            updateLoudnessQueueStatus();
+        }
+    } catch (error) {
+        log(`❌ Error clearing loudness queue: ${error.message}`, 'error');
+    }
+}
+
+// Get loudness results for an asset
+async function getLoudnessResults(assetId) {
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/results/${assetId}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            return result.loudness;
+        }
+        return null;
+    } catch (error) {
+        console.error('Error getting loudness results:', error);
+        return null;
+    }
+}
+
+// Display loudness badge
+function createLoudnessBadge(loudnessData) {
+    if (!loudnessData) {
+        return '<span class="loudness-badge not-analyzed">Not analyzed</span>';
+    }
+    
+    const lkfs = loudnessData.integrated_lkfs || loudnessData.integrated_lufs;
+    const compliant = loudnessData.atsc_a85_compliant;
+    
+    return `
+        <span class="loudness-badge ${compliant ? 'compliant' : 'non-compliant'}" 
+              title="Integrated: ${lkfs?.toFixed(1)} LKFS, Range: ${loudnessData.range_lu?.toFixed(1)} LU, True Peak: ${loudnessData.true_peak_dbtp?.toFixed(1)} dBTP">
+            <i class="fas fa-volume-up"></i> ${lkfs?.toFixed(1)} LKFS
+            ${compliant ? '<i class="fas fa-check-circle"></i>' : '<i class="fas fa-exclamation-triangle"></i>'}
+        </span>
+    `;
+}
+
+// Poll for loudness queue updates
+setInterval(updateLoudnessQueueStatus, 5000);
+
+
+// Show loudness analysis modal
+async function showLoudnessAnalysisModal() {
+    const modal = document.getElementById('loudnessAnalysisModal');
+    if (modal) {
+        modal.style.display = 'block';
+        await refreshLoudnessDisplay();
+        
+        // Update queue status
+        const queueStatus = document.getElementById('modalLoudnessQueueStatus');
+        if (queueStatus) {
+            const response = await fetch('/api/loudness/queue');
+            const result = await response.json();
+            
+            if (result.success && result.queue.total > 0) {
+                queueStatus.innerHTML = `
+                    <div class="loudness-queue-info">
+                        <span><i class="fas fa-info-circle"></i> Loudness Queue: ${result.queue.pending} pending, ${result.queue.processing} processing</span>
+                        ${result.queue.current_file ? `<span>Currently: ${result.queue.current_file}</span>` : ''}
+                    </div>
+                `;
+            } else {
+                queueStatus.innerHTML = '';
+            }
+        }
+    }
+}
+
+// Close loudness analysis modal
+function closeLoudnessAnalysisModal() {
+    const modal = document.getElementById('loudnessAnalysisModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Refresh loudness display
+async function refreshLoudnessDisplay() {
+    try {
+        // Get all analyzed content
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/analyzed-content`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content_type: '', duration_category: '', search: '' })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.content) {
+            await displayLoudnessContentByType(result.content);
+        }
+    } catch (error) {
+        console.error('Error refreshing loudness display:', error);
+    }
+}
+
+// Global variable to store all content for filtering
+let allLoudnessContent = [];
+
+// Display content grouped by type with loudness info
+// Global variable for sort order
+let loudnessSortOrder = 'asc';
+
+async function displayLoudnessContentByType(content) {
+    const container = document.getElementById('loudnessContentByType');
+    if (!container) return;
+    
+    // Store content for filtering
+    allLoudnessContent = content;
+    
+    // Apply content type filter if set
+    const filterValue = document.getElementById('loudnessContentTypeFilter')?.value || 'ALL';
+    let filteredContent = content;
+    if (filterValue !== 'ALL') {
+        filteredContent = content.filter(item => 
+            (item.content_type || 'OTHER').toUpperCase() === filterValue
+        );
+    }
+    
+    // Group content by content type
+    const contentByType = {};
+    const contentTypes = ['PSA', 'AN', 'ATLD', 'BMP', 'IMOW', 'IM', 'IA', 'LM', 'MTG', 'MAF', 'PKG', 'PMO', 'SZL', 'SPP'];
+    
+    // Initialize all content types (excluding OTHER)
+    contentTypes.forEach(type => {
+        contentByType[type] = [];
+    });
+    
+    // Group content by content type
+    filteredContent.forEach(item => {
+        const type = item.content_type ? item.content_type.toUpperCase() : 'OTHER';
+        // Skip OTHER content type (Live Input Placeholders)
+        if (type === 'OTHER') {
+            return;
+        }
+        if (contentByType[type]) {
+            contentByType[type].push(item);
+        }
+    });
+    
+    // Get loudness data for all content
+    for (const items of Object.values(contentByType)) {
+        for (const item of items) {
+            if (item.id) {
+                item.loudness = await getLoudnessResults(item.id);
+            }
+        }
+    }
+    
+    // Sort items within each content type
+    for (const type in contentByType) {
+        if (contentByType[type].length > 0) {
+            contentByType[type].sort((a, b) => {
+                const nameA = (a.file_name || a.content_title || '').toLowerCase();
+                const nameB = (b.file_name || b.content_title || '').toLowerCase();
+                const comparison = nameA.localeCompare(nameB);
+                return loudnessSortOrder === 'asc' ? comparison : -comparison;
+            });
+        }
+    }
+    
+    // Display each content type
+    let html = '';
+    for (const [type, items] of Object.entries(contentByType)) {
+        if (items.length === 0) continue;
+        
+        const analyzed = items.filter(i => i.loudness).length;
+        const compliant = items.filter(i => i.loudness?.atsc_a85_compliant).length;
+        
+        html += `
+            <div class="content-type-section">
+                <div class="content-type-header">
+                    <div class="content-type-title">
+                        <i class="fas fa-folder"></i>
+                        ${type} (${items.length} files)
+                    </div>
+                    <div class="content-type-stats">
+                        <span>${analyzed} analyzed</span>
+                        <span>${compliant} compliant</span>
+                        ${items.length > 0 ? `
+                            <button class="button primary small" onclick="analyzeLoudnessByType('${type}')">
+                                <i class="fas fa-volume-up"></i> Analyze All
+                            </button>
+                            <button class="button secondary small" onclick="analyzeSelectedLoudness('${type}')">
+                                <i class="fas fa-check-square"></i> Analyze Selected
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <table class="file-table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" onchange="toggleAllLoudnessCheckboxes('${type}', this.checked)"></th>
+                            <th class="sortable" onclick="sortLoudnessTable('${type}', 'name')">
+                                File Name 
+                                <i class="fas fa-sort"></i>
+                            </th>
+                            <th>Duration</th>
+                            <th>LKFS</th>
+                            <th>Range</th>
+                            <th>True Peak</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr id="loudness-row-${item.id}">
+                                <td><input type="checkbox" class="loudness-select loudness-select-${type}" data-asset-id="${item.id}" ${item.loudness ? 'disabled' : ''}></td>
+                                <td class="file-name">${item.file_name || item.content_title || 'Unknown'}</td>
+                                <td>${formatDuration(item.duration_seconds || item.file_duration || 0)}</td>
+                                <td>${(() => {
+                                    if (!item.loudness) return '--';
+                                    const lkfs = item.loudness.integrated_lkfs || item.loudness.integrated_lufs;
+                                    if (lkfs === null || lkfs === undefined) return '--';
+                                    const lkfsText = lkfs.toFixed(1);
+                                    let lkfsClass = '';
+                                    if (lkfs > -22) {
+                                        lkfsClass = 'loudness-lkfs-loud';  // RED - louder than expected
+                                    } else if (lkfs >= -26 && lkfs <= -22) {
+                                        lkfsClass = 'loudness-lkfs-compliant';  // GREEN - compliant
+                                    } else {
+                                        lkfsClass = 'loudness-lkfs-quiet';  // BLUE - quieter than expected
+                                    }
+                                    return `<span class="${lkfsClass}">${lkfsText}</span>`;
+                                })()}</td>
+                                <td>${(() => {
+                                    if (!item.loudness || item.loudness.range_lu === null || item.loudness.range_lu === undefined) return '-- LU';
+                                    const rangeValue = item.loudness.range_lu;
+                                    const rangeText = rangeValue.toFixed(1) + ' LU';
+                                    let rangeClass = '';
+                                    if (rangeValue < 5) {
+                                        rangeClass = 'loudness-range-low';  // RED
+                                    } else if (rangeValue >= 5 && rangeValue <= 15) {
+                                        rangeClass = 'loudness-range-medium';  // GREEN
+                                    } else {
+                                        rangeClass = 'loudness-range-high';  // BLUE
+                                    }
+                                    return `<span class="${rangeClass}">${rangeText}</span>`;
+                                })()}</td>
+                                <td>${(() => {
+                                    if (!item.loudness || item.loudness.true_peak_dbtp === null || item.loudness.true_peak_dbtp === undefined) return '-- dBTP';
+                                    const peakValue = item.loudness.true_peak_dbtp;
+                                    const peakText = peakValue.toFixed(1) + ' dBTP';
+                                    let peakClass = '';
+                                    if (peakValue > -2.0) {
+                                        peakClass = 'loudness-peak-high';  // RED - higher peaks than expected
+                                    } else if (peakValue >= -6.0 && peakValue <= -2.0) {
+                                        peakClass = 'loudness-peak-compliant';  // GREEN - compliant
+                                    } else {
+                                        peakClass = 'loudness-peak-low';  // BLUE - lower peaks than expected
+                                    }
+                                    return `<span class="${peakClass}">${peakText}</span>`;
+                                })()}</td>
+                                <td id="loudness-status-${item.id}">${createLoudnessBadge(item.loudness)}</td>
+                                <td id="loudness-action-${item.id}">
+                                    ${!item.loudness ? `
+                                        <button class="button primary small loudness-analyze-btn" 
+                                                onclick="analyzeLoudness(${item.id}, '${(item.file_name || '').replace(/'/g, "\'")}')">
+                                            <i class="fas fa-volume-up"></i> Analyze
+                                        </button>
+                                    ` : `
+                                        <button class="button secondary small loudness-reanalyze-btn" 
+                                                onclick="reanalyzeLoudness(${item.id}, '${(item.file_name || '').replace(/'/g, "\'")}')">
+                                            <i class="fas fa-sync-alt"></i> Reanalyze
+                                        </button>
+                                    `}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html || '<p>No analyzed content found.</p>';
+}
+
+// Format duration helper
+function formatDuration(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+// Filter loudness content by type
+function filterLoudnessContent() {
+    if (allLoudnessContent.length > 0) {
+        displayLoudnessContentByType(allLoudnessContent);
+    }
+}
+
+// Sort loudness table by column
+function sortLoudnessTable(_contentType, sortBy) {
+    if (sortBy === 'name') {
+        // Toggle sort order
+        loudnessSortOrder = loudnessSortOrder === 'asc' ? 'desc' : 'asc';
+        
+        // Redisplay with new sort order
+        if (allLoudnessContent.length > 0) {
+            displayLoudnessContentByType(allLoudnessContent);
+        }
+    }
+}
+
+// Export loudness results to CSV
+async function exportLoudnessCSV() {
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/export-csv`);
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `loudness_analysis_${new Date().toISOString().slice(0,10)}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            showNotification('Export Complete', 'Loudness results exported to CSV', 'success');
+        } else {
+            const error = await response.json();
+            showNotification('Export Failed', error.message || 'Failed to export CSV', 'error');
+        }
+    } catch (error) {
+        console.error('Error exporting CSV:', error);
+        showNotification('Export Error', 'Failed to export CSV file', 'error');
+    }
+}
+
+// Toggle all checkboxes for a content type
+function toggleAllLoudnessCheckboxes(contentType, checked) {
+    const checkboxes = document.querySelectorAll(`.loudness-select-${contentType}:not([disabled])`);
+    checkboxes.forEach(cb => cb.checked = checked);
+}
+
+// Analyze selected files
+async function analyzeSelectedLoudness(contentType) {
+    const selectedBoxes = document.querySelectorAll(`.loudness-select-${contentType}:checked`);
+    const assetIds = Array.from(selectedBoxes).map(cb => parseInt(cb.dataset.assetId));
+    
+    if (assetIds.length === 0) {
+        showNotification('No Selection', 'Please select files to analyze', 'warning');
+        return;
+    }
+    
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/loudness/analyze-batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_ids: assetIds })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ ${result.message}`, 'success');
+            showNotification('Batch Analysis Started', `${assetIds.length} files added to loudness analysis queue`, 'success');
+            updateLoudnessQueueStatus();
+            
+            // Start monitoring selected assets
+            assetIds.forEach(assetId => {
+                startMonitoringAsset(assetId);
+                // Update UI to show pending state
+                updateLoudnessRowStatus(assetId, 'pending');
+            });
+            
+            // Disable checkboxes for selected items
+            selectedBoxes.forEach(cb => cb.disabled = true);
+        } else {
+            log(`❌ Failed to start batch analysis: ${result.message}`, 'error');
+            showNotification('Batch Analysis Failed', result.message || 'Failed to start batch analysis', 'error');
+        }
+    } catch (error) {
+        log(`❌ Error in batch loudness analysis: ${error.message}`, 'error');
+        showNotification('Error', 'Failed to start batch analysis', 'error');
+    }
+}
+
+// Update loudness row status in the table
+function updateLoudnessRowStatus(assetId, status, loudnessData = null) {
+    const row = document.getElementById(`loudness-row-${assetId}`);
+    if (!row) return;
+    
+    const statusCell = row.querySelector(`#loudness-status-${assetId}`);
+    const actionCell = row.querySelector(`#loudness-action-${assetId}`);
+    const checkbox = row.querySelector('.loudness-select');
+    
+    if (status === 'pending') {
+        if (statusCell) {
+            statusCell.innerHTML = '<span class="loudness-badge pending"><i class="fas fa-clock"></i> In Queue</span>';
+        }
+        if (actionCell && monitoringAssets.has(assetId)) {
+            actionCell.innerHTML = `
+                <button class="button secondary small" onclick="stopMonitoringAsset(${assetId}); updateLoudnessRowStatus(${assetId}, 'stopped');" title="Stop monitoring this file">
+                    <i class="fas fa-stop-circle"></i> Stop
+                </button>
+            `;
+        }
+    } else if (status === 'processing') {
+        if (statusCell) {
+            statusCell.innerHTML = '<span class="loudness-badge processing"><i class="fas fa-spinner fa-spin"></i> Processing...</span>';
+        }
+        if (actionCell && monitoringAssets.has(assetId)) {
+            actionCell.innerHTML = `
+                <button class="button secondary small" onclick="stopMonitoringAsset(${assetId}); updateLoudnessRowStatus(${assetId}, 'stopped');" title="Stop monitoring this file">
+                    <i class="fas fa-stop-circle"></i> Stop
+                </button>
+            `;
+        }
+    } else if (status === 'completed' && loudnessData) {
+        // Update all data cells
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 8) {
+            // Color-coded LKFS
+            const lkfs = loudnessData.integrated_lkfs || loudnessData.integrated_lufs;
+            const lkfsText = lkfs ? lkfs.toFixed(1) : '--';
+            if (lkfs !== null && lkfs !== undefined) {
+                let lkfsClass = '';
+                if (lkfs > -22) {
+                    lkfsClass = 'loudness-lkfs-loud';  // RED - louder than expected
+                } else if (lkfs >= -26 && lkfs <= -22) {
+                    lkfsClass = 'loudness-lkfs-compliant';  // GREEN - compliant
+                } else {
+                    lkfsClass = 'loudness-lkfs-quiet';  // BLUE - quieter than expected
+                }
+                cells[3].innerHTML = `<span class="${lkfsClass}">${lkfsText}</span>`;
+            } else {
+                cells[3].textContent = lkfsText;
+            }
+            
+            // Color-coded loudness range
+            const rangeValue = loudnessData.range_lu;
+            const rangeText = rangeValue ? rangeValue.toFixed(1) + ' LU' : '-- LU';
+            if (rangeValue) {
+                let rangeClass = '';
+                if (rangeValue < 5) {
+                    rangeClass = 'loudness-range-low';  // RED
+                } else if (rangeValue >= 5 && rangeValue <= 15) {
+                    rangeClass = 'loudness-range-medium';  // GREEN
+                } else {
+                    rangeClass = 'loudness-range-high';  // BLUE
+                }
+                cells[4].innerHTML = `<span class="${rangeClass}">${rangeText}</span>`;
+            } else {
+                cells[4].textContent = rangeText;
+            }
+            
+            // Color-coded true peak
+            const peakValue = loudnessData.true_peak_dbtp;
+            const peakText = peakValue ? peakValue.toFixed(1) + ' dBTP' : '-- dBTP';
+            if (peakValue !== null && peakValue !== undefined) {
+                let peakClass = '';
+                if (peakValue > -2.0) {
+                    peakClass = 'loudness-peak-high';  // RED - higher peaks than expected
+                } else if (peakValue >= -6.0 && peakValue <= -2.0) {
+                    peakClass = 'loudness-peak-compliant';  // GREEN - compliant
+                } else {
+                    peakClass = 'loudness-peak-low';  // BLUE - lower peaks than expected
+                }
+                cells[5].innerHTML = `<span class="${peakClass}">${peakText}</span>`;
+            } else {
+                cells[5].textContent = peakText;
+            }
+        }
+        if (statusCell) {
+            statusCell.innerHTML = createLoudnessBadge(loudnessData);
+        }
+        if (actionCell) {
+            // Add reanalyze button
+            const asset = allLoudnessContent.find(item => item.id === assetId);
+            const fileName = asset ? (asset.file_name || asset.content_title || '') : '';
+            actionCell.innerHTML = `
+                <button class="button secondary small loudness-reanalyze-btn" 
+                        onclick="reanalyzeLoudness(${assetId}, '${fileName.replace(/'/g, "\'")}')">
+                    <i class="fas fa-sync-alt"></i> Reanalyze
+                </button>
+            `;
+        }
+        if (checkbox) {
+            checkbox.disabled = true;
+        }
+    } else if (status === 'error') {
+        if (statusCell) {
+            statusCell.innerHTML = '<span class="loudness-badge error"><i class="fas fa-exclamation-circle"></i> Error</span>';
+        }
+        if (actionCell && actionCell.querySelector('button')) {
+            actionCell.innerHTML = `
+                <button class="button primary small loudness-analyze-btn" 
+                        onclick="analyzeLoudness(${assetId}, '')">
+                    <i class="fas fa-redo"></i> Retry
+                </button>
+            `;
+        }
+        if (checkbox) {
+            checkbox.disabled = false;
+        }
+    } else if (status === 'stopped') {
+        if (statusCell) {
+            statusCell.innerHTML = '<span class="loudness-badge not-analyzed"><i class="fas fa-stop"></i> Monitoring Stopped</span>';
+        }
+        if (actionCell) {
+            actionCell.innerHTML = `
+                <button class="button primary small" onclick="refreshLoudnessDisplay()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            `;
+        }
+        if (checkbox) {
+            checkbox.disabled = false;
+        }
+    }
+}
+
+// Monitor specific asset for completion
+let monitoringAssets = new Set();
+
+function startMonitoringAsset(assetId) {
+    monitoringAssets.add(assetId);
+    
+    // Check every 5 seconds for completion (less frequent for long-running tasks)
+    const checkInterval = setInterval(async () => {
+        // Check if user manually stopped monitoring
+        if (!monitoringAssets.has(assetId)) {
+            clearInterval(checkInterval);
+            return;
+        }
+        
+        try {
+            const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+                (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+            
+            // First check queue status to see if there's an error
+            const queueResponse = await fetch(`${baseURL}/loudness/queue`);
+            const queueResult = await queueResponse.json();
+            
+            if (queueResult.success) {
+                const queueItem = queueResult.queue.items?.find(item => item.asset_id === assetId);
+                
+                if (queueItem && (queueItem.status === 'error' || queueItem.status === 'failed')) {
+                    // Analysis failed
+                    monitoringAssets.delete(assetId);
+                    clearInterval(checkInterval);
+                    
+                    const asset = allLoudnessContent.find(item => item.id === assetId);
+                    const fileName = asset ? (asset.file_name || asset.content_title || 'File') : 'File';
+                    
+                    showNotification(
+                        'Loudness Analysis Failed',
+                        `${fileName}: ${queueItem.error || 'Unknown error'}`,
+                        'error'
+                    );
+                    
+                    // Update the UI to show error state
+                    updateLoudnessRowStatus(assetId, 'error');
+                    return;
+                } else if (queueItem && queueItem.status === 'processing') {
+                    // Update to show processing state
+                    updateLoudnessRowStatus(assetId, 'processing');
+                }
+            }
+            
+            // Check for results
+            const response = await fetch(`${baseURL}/loudness/results/${assetId}`);
+            const result = await response.json();
+            
+            if (result.success && result.loudness) {
+                // Analysis complete!
+                monitoringAssets.delete(assetId);
+                clearInterval(checkInterval);
+                
+                // Find the asset name
+                const asset = allLoudnessContent.find(item => item.id === assetId);
+                const fileName = asset ? (asset.file_name || asset.content_title || 'File') : 'File';
+                
+                const lkfs = result.loudness.integrated_lkfs || result.loudness.integrated_lufs;
+                const compliant = result.loudness.atsc_a85_compliant;
+                
+                showNotification(
+                    'Loudness Analysis Complete',
+                    `${fileName}: ${lkfs.toFixed(1)} LKFS (${compliant ? 'Compliant' : 'Non-compliant'})`,
+                    compliant ? 'success' : 'warning'
+                );
+                
+                // Update the row with results
+                updateLoudnessRowStatus(assetId, 'completed', result.loudness);
+            }
+        } catch (error) {
+            console.error('Error monitoring loudness analysis:', error);
+        }
+    }, 5000); // Check every 5 seconds instead of 2
+    
+    // Store interval ID so we can stop it later if needed
+    if (!window.loudnessMonitorIntervals) {
+        window.loudnessMonitorIntervals = new Map();
+    }
+    window.loudnessMonitorIntervals.set(assetId, checkInterval);
+}
+
+// Stop monitoring a specific asset
+function stopMonitoringAsset(assetId) {
+    monitoringAssets.delete(assetId);
+    
+    // Clear the interval
+    if (window.loudnessMonitorIntervals && window.loudnessMonitorIntervals.has(assetId)) {
+        clearInterval(window.loudnessMonitorIntervals.get(assetId));
+        window.loudnessMonitorIntervals.delete(assetId);
+    }
+}

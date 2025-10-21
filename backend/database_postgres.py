@@ -1728,6 +1728,176 @@ class PostgreSQLDatabaseManager:
             return []
         finally:
             self._put_connection(conn)
+    
+    def get_asset_by_id(self, asset_id: int) -> Optional[Dict[str, Any]]:
+        """Get asset by ID"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT * FROM assets WHERE id = %s
+            """, (asset_id,))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            return dict(result) if result else None
+            
+        except Exception as e:
+            logger.error(f"Error getting asset by ID: {str(e)}")
+            return None
+        finally:
+            self._put_connection(conn)
+    
+    def get_instances_by_asset_id(self, asset_id: int) -> List[Dict[str, Any]]:
+        """Get all instances for an asset"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT * FROM instances WHERE asset_id = %s
+            """, (asset_id,))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            logger.error(f"Error getting instances: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def get_metadata_by_key(self, asset_id: int, meta_key: str) -> Optional[str]:
+        """Get specific metadata value by key"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT meta_value FROM metadata 
+                WHERE asset_id = %s AND meta_key = %s
+            """, (asset_id, meta_key))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            return result['meta_value'] if result else None
+            
+        except Exception as e:
+            logger.error(f"Error getting metadata by key: {str(e)}")
+            return None
+        finally:
+            self._put_connection(conn)
+    
+    def get_metadata_by_type(self, asset_id: int, type_name: str) -> List[Dict[str, Any]]:
+        """Get all metadata for an asset by type"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT m.* FROM metadata m
+                JOIN metadata_types mt ON m.metadata_type_id = mt.id
+                WHERE m.asset_id = %s AND mt.type_name = %s
+            """, (asset_id, type_name))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            logger.error(f"Error getting metadata by type: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def set_metadata(self, asset_id: int, type_name: str, meta_key: str, meta_value: str) -> bool:
+        """Set metadata value, creating type if needed"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Get or create metadata type
+            cursor.execute("""
+                SELECT id FROM metadata_types WHERE type_name = %s
+            """, (type_name,))
+            
+            result = cursor.fetchone()
+            if result:
+                metadata_type_id = result['id']
+            else:
+                # Create new metadata type
+                cursor.execute("""
+                    INSERT INTO metadata_types (type_name, data_type, description)
+                    VALUES (%s, 'string', %s)
+                    RETURNING id
+                """, (type_name, f'{type_name} metadata'))
+                result = cursor.fetchone()
+                if result:
+                    metadata_type_id = result['id']
+                else:
+                    raise Exception("Failed to create metadata type")
+            
+            # Insert or update metadata
+            cursor.execute("""
+                INSERT INTO metadata (asset_id, metadata_type_id, meta_key, meta_value)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (asset_id, metadata_type_id, meta_key)
+                DO UPDATE SET meta_value = %s
+            """, (asset_id, metadata_type_id, meta_key, meta_value, meta_value))
+            
+            conn.commit()
+            cursor.close()
+            return True
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"Error setting metadata for asset {asset_id}, key {meta_key}: {str(e)}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            if hasattr(e, 'pgcode'):
+                logger.error(f"PostgreSQL error code: {e.pgcode}")
+            conn.rollback()
+            return False
+        finally:
+            self._put_connection(conn)
+    
+    def get_assets_by_duration_category(self, duration_category: str) -> List[Dict[str, Any]]:
+        """Get all assets by duration category"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT * FROM assets WHERE duration_category = %s
+            """, (duration_category,))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            return [dict(row) for row in results] if results else []
+            
+        except Exception as e:
+            logger.error(f"Error getting assets by duration category: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def get_assets_by_content_type(self, content_type: str) -> List[Dict[str, Any]]:
+        """Get all assets of a specific content type"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT * FROM assets 
+                WHERE content_type = %s
+                ORDER BY created_at DESC
+            """, (content_type,))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            logger.error(f"Error getting assets by content type: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
 
 
 # Global database manager instance - will be replaced in database.py
