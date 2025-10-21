@@ -587,6 +587,11 @@ class FTPManager:
                     local_size = os.path.getsize(local_path)
                     logger.info(f"Remote file size: {remote_size}, Local file size: {local_size}")
                     
+                    # If remote_size is None, the FTP server doesn't support SIZE or can't determine size
+                    if remote_size is None:
+                        logger.warning("FTP server returned None for file size - falling back to LIST verification")
+                        raise Exception("SIZE command returned None")
+                    
                     if remote_size == local_size:
                         logger.info(f"✅ Upload verification successful!")
                         logger.info(f"File uploaded to: {os.path.join(base_path, remote_path)}")
@@ -756,7 +761,14 @@ class FTPManager:
             if self.download_file(source_path, temp_path):
                 logger.info(f"Download successful, file size: {os.path.getsize(temp_path)} bytes")
                 logger.info(f"Starting upload to target path: {target_path}")
-                success = target_ftp.upload_file(temp_path, target_path)
+                
+                # For very large files (>10GB), skip verification as FTP SIZE command may fail
+                file_size = os.path.getsize(temp_path)
+                skip_verify = file_size > 10 * 1024 * 1024 * 1024  # 10GB
+                if skip_verify:
+                    logger.warning(f"Large file ({file_size / (1024**3):.1f}GB) - skipping verification to avoid FTP timeouts")
+                
+                success = target_ftp.upload_file(temp_path, target_path, skip_verification=skip_verify)
                 logger.info(f"Upload result: {success}")
                 
                 if not keep_temp:
