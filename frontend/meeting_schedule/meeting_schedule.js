@@ -141,40 +141,6 @@ function meetingScheduleDisplayMeetings() {
     tbody.innerHTML = html;
 }
 
-// Import meetings from web
-async function meetingScheduleImportFromWeb() {
-    const button = event.target;
-    const statusEl = document.getElementById('importStatus');
-    
-    button.disabled = true;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
-    if (statusEl) statusEl.textContent = 'Importing meetings...';
-    
-    try {
-        const response = await window.API.post('/meetings/import-from-web');
-        if (response.success) {
-            const count = response.imported_count || 0;
-            if (statusEl) {
-                statusEl.textContent = `Successfully imported ${count} meetings`;
-                statusEl.className = 'meeting-schedule-import-status success';
-            }
-            window.showNotification(`Imported ${count} meetings from City Council website`, 'success');
-            
-            // Reload meetings
-            await meetingScheduleLoadMeetings();
-        }
-    } catch (error) {
-        if (statusEl) {
-            statusEl.textContent = 'Import failed';
-            statusEl.className = 'meeting-schedule-import-status error';
-        }
-        window.showNotification('Failed to import meetings', 'error');
-    } finally {
-        button.disabled = false;
-        button.innerHTML = '<i class="fas fa-download"></i> Import from City Council Website';
-    }
-}
-
 // Open add meeting modal
 function meetingScheduleOpenAddModal() {
     const modalTitle = document.getElementById('meetingModalTitle');
@@ -566,7 +532,6 @@ function meetingScheduleFormatFileSize(bytes) {
 
 // Export functions to global scope
 window.meetingScheduleInit = meetingScheduleInit;
-window.meetingScheduleImportFromWeb = meetingScheduleImportFromWeb;
 window.meetingScheduleOpenAddModal = meetingScheduleOpenAddModal;
 window.meetingScheduleEditMeeting = meetingScheduleEditMeeting;
 window.meetingScheduleSaveMeeting = meetingScheduleSaveMeeting;
@@ -580,7 +545,6 @@ window.meetingScheduleToggleAutoTrim = meetingScheduleToggleAutoTrim;
 window.meetingScheduleOpenTrimAnalysis = meetingScheduleOpenTrimAnalysis;
 
 // Legacy support
-window.importMeetingsFromWeb = meetingScheduleImportFromWeb;
 window.openAddMeetingModal = meetingScheduleOpenAddModal;
 window.saveMeeting = meetingScheduleSaveMeeting;
 window.closeMeetingModal = meetingScheduleCloseMeetingModal;
