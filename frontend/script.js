@@ -18093,6 +18093,52 @@ async function exportLoudnessCSV() {
     }
 }
 
+// Export loudness results to Excel with color coding
+async function exportLoudnessExcel() {
+    try {
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        showNotification('Generating Excel', 'Creating Excel file with color coding...', 'info');
+        
+        const response = await fetch(`${baseURL}/loudness/export-excel`);
+        
+        if (response.ok) {
+            // Get the filename from the Content-Disposition header if available
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = `loudness_analysis_${new Date().toISOString().slice(0,10)}.xlsx`;
+            
+            if (contentDisposition) {
+                const filenameMatch = /filename=([^;]+)/.exec(contentDisposition);
+                if (filenameMatch) {
+                    filename = filenameMatch[1].trim();
+                }
+            }
+            
+            // Ensure we're getting the blob as Excel type
+            const blob = await response.blob();
+            
+            // Create download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            showNotification('Export Complete', 'Loudness results exported to Excel with color coding', 'success');
+        } else {
+            const error = await response.json();
+            showNotification('Export Failed', error.message || 'Failed to export Excel', 'error');
+        }
+    } catch (error) {
+        console.error('Error exporting Excel:', error);
+        showNotification('Export Error', 'Failed to export Excel file', 'error');
+    }
+}
+
 // Toggle all checkboxes for a content type
 function toggleAllLoudnessCheckboxes(contentType, checked) {
     const checkboxes = document.querySelectorAll(`.loudness-select-${contentType}:not([disabled])`);

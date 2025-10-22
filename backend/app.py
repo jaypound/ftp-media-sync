@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 import json
 import os
@@ -13053,7 +13053,7 @@ def export_loudness_csv():
         import csv
         from io import StringIO
         
-        # Get all assets with loudness data
+        # Get all assets with loudness data (includes file_name from instances table)
         content = db_manager.get_assets_with_loudness()
         
         # Create CSV
@@ -13074,9 +13074,21 @@ def export_loudness_csv():
         for item in content:
             if item.get('loudness'):
                 loudness = item['loudness']
+                
+                # Get file name or construct it from metadata
+                file_name = item.get('file_name')
+                if not file_name:
+                    # Construct file name from metadata if not available
+                    content_type = item.get('content_type', '').upper()
+                    content_title = item.get('content_title', '')
+                    air_date = item.get('created_at', '')
+                    if air_date:
+                        air_date = str(air_date).split('T')[0]  # Get date part
+                    file_name = f"{content_type} - {content_title} - {air_date}" if air_date else f"{content_type} - {content_title}"
+                
                 writer.writerow([
                     item.get('id', ''),
-                    item.get('file_name', item.get('content_title', '')),
+                    file_name,
                     item.get('content_type', '').upper() if item.get('content_type') else '',
                     format_duration_for_csv(item.get('duration_seconds', 0)),
                     loudness.get('integrated_lkfs', loudness.get('integrated_lufs', '')),
@@ -13106,6 +13118,258 @@ def export_loudness_csv():
         return jsonify({
             'success': False,
             'message': error_msg
+        })
+
+@app.route('/api/loudness/export-excel', methods=['GET'])
+def export_loudness_excel():
+    """Export all loudness analysis results to Excel with color coding"""
+    try:
+        from io import BytesIO
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+        
+        logger.info("Starting Excel export for loudness analysis")
+        
+        # Get all assets with loudness data (includes file_name from instances table)
+        content = db_manager.get_assets_with_loudness()
+        logger.info(f"Retrieved {len(content)} assets with loudness data")
+        
+        # Log sample data for debugging
+        if content:
+            logger.info(f"First asset: {content[0].get('id')} - {content[0].get('content_title')}")
+            logger.info(f"Loudness data exists: {'loudness' in content[0]}")
+        
+        # Create workbook
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Loudness Analysis"
+        
+        # Define color fills
+        red_fill = PatternFill(start_color="FFB3B3", end_color="FFB3B3", fill_type="solid")  # Light red
+        green_fill = PatternFill(start_color="B3FFB3", end_color="B3FFB3", fill_type="solid")  # Light green
+        blue_fill = PatternFill(start_color="B3D9FF", end_color="B3D9FF", fill_type="solid")  # Light blue
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")  # Dark blue
+        
+        # Define fonts
+        header_font = Font(bold=True, color="FFFFFF")
+        bold_font = Font(bold=True)
+        
+        # Write headers
+        headers = [
+            'Asset ID', 'File Name', 'Content Type', 'Duration', 
+            'Integrated LKFS', 'Range (LU)', 'True Peak (dBTP)',
+            'Short Term Max', 'Momentary Max', 'Target Offset',
+            'ATSC A/85 Compliant', 'EBU R128 Compliant', 
+            'Analysis Date'
+        ]
+        
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Write data rows with color coding
+        row_num = 2
+        logger.info(f"Starting to write data rows. Total items: {len(content)}")
+        for idx, item in enumerate(content):
+            if item.get('loudness'):
+                loudness = item['loudness']
+                logger.debug(f"Processing item {idx}: {item.get('id')} - has loudness data")
+                
+                # Basic data
+                ws.cell(row=row_num, column=1, value=str(item.get('id', '')))
+                
+                # Get file name or construct it from metadata
+                file_name = item.get('file_name')
+                if not file_name:
+                    # Construct file name from metadata if not available
+                    content_type = item.get('content_type', '').upper()
+                    content_title = item.get('content_title', '')
+                    air_date = item.get('created_at', '')
+                    if air_date:
+                        air_date = str(air_date).split('T')[0]  # Get date part
+                    file_name = f"{content_type} - {content_title} - {air_date}" if air_date else f"{content_type} - {content_title}"
+                
+                ws.cell(row=row_num, column=2, value=str(file_name))
+                ws.cell(row=row_num, column=3, value=str(item.get('content_type', '').upper() if item.get('content_type') else ''))
+                ws.cell(row=row_num, column=4, value=format_duration_for_csv(item.get('duration_seconds', 0)))
+                
+                # LKFS with color coding
+                lkfs_value = loudness.get('integrated_lkfs', loudness.get('integrated_lufs'))
+                lkfs_cell = ws.cell(row=row_num, column=5, value=lkfs_value)
+                if lkfs_value is not None:
+                    lkfs_cell.font = bold_font
+                    if lkfs_value > -22:
+                        lkfs_cell.fill = red_fill  # Louder than expected
+                    elif lkfs_value >= -26:
+                        lkfs_cell.fill = green_fill  # Compliant
+                    else:
+                        lkfs_cell.fill = blue_fill  # Quieter than expected
+                
+                # Range with color coding
+                range_value = loudness.get('range_lu')
+                range_cell = ws.cell(row=row_num, column=6, value=range_value)
+                if range_value is not None:
+                    range_cell.font = bold_font
+                    if range_value < 5:
+                        range_cell.fill = red_fill  # Low dynamic range
+                    elif range_value <= 15:
+                        range_cell.fill = green_fill  # Good range
+                    else:
+                        range_cell.fill = blue_fill  # High dynamic range
+                
+                # True Peak with color coding
+                peak_value = loudness.get('true_peak_dbtp')
+                peak_cell = ws.cell(row=row_num, column=7, value=peak_value)
+                if peak_value is not None:
+                    peak_cell.font = bold_font
+                    if peak_value > -2.0:
+                        peak_cell.fill = red_fill  # Higher peaks than expected
+                    elif peak_value >= -6.0:
+                        peak_cell.fill = green_fill  # Compliant
+                    else:
+                        peak_cell.fill = blue_fill  # Lower peaks than expected
+                
+                # Other values
+                ws.cell(row=row_num, column=8, value=loudness.get('short_term_max') if loudness.get('short_term_max') is not None else '')
+                ws.cell(row=row_num, column=9, value=loudness.get('momentary_max') if loudness.get('momentary_max') is not None else '')
+                ws.cell(row=row_num, column=10, value=loudness.get('target_offset') if loudness.get('target_offset') is not None else '')
+                
+                # Compliance
+                atsc_cell = ws.cell(row=row_num, column=11, value='Yes' if loudness.get('atsc_a85_compliant') else 'No')
+                if loudness.get('atsc_a85_compliant'):
+                    atsc_cell.fill = green_fill
+                else:
+                    atsc_cell.fill = red_fill
+                
+                ebu_cell = ws.cell(row=row_num, column=12, value='Yes' if loudness.get('ebu_r128_compliant') else 'No')
+                if loudness.get('ebu_r128_compliant'):
+                    ebu_cell.fill = green_fill
+                else:
+                    ebu_cell.fill = red_fill
+                
+                ws.cell(row=row_num, column=13, value=str(loudness.get('analysis_date', '')))
+                
+                row_num += 1
+        
+        # Auto-size columns - safer implementation
+        for col_idx in range(1, 14):  # We have 13 columns
+            max_length = 10  # Default width
+            column_letter = get_column_letter(col_idx)
+            
+            # Check header length
+            header_cell = ws.cell(row=1, column=col_idx)
+            if header_cell.value:
+                max_length = max(max_length, len(str(header_cell.value)))
+            
+            # Check data cells
+            for row in range(2, row_num):
+                cell = ws.cell(row=row, column=col_idx)
+                if cell.value is not None:
+                    try:
+                        cell_length = len(str(cell.value))
+                        max_length = max(max_length, cell_length)
+                    except:
+                        pass
+            
+            # Set width with reasonable limits
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Add legend at the bottom
+        legend_row = row_num + 2
+        ws.cell(row=legend_row, column=1, value="COLOR LEGEND:").font = bold_font
+        
+        legend_row += 1
+        ws.cell(row=legend_row, column=1, value="LKFS:").font = bold_font
+        ws.cell(row=legend_row, column=2, value="> -22 (Loud)").fill = red_fill
+        ws.cell(row=legend_row, column=3, value="-26 to -22 (Compliant)").fill = green_fill
+        ws.cell(row=legend_row, column=4, value="< -26 (Quiet)").fill = blue_fill
+        
+        legend_row += 1
+        ws.cell(row=legend_row, column=1, value="Range:").font = bold_font
+        ws.cell(row=legend_row, column=2, value="< 5 LU (Low)").fill = red_fill
+        ws.cell(row=legend_row, column=3, value="5-15 LU (Good)").fill = green_fill
+        ws.cell(row=legend_row, column=4, value="> 15 LU (High)").fill = blue_fill
+        
+        legend_row += 1
+        ws.cell(row=legend_row, column=1, value="True Peak:").font = bold_font
+        ws.cell(row=legend_row, column=2, value="> -2 dBTP (High)").fill = red_fill
+        ws.cell(row=legend_row, column=3, value="-6 to -2 dBTP (Compliant)").fill = green_fill
+        ws.cell(row=legend_row, column=4, value="< -6 dBTP (Low)").fill = blue_fill
+        
+        # Create response
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # Get the file content
+        file_content = output.getvalue()
+        logger.info(f"Excel file size: {len(file_content)} bytes")
+        
+        # Create response with proper headers
+        response = make_response(file_content)
+        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        response.headers['Content-Disposition'] = f'attachment; filename=loudness_analysis_{datetime.now().strftime("%Y-%m-%d_%H%M%S")}.xlsx'
+        response.headers['Content-Length'] = str(len(file_content))
+        
+        loudness_logger.info(f"Exported {row_num - 2} loudness results to Excel with color coding")
+        
+        return response
+        
+    except Exception as e:
+        error_msg = f"Error exporting loudness Excel: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        })
+
+@app.route('/api/loudness/test-excel', methods=['GET'])
+def test_excel_export():
+    """Test Excel export by saving to disk"""
+    try:
+        from io import BytesIO
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        
+        # Create simple test workbook
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Test Sheet"
+        
+        # Add headers
+        ws.cell(row=1, column=1, value="Test Header 1")
+        ws.cell(row=1, column=2, value="Test Header 2")
+        
+        # Add data
+        ws.cell(row=2, column=1, value="Test Data 1")
+        ws.cell(row=2, column=2, value="Test Data 2")
+        
+        # Save to disk for inspection
+        test_file = "test_loudness_export.xlsx"
+        wb.save(test_file)
+        
+        # Also save to BytesIO to test the response mechanism
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        file_content = output.getvalue()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Test file saved as {test_file}',
+            'file_size': len(file_content),
+            'file_exists': os.path.exists(test_file)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
         })
 
 def format_duration_for_csv(seconds):

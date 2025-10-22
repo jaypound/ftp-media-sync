@@ -39,6 +39,7 @@ mpmath==1.3.0
 numpy==2.0.2
 onnxruntime==1.19.2
 openai==1.101.0
+openpyxl==3.1.2
 packaging==25.0
 pandoc==2.4
 pdf2image==1.17.0

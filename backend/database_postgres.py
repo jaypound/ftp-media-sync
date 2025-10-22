@@ -1898,6 +1898,88 @@ class PostgreSQLDatabaseManager:
             return []
         finally:
             self._put_connection(conn)
+    
+    def get_assets_with_loudness(self) -> List[Dict[str, Any]]:
+        """Get all assets that have loudness analysis results"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Get all assets that have loudness metadata
+            cursor.execute("""
+                SELECT DISTINCT a.*, i.file_name
+                FROM assets a
+                INNER JOIN metadata m ON a.id = m.asset_id
+                INNER JOIN metadata_types mt ON m.metadata_type_id = mt.id
+                LEFT JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                WHERE mt.type_name = 'loudness' 
+                AND m.meta_key LIKE 'loudness_%%'
+                AND a.content_type != 'other'
+                ORDER BY a.content_type, a.content_title
+            """)
+            
+            assets = cursor.fetchall()
+            logger.info(f"Found {len(assets)} assets with loudness metadata")
+            
+            # For each asset, get all loudness metadata
+            assets_with_loudness = []
+            for asset in assets:
+                asset_dict = dict(asset)
+                
+                # Get all loudness metadata for this asset
+                cursor.execute("""
+                    SELECT m.meta_key, m.meta_value
+                    FROM metadata m
+                    INNER JOIN metadata_types mt ON m.metadata_type_id = mt.id
+                    WHERE mt.type_name = 'loudness' 
+                    AND m.asset_id = %s
+                    AND m.meta_key LIKE 'loudness_%%'
+                """, (asset_dict['id'],))
+                
+                loudness_metadata = cursor.fetchall()
+                
+                # Build loudness object from individual metadata items
+                loudness = {}
+                for meta in loudness_metadata:
+                    key = meta['meta_key']
+                    value = meta['meta_value']
+                    
+                    # Map database keys to expected format
+                    if key == 'loudness_integrated_lkfs':
+                        loudness['integrated_lkfs'] = float(value) if value else None
+                        loudness['integrated_lufs'] = float(value) if value else None
+                    elif key == 'loudness_range_lu':
+                        loudness['range_lu'] = float(value) if value else None
+                    elif key == 'loudness_true_peak_dbtp':
+                        loudness['true_peak_dbtp'] = float(value) if value else None
+                    elif key == 'loudness_short_term_max':
+                        loudness['short_term_max'] = float(value) if value else None
+                    elif key == 'loudness_momentary_max':
+                        loudness['momentary_max'] = float(value) if value else None
+                    elif key == 'loudness_target_offset':
+                        loudness['target_offset'] = float(value) if value else None
+                    elif key == 'loudness_atsc_a85_compliant':
+                        loudness['atsc_a85_compliant'] = value.lower() == 'true'
+                    elif key == 'loudness_ebu_r128_compliant':
+                        loudness['ebu_r128_compliant'] = value.lower() == 'true'
+                    elif key == 'loudness_analysis_date':
+                        loudness['analysis_date'] = value
+                
+                if loudness:  # Only add if we have loudness data
+                    asset_dict['loudness'] = loudness
+                    assets_with_loudness.append(asset_dict)
+            
+            cursor.close()
+            logger.info(f"Returning {len(assets_with_loudness)} assets with complete loudness data")
+            return assets_with_loudness
+            
+        except Exception as e:
+            logger.error(f"Error getting assets with loudness: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
+        finally:
+            self._put_connection(conn)
 
 
 # Global database manager instance - will be replaced in database.py
