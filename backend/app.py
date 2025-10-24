@@ -25,6 +25,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from loudness_analysis.loudness_analyzer import LoudnessAnalyzer
+from loudness_analysis.audio_normalizer import AudioNormalizer
 import threading
 from psycopg2.extras import RealDictCursor
 
@@ -13370,6 +13371,370 @@ def test_excel_export():
         return jsonify({
             'success': False,
             'message': str(e)
+        })
+
+@app.route('/api/normalize/preview', methods=['POST'])
+def preview_normalization():
+    """Preview audio normalization without processing"""
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        target_lkfs = data.get('target_lkfs', -24.0)
+        target_lra = data.get('target_lra', 7.0)
+        target_tp = data.get('target_tp', -2.0)
+        
+        if not asset_id:
+            return jsonify({
+                'success': False,
+                'message': 'Asset ID is required'
+            })
+        
+        # Get asset information
+        asset = db_manager.get_asset(asset_id)
+        if not asset:
+            return jsonify({
+                'success': False,
+                'message': 'Asset not found'
+            })
+        
+        logger.info(f"Previewing normalization for asset {asset_id}: {asset.get('content_title')}")
+        
+        # Get file path from primary instance
+        instance = db_manager.get_primary_instance(asset_id)
+        if not instance:
+            return jsonify({
+                'success': False,
+                'message': 'No file instance found for this asset'
+            })
+        
+        file_path = instance.get('file_path')
+        if not file_path:
+            return jsonify({
+                'success': False,
+                'message': 'File path not found'
+            })
+        
+        # Construct full FTP path if needed
+        if not file_path.startswith('/'):
+            file_path = f"/mnt/main/ATL26 On-Air Content/{file_path}"
+        
+        # Download file to temp location
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(suffix=os.path.splitext(file_path)[1], delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        
+        try:
+            # Download from target FTP
+            ftp_manager = ftp_managers.get('target')
+            if not ftp_manager or not ftp_manager.connected:
+                logger.info("Creating new FTP connection for normalization preview")
+                config = config_manager.get_config()
+                target_config = config['servers']['target']
+                ftp_manager = FTPManager(
+                    host=target_config['host'],
+                    username=target_config['username'],
+                    password=target_config['password'],
+                    port=target_config.get('port', 21)
+                )
+                ftp_manager.connect()
+            
+            logger.info(f"Downloading file from FTP: {file_path}")
+            ftp_manager.download_file(file_path, temp_path)
+            
+            # Create normalizer and analyze
+            normalizer = AudioNormalizer(
+                target_lkfs=target_lkfs,
+                target_lra=target_lra,
+                target_tp=target_tp
+            )
+            
+            # Preview normalization
+            _, normalization_info = normalizer.normalize(
+                temp_path,
+                preview_only=True
+            )
+            
+            # Add asset info
+            normalization_info['asset'] = {
+                'id': asset_id,
+                'content_title': asset.get('content_title'),
+                'content_type': asset.get('content_type'),
+                'duration': asset.get('duration_seconds'),
+                'file_name': instance.get('file_name')
+            }
+            
+            return jsonify({
+                'success': True,
+                'normalization': normalization_info
+            })
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        
+    except Exception as e:
+        error_msg = f"Error previewing normalization: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        })
+
+@app.route('/api/normalize/process', methods=['POST'])
+def process_normalization():
+    """Process audio normalization and save locally for review"""
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        target_lkfs = data.get('target_lkfs', -24.0)
+        target_lra = data.get('target_lra', 7.0)
+        target_tp = data.get('target_tp', -2.0)
+        output_dir = data.get('output_dir', './normalized_files')
+        
+        if not asset_id:
+            return jsonify({
+                'success': False,
+                'message': 'Asset ID is required'
+            })
+        
+        # Get asset information
+        asset = db_manager.get_asset(asset_id)
+        if not asset:
+            return jsonify({
+                'success': False,
+                'message': 'Asset not found'
+            })
+        
+        logger.info(f"Processing normalization for asset {asset_id}: {asset.get('content_title')}")
+        
+        # Get file path from primary instance
+        instance = db_manager.get_primary_instance(asset_id)
+        if not instance:
+            return jsonify({
+                'success': False,
+                'message': 'No file instance found for this asset'
+            })
+        
+        file_path = instance.get('file_path')
+        file_name = instance.get('file_name')
+        
+        if not file_path:
+            return jsonify({
+                'success': False,
+                'message': 'File path not found'
+            })
+        
+        # Construct full FTP path if needed
+        if not file_path.startswith('/'):
+            file_path = f"/mnt/main/ATL26 On-Air Content/{file_path}"
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Download file to temp location
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(suffix=os.path.splitext(file_path)[1], delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+        
+        # Prepare output path
+        output_filename = f"{os.path.splitext(file_name)[0]}_normalized{os.path.splitext(file_name)[1]}"
+        output_path = os.path.join(output_dir, output_filename)
+        
+        try:
+            # Download from target FTP
+            ftp_manager = ftp_managers.get('target')
+            if not ftp_manager or not ftp_manager.connected:
+                logger.info("Creating new FTP connection for normalization")
+                config = config_manager.get_config()
+                target_config = config['servers']['target']
+                ftp_manager = FTPManager(
+                    host=target_config['host'],
+                    username=target_config['username'],
+                    password=target_config['password'],
+                    port=target_config.get('port', 21)
+                )
+                ftp_manager.connect()
+            
+            logger.info(f"Downloading file from FTP: {file_path}")
+            ftp_manager.download_file(file_path, temp_path)
+            
+            # Create normalizer and process
+            normalizer = AudioNormalizer(
+                target_lkfs=target_lkfs,
+                target_lra=target_lra,
+                target_tp=target_tp
+            )
+            
+            # Normalize the file
+            normalized_path, normalization_info = normalizer.normalize(
+                temp_path,
+                output_path
+            )
+            
+            # Save normalization metadata
+            metadata_key = f"normalization_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            db_manager.set_metadata(
+                asset_id,
+                'normalization',
+                metadata_key,
+                json.dumps(normalization_info)
+            )
+            
+            # Add result info
+            result = {
+                'success': True,
+                'asset': {
+                    'id': asset_id,
+                    'content_title': asset.get('content_title'),
+                    'content_type': asset.get('content_type'),
+                    'duration': asset.get('duration_seconds'),
+                    'file_name': file_name
+                },
+                'normalization': normalization_info,
+                'output_file': normalized_path,
+                'output_size': os.path.getsize(normalized_path) if os.path.exists(normalized_path) else 0
+            }
+            
+            logger.info(f"Normalization complete. Output saved to: {normalized_path}")
+            
+            return jsonify(result)
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        
+    except Exception as e:
+        error_msg = f"Error processing normalization: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': error_msg
+        })
+
+@app.route('/api/normalize/upload', methods=['POST'])
+def upload_normalized_file():
+    """Upload a normalized file back to Castus"""
+    try:
+        data = request.json
+        asset_id = data.get('asset_id')
+        normalized_file = data.get('normalized_file')
+        replace_original = data.get('replace_original', False)
+        
+        if not asset_id or not normalized_file:
+            return jsonify({
+                'success': False,
+                'message': 'Asset ID and normalized file path are required'
+            })
+        
+        if not os.path.exists(normalized_file):
+            return jsonify({
+                'success': False,
+                'message': 'Normalized file not found'
+            })
+        
+        # Get asset information
+        asset = db_manager.get_asset(asset_id)
+        if not asset:
+            return jsonify({
+                'success': False,
+                'message': 'Asset not found'
+            })
+        
+        # Get original file path
+        instance = db_manager.get_primary_instance(asset_id)
+        if not instance:
+            return jsonify({
+                'success': False,
+                'message': 'No file instance found for this asset'
+            })
+        
+        original_path = instance.get('file_path')
+        if not original_path.startswith('/'):
+            original_path = f"/mnt/main/ATL26 On-Air Content/{original_path}"
+        
+        # Determine upload path
+        if replace_original:
+            upload_path = original_path
+            backup_path = f"{original_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        else:
+            # Upload as new file with _normalized suffix
+            dir_path = os.path.dirname(original_path)
+            base_name = os.path.basename(original_path)
+            name_parts = os.path.splitext(base_name)
+            upload_path = os.path.join(dir_path, f"{name_parts[0]}_normalized{name_parts[1]}")
+            backup_path = None
+        
+        # Upload to target FTP
+        ftp_manager = ftp_managers.get('target')
+        if not ftp_manager or not ftp_manager.connected:
+            logger.info("Creating new FTP connection for upload")
+            config = config_manager.get_config()
+            target_config = config['servers']['target']
+            ftp_manager = FTPManager(
+                host=target_config['host'],
+                username=target_config['username'],
+                password=target_config['password'],
+                port=target_config.get('port', 21)
+            )
+            ftp_manager.connect()
+        
+        # Backup original if replacing
+        if replace_original and backup_path:
+            logger.info(f"Creating backup of original file: {backup_path}")
+            try:
+                # Use FTP RNFR/RNTO to rename
+                ftp_manager.ftp.rename(original_path, backup_path)
+            except Exception as e:
+                logger.warning(f"Could not create backup: {str(e)}")
+        
+        # Upload normalized file
+        logger.info(f"Uploading normalized file to: {upload_path}")
+        ftp_manager.upload_file(normalized_file, upload_path)
+        
+        # Update database if replacing original
+        if replace_original:
+            # Update file size
+            new_size = os.path.getsize(normalized_file)
+            cursor = db_manager._get_connection().cursor()
+            cursor.execute("""
+                UPDATE instances 
+                SET file_size = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE asset_id = %s AND is_primary = TRUE
+            """, (new_size, asset_id))
+            cursor.connection.commit()
+            cursor.close()
+            
+            # Save normalization history
+            db_manager.set_metadata(
+                asset_id,
+                'normalization',
+                f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                json.dumps({
+                    'replaced_original': True,
+                    'backup_path': backup_path,
+                    'upload_path': upload_path,
+                    'timestamp': datetime.now().isoformat()
+                })
+            )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Normalized file uploaded successfully',
+            'upload_path': upload_path,
+            'backup_path': backup_path,
+            'replaced_original': replace_original
+        })
+        
+    except Exception as e:
+        error_msg = f"Error uploading normalized file: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': error_msg
         })
 
 def format_duration_for_csv(seconds):

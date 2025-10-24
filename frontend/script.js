@@ -17559,6 +17559,270 @@ window.showPanel = function(panelName) {
 let loudnessQueue = [];
 let loudnessProcessing = false;
 
+// Normalize audio to target loudness
+async function normalizeLoudness(assetId, fileName) {
+    try {
+        // First preview the normalization
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        showNotification('Analyzing', 'Analyzing file for normalization...', 'info');
+        
+        const response = await fetch(`${baseURL}/normalize/preview`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                asset_id: assetId,
+                target_lkfs: -24.0,
+                target_lra: 7.0,
+                target_tp: -2.0
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const norm = result.normalization;
+            
+            // Show normalization modal
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'block';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2>Audio Normalization Preview</h2>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <h3>${fileName || norm.asset.content_title}</h3>
+                        
+                        <div class="normalization-details">
+                            <h4>Current Loudness:</h4>
+                            <ul>
+                                <li>Integrated: <strong>${norm.measured.integrated_lkfs.toFixed(1)} LKFS</strong></li>
+                                <li>True Peak: <strong>${norm.measured.true_peak.toFixed(1)} dBTP</strong></li>
+                                <li>Range: <strong>${norm.measured.loudness_range.toFixed(1)} LU</strong></li>
+                            </ul>
+                            
+                            <h4>Target Loudness:</h4>
+                            <ul>
+                                <li>Integrated: <strong>${norm.target.integrated_lkfs.toFixed(1)} LKFS</strong></li>
+                                <li>True Peak: <strong>${norm.target.true_peak.toFixed(1)} dBTP</strong></li>
+                                <li>Range: <strong>${norm.target.loudness_range.toFixed(1)} LU</strong></li>
+                            </ul>
+                            
+                            <h4>Adjustment:</h4>
+                            <p>Offset: <strong>${norm.offset.toFixed(1)} dB</strong></p>
+                            ${!norm.will_normalize ? 
+                                '<p class="info-message"><i class="fas fa-info-circle"></i> File is already close to target loudness. No normalization needed.</p>' :
+                                '<p class="warning-message"><i class="fas fa-exclamation-triangle"></i> File will be normalized to target loudness.</p>'
+                            }
+                        </div>
+                        
+                        <div class="normalization-options">
+                            <h4>Normalization Settings:</h4>
+                            <div class="form-group">
+                                <label>Target LKFS:</label>
+                                <input type="number" id="target-lkfs" value="-24" step="0.1" style="width: 80px;">
+                                <span class="help-text">(ATSC A/85 standard: -24)</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Output Directory:</label>
+                                <input type="text" id="output-dir" value="./normalized_files" style="width: 300px;">
+                                <span class="help-text">(Local directory for review)</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="button secondary" onclick="this.closest('.modal').remove()">Cancel</button>
+                        ${norm.will_normalize ? 
+                            `<button class="button primary" onclick="processNormalization(${assetId}, '${(fileName || '').replace(/'/g, "\\'")}')">
+                                <i class="fas fa-sliders-h"></i> Process Normalization
+                            </button>` :
+                            ''
+                        }
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+        } else {
+            showNotification('Error', result.message || 'Failed to preview normalization', 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error previewing normalization:', error);
+        showNotification('Error', 'Failed to preview normalization', 'error');
+    }
+}
+
+// Process the actual normalization
+async function processNormalization(assetId, fileName) {
+    try {
+        const targetLkfs = parseFloat(document.getElementById('target-lkfs').value);
+        const outputDir = document.getElementById('output-dir').value;
+        
+        // Close modal
+        const modal = document.querySelector('.modal');
+        if (modal) modal.remove();
+        
+        showNotification('Processing', 'Normalizing audio file... This may take several minutes.', 'info');
+        
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/normalize/process`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                asset_id: assetId,
+                target_lkfs: targetLkfs,
+                target_lra: 7.0,
+                target_tp: -2.0,
+                output_dir: outputDir
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const outputFile = result.output_file;
+            const outputSizeMB = (result.output_size / (1024 * 1024)).toFixed(2);
+            
+            // Show success modal with upload option
+            const successModal = document.createElement('div');
+            successModal.className = 'modal';
+            successModal.style.display = 'block';
+            successModal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2>Normalization Complete</h2>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="success-message">
+                            <i class="fas fa-check-circle"></i>
+                            <h3>Audio normalized successfully!</h3>
+                        </div>
+                        
+                        <div class="normalization-result">
+                            <p><strong>File:</strong> ${fileName || result.asset.content_title}</p>
+                            <p><strong>Output:</strong> ${outputFile}</p>
+                            <p><strong>Size:</strong> ${outputSizeMB} MB</p>
+                            ${result.normalization.output_lkfs ? 
+                                `<p><strong>Final Loudness:</strong> ${result.normalization.output_lkfs.toFixed(1)} LKFS</p>` : 
+                                ''
+                            }
+                        </div>
+                        
+                        <div class="info-message">
+                            <i class="fas fa-info-circle"></i>
+                            <p>The normalized file has been saved locally for review. You can now:</p>
+                            <ol>
+                                <li>Review the normalized file locally</li>
+                                <li>Upload to Castus as a new file</li>
+                                <li>Replace the original file (with backup)</li>
+                            </ol>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="button secondary" onclick="this.closest('.modal').remove()">Close</button>
+                        <button class="button primary" onclick="uploadNormalizedFile(${assetId}, '${outputFile.replace(/'/g, "\\'")}', false)">
+                            <i class="fas fa-upload"></i> Upload as New File
+                        </button>
+                        <button class="button warning" onclick="uploadNormalizedFile(${assetId}, '${outputFile.replace(/'/g, "\\'")}', true)">
+                            <i class="fas fa-exchange-alt"></i> Replace Original
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(successModal);
+            
+        } else {
+            showNotification('Error', result.message || 'Failed to normalize file', 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error processing normalization:', error);
+        showNotification('Error', 'Failed to process normalization', 'error');
+    }
+}
+
+// Upload normalized file to Castus
+async function uploadNormalizedFile(assetId, normalizedFile, replaceOriginal) {
+    try {
+        const confirmMsg = replaceOriginal ? 
+            'Are you sure you want to replace the original file? A backup will be created.' :
+            'Upload the normalized file as a new file to Castus?';
+            
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+        
+        showNotification('Uploading', 'Uploading normalized file to Castus...', 'info');
+        
+        const baseURL = window.APIConfig ? window.APIConfig.baseURL : 
+            (window.location.port === '8000' ? 'http://127.0.0.1:5000/api' : '/api');
+        
+        const response = await fetch(`${baseURL}/normalize/upload`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                asset_id: assetId,
+                normalized_file: normalizedFile,
+                replace_original: replaceOriginal
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Close modal
+            const modal = document.querySelector('.modal');
+            if (modal) modal.remove();
+            
+            showNotification('Success', 
+                replaceOriginal ? 
+                    'Original file replaced with normalized version' : 
+                    'Normalized file uploaded successfully', 
+                'success'
+            );
+            
+            // Refresh loudness modal if open
+            const loudnessModal = document.getElementById('loudnessModal');
+            if (loudnessModal && loudnessModal.style.display === 'block') {
+                await showLoudnessModal();
+            }
+            
+        } else {
+            showNotification('Error', result.message || 'Failed to upload file', 'error');
+        }
+        
+    } catch (error) {
+        console.error('Error uploading normalized file:', error);
+        showNotification('Error', 'Failed to upload normalized file', 'error');
+    }
+}
+
 // Reanalyze loudness for a file
 async function reanalyzeLoudness(assetId, fileName) {
     const confirmReanalyze = confirm(`Are you sure you want to reanalyze loudness for "${fileName || 'this file'}"?\n\nThis will overwrite the existing loudness data.`);
@@ -18022,6 +18286,10 @@ async function displayLoudnessContentByType(content) {
                                                 onclick="reanalyzeLoudness(${item.id}, '${(item.file_name || '').replace(/'/g, "\'")}')">
                                             <i class="fas fa-sync-alt"></i> Reanalyze
                                         </button>
+                                        <button class="button primary small loudness-normalize-btn" 
+                                                onclick="normalizeLoudness(${item.id}, '${(item.file_name || '').replace(/'/g, "\'")}')">
+                                            <i class="fas fa-sliders-h"></i> Normalize
+                                        </button>
                                     `}
                                 </td>
                             </tr>
@@ -18288,6 +18556,10 @@ function updateLoudnessRowStatus(assetId, status, loudnessData = null) {
                 <button class="button secondary small loudness-reanalyze-btn" 
                         onclick="reanalyzeLoudness(${assetId}, '${fileName.replace(/'/g, "\'")}')">
                     <i class="fas fa-sync-alt"></i> Reanalyze
+                </button>
+                <button class="button primary small loudness-normalize-btn" 
+                        onclick="normalizeLoudness(${assetId}, '${fileName.replace(/'/g, "\'")}')">
+                    <i class="fas fa-sliders-h"></i> Normalize
                 </button>
             `;
         }
