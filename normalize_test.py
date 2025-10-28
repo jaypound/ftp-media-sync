@@ -9,12 +9,18 @@ import os
 import argparse
 import logging
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add backend directory to path
+backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backend')
+sys.path.insert(0, backend_dir)
 
-from backend.database_postgres import PostgreSQLDatabaseManager
-from backend.config_manager import ConfigManager
-from backend.ftp_manager import FTPManager
+from config_manager import ConfigManager
+from ftp_manager import FTPManager
+from database_postgres import PostgreSQLDatabaseManager
+
+# Add parent directory for loudness_analysis
+parent_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, parent_dir)
+
 from loudness_analysis.audio_normalizer import AudioNormalizer
 import tempfile
 
@@ -38,12 +44,23 @@ def main():
     
     # Initialize database and config
     logger.info("Initializing database and configuration...")
-    db = PostgreSQLDatabaseManager()
-    config_manager = ConfigManager()
-    config = config_manager.get_config()
+    
+    # Use PostgreSQL with connection string
+    import getpass
+    default_pg_conn = f'postgresql://{getpass.getuser()}@localhost/ftp_media_sync'
+    db = PostgreSQLDatabaseManager(
+        connection_string=os.getenv('DATABASE_URL', default_pg_conn)
+    )
+    db.connect()  # Initialize the connection pool
+    
+    # Use config file from backend directory
+    config_file_path = os.path.join(backend_dir, 'config.json')
+    config_manager = ConfigManager(config_file=config_file_path)
+    config_manager.load_config()
+    config = config_manager.config
     
     # Get asset information
-    asset = db.get_asset(args.asset_id)
+    asset = db.get_asset_by_id(args.asset_id)
     if not asset:
         logger.error(f"Asset {args.asset_id} not found")
         return 1
@@ -51,7 +68,15 @@ def main():
     logger.info(f"Asset: {asset['content_title']} ({asset['content_type']})")
     
     # Get file instance
-    instance = db.get_primary_instance(args.asset_id)
+    instances = db.get_instances_by_asset_id(args.asset_id)
+    instance = None
+    for inst in instances:
+        if inst.get('is_primary'):
+            instance = inst
+            break
+    
+    if not instance and instances:
+        instance = instances[0]  # Use first instance if no primary
     if not instance:
         logger.error("No file instance found for this asset")
         return 1
@@ -67,14 +92,27 @@ def main():
     
     # Connect to FTP
     logger.info("Connecting to FTP...")
+    if 'servers' not in config or 'target' not in config.get('servers', {}):
+        logger.error("No FTP server configuration found. Please configure FTP servers in the web interface first.")
+        print("\nERROR: FTP server configuration missing!")
+        print("Please use the web interface to configure FTP servers before using this tool.")
+        print("Go to: http://localhost:8000")
+        return 1
+    
     target_config = config['servers']['target']
-    ftp = FTPManager(
-        host=target_config['host'],
-        username=target_config['username'],
-        password=target_config['password'],
-        port=target_config.get('port', 21)
-    )
-    ftp.connect()
+    if not all(k in target_config for k in ['host', 'user', 'password']):
+        logger.error("Incomplete FTP configuration. Please configure the target server in the web interface.")
+        print("\nERROR: Incomplete FTP configuration!")
+        print("Please configure the target FTP server (Castus2) in the web interface.")
+        return 1
+    
+    ftp = FTPManager(target_config)
+    if not ftp.connect():
+        logger.error("Failed to connect to FTP server")
+        print("\nERROR: Failed to connect to FTP server!")
+        print(f"Host: {target_config.get('host', 'not set')}")
+        print("Please check your FTP configuration and ensure the server is accessible.")
+        return 1
     
     # Download file
     with tempfile.NamedTemporaryFile(suffix=os.path.splitext(file_name)[1], delete=False) as temp_file:
@@ -82,7 +120,11 @@ def main():
     
     try:
         logger.info(f"Downloading file from FTP...")
-        ftp.download_file(file_path, temp_path)
+        if not ftp.download_file(file_path, temp_path):
+            logger.error("Failed to download file from FTP")
+            print("\nERROR: Failed to download file from FTP server!")
+            print(f"File path: {file_path}")
+            return 1
         
         # Create normalizer
         normalizer = AudioNormalizer(

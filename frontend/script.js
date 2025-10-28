@@ -18213,6 +18213,7 @@ async function displayLoudnessContentByType(content) {
                     <thead>
                         <tr>
                             <th><input type="checkbox" onchange="toggleAllLoudnessCheckboxes('${type}', this.checked)"></th>
+                            <th>Asset ID</th>
                             <th class="sortable" onclick="sortLoudnessTable('${type}', 'name')">
                                 File Name 
                                 <i class="fas fa-sort"></i>
@@ -18229,6 +18230,7 @@ async function displayLoudnessContentByType(content) {
                         ${items.map(item => `
                             <tr id="loudness-row-${item.id}">
                                 <td><input type="checkbox" class="loudness-select loudness-select-${type}" data-asset-id="${item.id}" ${item.loudness ? 'disabled' : ''}></td>
+                                <td>${item.id}</td>
                                 <td class="file-name">${item.file_name || item.content_title || 'Unknown'}</td>
                                 <td>${formatDuration(item.duration_seconds || item.file_duration || 0)}</td>
                                 <td>${(() => {

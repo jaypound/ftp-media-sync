@@ -29,6 +29,15 @@ from loudness_analysis.audio_normalizer import AudioNormalizer
 import threading
 from psycopg2.extras import RealDictCursor
 
+# Helper function to get primary instance
+def get_primary_instance(asset_id):
+    """Get primary instance for an asset"""
+    instances = db_manager.get_instances_by_asset_id(asset_id)
+    for inst in instances:
+        if inst.get('is_primary'):
+            return inst
+    return instances[0] if instances else None
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -8390,6 +8399,17 @@ def fill_template_gaps():
                 # Check if we actually found content to place
                 # If we broke from the loop due to no content fitting, skip to next gap
                 if selected is None or duration is None:
+                    # Check if this is an end-of-day situation
+                    if is_end_of_day and schedule_type == 'weekly':
+                        # For weekly schedules at end of day, advance to start of next day
+                        time_to_midnight = 86400 - (current_position % 86400)
+                        if time_to_midnight <= 60:  # Within 1 minute of midnight
+                            logger.info(f"Cannot fill end-of-day gap of {time_to_midnight:.1f} seconds. Advancing to next day.")
+                            # Move position to the start of the next day
+                            next_day_start = ((current_position // 86400) + 1) * 86400
+                            current_position = next_day_start
+                            continue  # Continue with the main loop
+                    
                     logger.info("No content selected for this gap position, moving to next gap")
                     break
                 
@@ -8639,6 +8659,13 @@ def fill_template_gaps():
                         end_minutes = int((end_position % 3600) // 60)
                         end_seconds = end_position % 60
                         end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
+                    
+                    # Check if duration is infinity (which means content would cross midnight)
+                    # This prevents zero-duration items at day boundaries
+                    if duration == float('inf'):
+                        logger.warning(f"Skipping content '{selected.get('content_title', selected.get('file_name'))}' because it would cross midnight boundary")
+                        # Don't advance rotation for content we couldn't place
+                        continue
                     
                     # Add to template (file already validated during pre-processing)
                     # IMPORTANT: Use the validated duration, not the original duration
@@ -13390,7 +13417,7 @@ def preview_normalization():
             })
         
         # Get asset information
-        asset = db_manager.get_asset(asset_id)
+        asset = db_manager.get_asset_by_id(asset_id)
         if not asset:
             return jsonify({
                 'success': False,
@@ -13400,7 +13427,7 @@ def preview_normalization():
         logger.info(f"Previewing normalization for asset {asset_id}: {asset.get('content_title')}")
         
         # Get file path from primary instance
-        instance = db_manager.get_primary_instance(asset_id)
+        instance = get_primary_instance(asset_id)
         if not instance:
             return jsonify({
                 'success': False,
@@ -13429,7 +13456,7 @@ def preview_normalization():
             ftp_manager = ftp_managers.get('target')
             if not ftp_manager or not ftp_manager.connected:
                 logger.info("Creating new FTP connection for normalization preview")
-                config = config_manager.get_config()
+                config = config_manager.config
                 target_config = config['servers']['target']
                 ftp_manager = FTPManager(
                     host=target_config['host'],
@@ -13500,7 +13527,7 @@ def process_normalization():
             })
         
         # Get asset information
-        asset = db_manager.get_asset(asset_id)
+        asset = db_manager.get_asset_by_id(asset_id)
         if not asset:
             return jsonify({
                 'success': False,
@@ -13510,7 +13537,7 @@ def process_normalization():
         logger.info(f"Processing normalization for asset {asset_id}: {asset.get('content_title')}")
         
         # Get file path from primary instance
-        instance = db_manager.get_primary_instance(asset_id)
+        instance = get_primary_instance(asset_id)
         if not instance:
             return jsonify({
                 'success': False,
@@ -13548,7 +13575,7 @@ def process_normalization():
             ftp_manager = ftp_managers.get('target')
             if not ftp_manager or not ftp_manager.connected:
                 logger.info("Creating new FTP connection for normalization")
-                config = config_manager.get_config()
+                config = config_manager.config
                 target_config = config['servers']['target']
                 ftp_manager = FTPManager(
                     host=target_config['host'],
@@ -13637,7 +13664,7 @@ def upload_normalized_file():
             })
         
         # Get asset information
-        asset = db_manager.get_asset(asset_id)
+        asset = db_manager.get_asset_by_id(asset_id)
         if not asset:
             return jsonify({
                 'success': False,
@@ -13645,7 +13672,7 @@ def upload_normalized_file():
             })
         
         # Get original file path
-        instance = db_manager.get_primary_instance(asset_id)
+        instance = get_primary_instance(asset_id)
         if not instance:
             return jsonify({
                 'success': False,
@@ -13672,7 +13699,7 @@ def upload_normalized_file():
         ftp_manager = ftp_managers.get('target')
         if not ftp_manager or not ftp_manager.connected:
             logger.info("Creating new FTP connection for upload")
-            config = config_manager.get_config()
+            config = config_manager.config
             target_config = config['servers']['target']
             ftp_manager = FTPManager(
                 host=target_config['host'],
@@ -13846,14 +13873,14 @@ async def process_loudness_queue():
             if not ftp_manager:
                 logger.info("Target FTP manager not found, creating new instance")
                 # Get target server config
-                config = config_manager.get_config()
+                config = config_manager.config
                 target_config = config.get('servers', {}).get('target', {})
                 if target_config:
                     # Create config dict for FTPManager
                     ftp_config = {
                         'host': target_config.get('host'),
                         'port': target_config.get('port', 21),
-                        'user': target_config.get('username'),
+                        'user': target_config.get('user'),
                         'password': target_config.get('password')
                     }
                     ftp_manager = FTPManager(ftp_config)

@@ -6,4 +6,5 @@ backend/backups
 backend/*.log
 backend/gap_filling_debug.log.*
 backend/logs
+backend/normalized_files
 .DS_Store
