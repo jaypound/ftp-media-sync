@@ -1929,6 +1929,21 @@ async function startSync() {
                 
                 // Show notification of successful sync
                 showNotification('Sync Complete', `Successfully synced ${syncStats.processed} files`, 'success');
+                
+                // Automatically re-scan and compare after successful sync
+                if (syncStats.processed > 0) {
+                    setTimeout(async () => {
+                        showNotification('Refreshing file status...', 'info');
+                        console.log('Auto-rescanning after successful sync');
+                        
+                        // Re-scan and compare files to update status
+                        await scanAndCompareFiles();
+                        
+                        // Update UI with fresh comparison results
+                        updateDashboardStats();
+                        showNotification('File status updated', 'success');
+                    }, 1000);
+                }
             } else if (dryRun && syncStats.errors === 0) {
                 // For dry run, show what would have been done
                 showNotification('Dry Run Complete', `Would have synced ${syncStats.processed} files`, 'info');
