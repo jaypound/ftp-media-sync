@@ -3677,7 +3677,8 @@ def generate_report():
             })
         elif report_type in ['content-replay-distribution', 'replay-heatmap', 
                              'replay-frequency-boxplot', 'content-freshness',
-                             'pareto-chart', 'replay-gaps', 'comprehensive-analysis']:
+                             'pareto-chart', 'replay-gaps', 'comprehensive-analysis',
+                             'content-diversity-dashboard']:
             if not schedule_id:
                 return jsonify({'success': False, 'message': 'Schedule ID required'})
             
@@ -3685,7 +3686,23 @@ def generate_report():
             from reports import ScheduleReplayAnalysisReport
             
             report = ScheduleReplayAnalysisReport(db_manager)
-            report_data = report.generate(schedule_id, report_type)
+            
+            # Check for day filter parameter
+            day_filter = request.args.get('day')
+            if day_filter is not None:
+                try:
+                    day_filter = int(day_filter)
+                except ValueError:
+                    day_filter = None
+            
+            # Check for include_expired parameter (for diversity dashboard)
+            include_expired = request.args.get('include_expired', 'false').lower() == 'true'
+            
+            # Pass additional parameters based on report type
+            if report_type == 'content-diversity-dashboard':
+                report_data = report.generate_diversity_dashboard(schedule_id, include_expired)
+            else:
+                report_data = report.generate(schedule_id, report_type, day_filter)
             
             return jsonify({
                 'success': True,
@@ -3836,6 +3853,14 @@ def list_schedules():
     try:
         # Get active schedules from PostgreSQL
         schedules = scheduler_postgres.get_active_schedules()
+        logger.info(f"Retrieved {len(schedules)} schedules from database")
+        
+        # Debug first schedule if available
+        if schedules and len(schedules) > 0:
+            first_schedule = schedules[0]
+            logger.debug(f"First schedule fields: {list(first_schedule.keys())}")
+            logger.debug(f"First schedule name: {first_schedule.get('name')} | schedule_name: {first_schedule.get('schedule_name')}")
+            logger.debug(f"First schedule air_date: {first_schedule.get('air_date')}")
         
         # Convert datetime objects to strings and ensure consistent field names
         for schedule in schedules:
@@ -3846,6 +3871,11 @@ def list_schedules():
             # Also handle created_date for backward compatibility
             if 'created_date' in schedule and schedule['created_date']:
                 schedule['created_at'] = schedule['created_date'].isoformat()
+            # Ensure 'name' field exists (handle both 'name' and 'schedule_name' from DB)
+            if 'schedule_name' in schedule and not schedule.get('name'):
+                schedule['name'] = schedule['schedule_name']
+            elif not schedule.get('name'):
+                schedule['name'] = 'Unnamed Schedule'
             # Format duration with validation
             if schedule.get('total_duration'):
                 duration = validate_numeric(schedule['total_duration'],
@@ -6486,8 +6516,11 @@ def load_schedule_from_ftp():
             
             logger.info(f"Schedule creation summary: success={success_count}, failed={failed_count}, skipped={skipped_count}")
             
-            # Recalculate times
-            scheduler_postgres.recalculate_schedule_times(schedule_id)
+            # Skip recalculating times for weekly schedules to preserve day offsets
+            if schedule_data.get('type') != 'weekly':
+                scheduler_postgres.recalculate_schedule_times(schedule_id)
+            else:
+                logger.info("Skipping time recalculation for weekly schedule to preserve day offsets")
             
             return jsonify({
                 'success': True,

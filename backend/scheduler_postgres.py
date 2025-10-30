@@ -1315,9 +1315,11 @@ class PostgreSQLScheduler:
             
             for idx, item in enumerate(items):
                 # Convert seconds to time string with microseconds
-                hours = int(current_time // 3600)
-                minutes = int((current_time % 3600) // 60)
-                seconds_total = current_time % 60
+                # Ensure time wraps at 24 hours for schedules that go past midnight
+                time_in_day = current_time % 86400  # 86400 seconds = 24 hours
+                hours = int(time_in_day // 3600)
+                minutes = int((time_in_day % 3600) // 60)
+                seconds_total = time_in_day % 60
                 seconds = int(seconds_total)
                 microseconds = int((seconds_total - seconds) * 1000000)
                 
@@ -1533,7 +1535,8 @@ class PostgreSQLScheduler:
         try:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
-            # Get all schedules, not just active ones, for reporting purposes
+            # Get all schedules within a reasonable date range for reporting
+            # Include schedules from 90 days ago to any future date
             cursor.execute("""
                 SELECT 
                     s.id,
@@ -1546,14 +1549,26 @@ class PostgreSQLScheduler:
                     SUM(si.scheduled_duration_seconds) as total_duration
                 FROM schedules s
                 LEFT JOIN scheduled_items si ON s.id = si.schedule_id
-                WHERE s.air_date >= CURRENT_DATE - INTERVAL '60 days'
+                WHERE s.air_date >= CURRENT_DATE - INTERVAL '90 days'
                 GROUP BY s.id, s.schedule_name, s.air_date, s.created_date, s.active, s.total_duration_seconds
-                ORDER BY s.created_date DESC
-                LIMIT 200
+                ORDER BY s.air_date DESC, s.created_date DESC
+                LIMIT 300
             """)
             
             results = cursor.fetchall()
             cursor.close()
+            
+            # Debug logging to help diagnose missing schedules
+            logger.info(f"get_active_schedules: Found {len(results)} schedules")
+            if len(results) > 0:
+                logger.debug(f"First schedule: {results[0].get('name')} - Air date: {results[0].get('air_date')} - ID: {results[0].get('id')}")
+                logger.debug(f"Date range: 90 days ago to future")
+                # Log all schedules for debugging
+                logger.debug("All schedules:")
+                for idx, sched in enumerate(results[:10]):  # First 10 schedules
+                    logger.debug(f"  {idx+1}. {sched.get('name')} - Air date: {sched.get('air_date')} - ID: {sched.get('id')}")
+            else:
+                logger.warning("No schedules found in get_active_schedules - check if schedules exist in the database")
             
             return results
             

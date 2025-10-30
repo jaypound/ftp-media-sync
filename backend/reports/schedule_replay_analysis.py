@@ -18,7 +18,19 @@ class ScheduleReplayAnalysisReport:
     def __init__(self, db_manager):
         self.db = db_manager
     
-    def generate(self, schedule_id: int, report_type: str) -> Dict[str, Any]:
+    def generate_diversity_dashboard(self, schedule_id: int, include_expired: bool = False) -> Dict[str, Any]:
+        """Generate diversity dashboard with option to include expired content"""
+        # Get schedule and items
+        schedule = self._get_schedule(schedule_id)
+        if not schedule:
+            raise ValueError(f"Schedule {schedule_id} not found")
+        
+        items = self._get_scheduled_items(schedule_id)
+        
+        # Generate diversity dashboard with include_expired flag
+        return self._generate_content_diversity_dashboard(schedule, items, include_expired)
+    
+    def generate(self, schedule_id: int, report_type: str, day_filter: Optional[int] = None) -> Dict[str, Any]:
         """Generate specific replay analysis report"""
         # Get schedule and items
         schedule = self._get_schedule(schedule_id)
@@ -26,6 +38,35 @@ class ScheduleReplayAnalysisReport:
             raise ValueError(f"Schedule {schedule_id} not found")
         
         items = self._get_scheduled_items(schedule_id)
+        
+        # Filter by day if specified (for weekly schedules)
+        if day_filter is not None:
+            filtered_items = []
+            for item in items:
+                # Check metadata first for weekly schedules
+                metadata = item.get('metadata', {})
+                if isinstance(metadata, str):
+                    try:
+                        import json
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                
+                # Use metadata day_offset if available, otherwise calculate from time
+                if metadata and 'day_offset' in metadata:
+                    item_day = metadata['day_offset']
+                else:
+                    start_seconds = item.get('start_seconds', 0)
+                    item_day = int(start_seconds // 86400)
+                
+                if item_day == day_filter:
+                    filtered_items.append(item)
+            items = filtered_items
+            
+            # Add day info to schedule
+            schedule['filtered_day'] = day_filter
+            day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+            schedule['filtered_day_name'] = day_names[day_filter % 7]
         
         # Generate report based on type
         if report_type == 'content-replay-distribution':
@@ -42,6 +83,8 @@ class ScheduleReplayAnalysisReport:
             return self._generate_replay_gaps(schedule, items)
         elif report_type == 'comprehensive-analysis':
             return self._generate_comprehensive_analysis(schedule, items)
+        elif report_type == 'content-diversity-dashboard':
+            return self._generate_content_diversity_dashboard(schedule, items)
         else:
             raise ValueError(f"Unknown report type: {report_type}")
     
@@ -109,9 +152,15 @@ class ScheduleReplayAnalysisReport:
     
     def _generate_replay_distribution(self, schedule: Dict, items: List[Dict]) -> Dict[str, Any]:
         """Generate content replay distribution (bell curve) data"""
+        # Check if this is a weekly schedule
+        schedule_name = schedule.get('name', '').lower()
+        is_weekly = 'weekly' in schedule_name or '[weekly]' in schedule_name
+        
         # Count replays by content and category
         replay_counts_by_category = defaultdict(lambda: defaultdict(int))
         
+        # For ALL schedules, count total plays
+        # (Weekly schedules may be compressed into one day during import)
         for item in items:
             if item.get('asset_id'):
                 category = item.get('duration_category', 'unknown')
@@ -141,25 +190,71 @@ class ScheduleReplayAnalysisReport:
                     }
                 }
         
+        # Add explanation for weekly schedules
+        explanation = None
+        if is_weekly:
+            explanation = "This weekly schedule contains 7 days of content. The chart shows how many times each unique content item is played across the entire week."
+        
         return {
             'schedule': self._schedule_summary(schedule),
             'distributions': distributions,
             'chart_type': 'line',
             'x_axis': 'Number of Plays',
-            'y_axis': 'Number of Unique Content Items'
+            'y_axis': 'Number of Unique Content Items',
+            'explanation': explanation,
+            'is_weekly': is_weekly
         }
     
     def _generate_replay_heatmap(self, schedule: Dict, items: List[Dict]) -> Dict[str, Any]:
         """Generate replay timeline heatmap data"""
+        # Check if this is a weekly schedule
+        schedule_name = schedule.get('name', '').lower()
+        is_weekly = 'weekly' in schedule_name or '[weekly]' in schedule_name
+        
         # Create hourly buckets
         hourly_content = defaultdict(lambda: defaultdict(int))
         content_info = {}
         
         for item in items:
             if item.get('asset_id'):
-                # Calculate hour bucket
-                start_seconds = item.get('start_seconds', 0)
-                hour = int(start_seconds // 3600)
+                # For weekly schedules, use metadata to reconstruct actual hour
+                if is_weekly:
+                    metadata = item.get('metadata', {})
+                    if isinstance(metadata, str):
+                        try:
+                            import json
+                            metadata = json.loads(metadata)
+                        except:
+                            metadata = {}
+                    
+                    day_offset = metadata.get('day_offset', 0)
+                    
+                    # Get the scheduled_start_time which contains the time portion
+                    scheduled_time = item.get('scheduled_start_time')
+                    if scheduled_time:
+                        # Extract hours, minutes, seconds from the time
+                        import datetime
+                        if isinstance(scheduled_time, str):
+                            # Parse time string like "00:10:42.308000"
+                            time_parts = scheduled_time.split(':')
+                            hours = int(time_parts[0])
+                            minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                            seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                            hour_in_day = hours
+                        else:
+                            # If it's a datetime/time object
+                            hour_in_day = scheduled_time.hour
+                    else:
+                        # Fallback to start_seconds if no scheduled_start_time
+                        start_seconds = item.get('start_seconds', 0)
+                        hour_in_day = int(start_seconds // 3600)
+                    
+                    # Calculate the actual hour in the week
+                    hour = day_offset * 24 + hour_in_day
+                else:
+                    # For daily schedules, use normal calculation
+                    start_seconds = item.get('start_seconds', 0)
+                    hour = int(start_seconds // 3600)
                 
                 asset_id = item['asset_id']
                 hourly_content[hour][asset_id] += 1
@@ -186,8 +281,10 @@ class ScheduleReplayAnalysisReport:
         sorted_content = sorted(all_content, key=lambda x: content_totals[x], reverse=True)
         
         # Build heatmap matrix
+        max_hours = 168 if is_weekly else 24  # 7 days * 24 hours for weekly
+        
         for i, asset_id in enumerate(sorted_content[:50]):  # Top 50 content items
-            for hour in range(24):
+            for hour in range(max_hours):
                 count = hourly_content[hour].get(asset_id, 0)
                 if count > 0:
                     heatmap_data.append({
@@ -198,14 +295,19 @@ class ScheduleReplayAnalysisReport:
                         'play_count': count
                     })
         
+        # Add metadata about schedule type
+        x_axis_label = 'Hour of Week' if is_weekly else 'Hour of Day'
+        
         return {
             'schedule': self._schedule_summary(schedule),
             'heatmap_data': heatmap_data,
             'content_info': {i: content_info[aid] for i, aid in enumerate(sorted_content[:50])},
             'chart_type': 'heatmap',
-            'x_axis': 'Hour of Day',
+            'x_axis': x_axis_label,
             'y_axis': 'Content (sorted by total plays)',
-            'max_plays': max((d['play_count'] for d in heatmap_data), default=0)
+            'max_plays': max((d['play_count'] for d in heatmap_data), default=0),
+            'is_weekly': is_weekly,
+            'max_hours': max_hours
         }
     
     def _generate_replay_frequency_boxplot(self, schedule: Dict, items: List[Dict]) -> Dict[str, Any]:
@@ -571,3 +673,228 @@ class ScheduleReplayAnalysisReport:
             recommendations.append("Schedule is well-optimized with good content rotation!")
         
         return recommendations
+    
+    def _generate_content_diversity_dashboard(self, schedule: Dict, items: List[Dict], include_expired: bool = False) -> Dict[str, Any]:
+        """Generate content diversity dashboard showing available vs used content"""
+        from collections import defaultdict
+        import datetime
+        
+        # Get schedule date range
+        schedule_date = schedule.get('air_date')
+        
+        # Get all available content from the assets table
+        conn = self.db._get_connection()
+        try:
+            from psycopg2.extras import RealDictCursor
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Debug: Check table structure and data
+            logger.info(f"Checking assets for schedule date: {schedule_date}")
+            
+            # First, get total count without any filters
+            cursor.execute("SELECT COUNT(*) as total_count FROM assets")
+            total_all = cursor.fetchone()
+            logger.info(f"Total assets in database (no filter): {total_all['total_count']}")
+            
+            # Check analysis_completed assets
+            cursor.execute("SELECT COUNT(*) as total_count FROM assets WHERE analysis_completed = TRUE")
+            total_active = cursor.fetchone()
+            logger.info(f"Total analyzed assets: {total_active['total_count']}")
+            
+            # Check if we're in the wrong schema/database
+            cursor.execute("SELECT current_database(), current_schema()")
+            db_info = cursor.fetchone()
+            logger.info(f"Current database: {db_info['current_database']}, schema: {db_info['current_schema']}")
+            
+            # Get all available content using same criteria as Schedule Analysis Report
+            # Join with instances table to get primary file paths
+            if include_expired:
+                # Include all content regardless of expiry date
+                cursor.execute("""
+                    SELECT 
+                        a.id as asset_id,
+                        i.file_path as content_title,
+                        a.duration_category,
+                        a.content_type,
+                        a.created_at as created_date,
+                        a.updated_at as last_updated,
+                        sm.content_expiry_date as expiration_date,
+                        CASE 
+                            WHEN sm.content_expiry_date IS NOT NULL AND sm.content_expiry_date < %s::date 
+                            THEN TRUE 
+                            ELSE FALSE 
+                        END as is_expired
+                    FROM assets a
+                    JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                    LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                    WHERE a.analysis_completed = TRUE
+                        AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
+                        AND i.file_path NOT LIKE 'FILL%%'
+                    ORDER BY a.duration_category, i.file_path
+                """, (schedule_date,))
+            else:
+                # Exclude expired content (original behavior)
+                cursor.execute("""
+                    SELECT 
+                        a.id as asset_id,
+                        i.file_path as content_title,
+                        a.duration_category,
+                        a.content_type,
+                        a.created_at as created_date,
+                        a.updated_at as last_updated,
+                        sm.content_expiry_date as expiration_date,
+                        FALSE as is_expired
+                    FROM assets a
+                    JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+                    LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                    WHERE a.analysis_completed = TRUE
+                        AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
+                        AND COALESCE(sm.content_expiry_date, %s::date + INTERVAL '1 year') > %s::date
+                        AND i.file_path NOT LIKE 'FILL%%'
+                    ORDER BY a.duration_category, i.file_path
+                """, (schedule_date, schedule_date))
+            
+            all_assets = cursor.fetchall()
+            cursor.close()
+            logger.info(f"Query returned {len(all_assets)} available assets")
+            
+            # Log sample of what we got
+            if all_assets:
+                logger.info(f"Sample asset: ID={all_assets[0]['asset_id']}, Title={all_assets[0]['content_title'][:30]}")
+        except Exception as e:
+            logger.error(f"Error fetching available assets: {e}")
+            all_assets = []
+        finally:
+            conn.commit()
+        
+        # Build usage tracking
+        used_assets = set()
+        usage_by_category = defaultdict(lambda: {'available': set(), 'used': set()})
+        usage_by_type = defaultdict(lambda: {'available': set(), 'used': set()})
+        asset_play_counts = defaultdict(int)
+        
+        # Track what was actually used in the schedule
+        for item in items:
+            if item.get('asset_id'):
+                asset_id = item['asset_id']
+                used_assets.add(asset_id)
+                asset_play_counts[asset_id] += 1
+                
+                category = item.get('duration_category', 'unknown')
+                content_type = item.get('content_type', 'unknown')
+                usage_by_category[category]['used'].add(asset_id)
+                usage_by_type[content_type]['used'].add(asset_id)
+        
+        # Track what was available
+        for asset in all_assets:
+            asset_id = asset['asset_id']
+            category = asset.get('duration_category', 'unknown')
+            content_type = asset.get('content_type', 'unknown')
+            usage_by_category[category]['available'].add(asset_id)
+            usage_by_type[content_type]['available'].add(asset_id)
+        
+        # Calculate usage rates
+        category_usage_rates = {}
+        for category, data in usage_by_category.items():
+            available_count = len(data['available'])
+            used_count = len(data['used'])
+            category_usage_rates[category] = {
+                'available': available_count,
+                'used': used_count,
+                'usage_rate': (used_count / available_count * 100) if available_count > 0 else 0,
+                'unused': available_count - used_count
+            }
+        
+        type_usage_rates = {}
+        for content_type, data in usage_by_type.items():
+            available_count = len(data['available'])
+            used_count = len(data['used'])
+            type_usage_rates[content_type] = {
+                'available': available_count,
+                'used': used_count,
+                'usage_rate': (used_count / available_count * 100) if available_count > 0 else 0,
+                'unused': available_count - used_count
+            }
+        
+        # Find underutilized content (available but never or rarely used)
+        underutilized = []
+        never_used = []
+        
+        for asset in all_assets:
+            asset_id = asset['asset_id']
+            play_count = asset_play_counts.get(asset_id, 0)
+            
+            asset_info = {
+                'asset_id': asset_id,
+                'title': asset['content_title'],
+                'category': asset['duration_category'],
+                'type': asset['content_type'],
+                'created_date': asset['created_date'].isoformat() if asset['created_date'] else None,
+                'days_in_library': (schedule_date - asset['created_date'].date()).days if asset['created_date'] and schedule_date else 999,
+                'play_count': play_count
+            }
+            
+            if play_count == 0:
+                never_used.append(asset_info)
+            elif play_count <= 2:  # Arbitrary threshold for "underutilized"
+                underutilized.append(asset_info)
+        
+        # Sort by days in library (oldest first)
+        never_used.sort(key=lambda x: x['days_in_library'], reverse=True)
+        underutilized.sort(key=lambda x: x['play_count'])
+        
+        # Calculate overall metrics
+        total_available = len(all_assets)
+        total_used = len(used_assets)
+        overall_usage_rate = (total_used / total_available * 100) if total_available > 0 else 0
+        
+        # Count expired content if including expired
+        expired_count = 0
+        if include_expired:
+            expired_count = sum(1 for asset in all_assets if asset.get('is_expired', False))
+        
+        # Generate insights
+        insights = []
+        
+        # Find categories with worst usage rates
+        worst_categories = sorted(
+            [(cat, data) for cat, data in category_usage_rates.items() if data['available'] > 0],
+            key=lambda x: x[1]['usage_rate']
+        )[:3]
+        
+        for category, data in worst_categories:
+            if data['usage_rate'] < 50:
+                insights.append(f"{category.upper()} content is underutilized - only {data['usage_rate']:.1f}% used ({data['used']}/{data['available']} items)")
+        
+        if len(never_used) > 10:
+            insights.append(f"{len(never_used)} content items have NEVER been used in this schedule")
+        
+        if overall_usage_rate < 30:
+            insights.append(f"Only {overall_usage_rate:.1f}% of available content library is being utilized")
+        
+        # Find content that's been in library longest without use
+        if never_used:
+            # Find first item with valid days_in_library
+            for unused in never_used:
+                if unused['days_in_library'] < 999 and unused['days_in_library'] > 30:
+                    insights.append(f"'{unused['title']}' has been in library for {unused['days_in_library']} days without being scheduled")
+                    break
+        
+        return {
+            'schedule': self._schedule_summary(schedule),
+            'overall_metrics': {
+                'total_available': total_available,
+                'total_used': total_used,
+                'usage_rate': overall_usage_rate,
+                'diversity_score': total_used / len(items) * 100 if len(items) > 0 else 0,
+                'include_expired': include_expired,
+                'expired_count': expired_count,
+                'active_count': total_available - expired_count
+            },
+            'category_usage': category_usage_rates,
+            'type_usage': type_usage_rates,
+            'never_used': never_used[:20],  # Top 20 never used
+            'underutilized': underutilized[:20],  # Top 20 underutilized
+            'insights': insights,
+            'chart_type': 'diversity-dashboard'
+        }

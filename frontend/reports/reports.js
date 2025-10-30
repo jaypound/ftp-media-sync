@@ -62,6 +62,13 @@ const reportsState = {
             requiresScheduleId: true
         },
         {
+            id: 'content-diversity-dashboard',
+            name: 'Content Diversity Dashboard',
+            description: 'Shows available vs used content, usage rates by category, and identifies underutilized content',
+            icon: 'fas fa-chart-pie',
+            requiresScheduleId: true
+        },
+        {
             id: 'available-content',
             name: 'Available Content Report',
             description: 'Analysis of available content by duration category, showing active and expired content',
@@ -181,6 +188,7 @@ async function reportsOpenReport(reportId) {
         case 'pareto-chart':
         case 'replay-gaps':
         case 'comprehensive-analysis':
+        case 'content-diversity-dashboard':
             await reportsLoadScheduleBasedReport(reportId);
             break;
         case 'available-content':
@@ -544,7 +552,16 @@ async function reportsLoadScheduleBasedReport(reportId) {
     const reportContent = document.getElementById('reportContent');
     const report = reportsState.availableReports.find(r => r.id === reportId);
     
-    // Show schedule selector
+    // Show schedule selector with additional options for diversity dashboard
+    const additionalOptions = reportId === 'content-diversity-dashboard' ? `
+        <div class="report-options" style="margin-top: 1rem;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" id="includeExpiredContent">
+                <span>Include expired content in analysis</span>
+            </label>
+        </div>
+    ` : '';
+    
     reportContent.innerHTML = `
         <div class="report-header">
             <button class="button secondary" onclick="reportsBackToMenu()">
@@ -563,6 +580,7 @@ async function reportsLoadScheduleBasedReport(reportId) {
                     <i class="fas fa-play"></i> Generate Report
                 </button>
             </div>
+            ${additionalOptions}
         </div>
         
         <div id="reportResults" class="report-results" style="display: none;">
@@ -642,12 +660,23 @@ async function reportsGenerateVisualization(reportId) {
     `;
     
     try {
-        const response = await window.API.post('/generate-report', {
+        // Check if we need to include expired content (for diversity dashboard)
+        let url = '/generate-report';
+        const includeExpired = reportId === 'content-diversity-dashboard' && 
+                              document.getElementById('includeExpiredContent')?.checked;
+        
+        if (includeExpired) {
+            url += '?include_expired=true';
+        }
+        
+        const response = await window.API.post(url, {
             report_type: reportId,
             schedule_id: parseInt(scheduleId)
         });
         
         if (response.success) {
+            // Store the report data
+            reportsState.reportData = response.data;
             reportsDisplayVisualization(reportId, response.data);
         } else {
             throw new Error(response.message || 'Failed to generate report');
@@ -715,6 +744,9 @@ function renderVisualization(reportId, data, container) {
         case 'comprehensive-analysis':
             html += renderComprehensiveAnalysis(data);
             break;
+        case 'content-diversity-dashboard':
+            html += renderContentDiversityDashboard(data);
+            break;
     }
     
     container.innerHTML = html;
@@ -743,10 +775,32 @@ function renderReplayDistribution(data) {
     // Check if all content is only played once
     const allSinglePlays = maxReplays === 1;
     
+    // Add day selector for weekly schedules
+    let daySelectorHtml = '';
+    if (data.is_weekly) {
+        daySelectorHtml = `
+            <div class="day-selector" style="margin: 1rem 0;">
+                <label style="font-weight: 600; margin-right: 0.5rem;">Filter by day:</label>
+                <select id="weeklyDayFilter" onchange="reportsFilterByDay()" class="form-select" style="display: inline-block; width: auto;">
+                    <option value="">All Days (Full Week)</option>
+                    <option value="0">Sunday</option>
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5">Friday</option>
+                    <option value="6">Saturday</option>
+                </select>
+                ${data.schedule.filtered_day !== undefined ? `<span style="margin-left: 1rem; color: #1976d2;"><i class="fas fa-info-circle"></i> Showing ${data.schedule.filtered_day_name} only</span>` : ''}
+            </div>
+        `;
+    }
+    
     return `
         <div class="report-section">
             <h3>Content Replay Distribution by Duration Category</h3>
-            <p>Shows how many times unique content items are replayed, forming a distribution curve.</p>
+            <p>${data.explanation || 'Shows how many times unique content items are replayed, forming a distribution curve.'}</p>
+            ${daySelectorHtml}
             ${allSinglePlays ? `
                 <div class="info-banner" style="background: #e3f2fd; color: #1976d2; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
                     <i class="fas fa-info-circle"></i> 
@@ -784,7 +838,7 @@ function renderReplayHeatmap(data) {
     return `
         <div class="report-section">
             <h3>Content Replay Timeline Heatmap</h3>
-            <p>Visual representation of when content is replayed throughout the day. Darker colors indicate more replays.</p>
+            <p>Visual representation of when content is replayed throughout the ${data.is_weekly ? 'week' : 'day'}. Darker colors indicate more replays.</p>
             <div class="heatmap-container" id="replayHeatmap">
                 <!-- Heatmap will be rendered here -->
             </div>
@@ -1093,6 +1147,86 @@ function renderComprehensiveAnalysis(data) {
     `;
 }
 
+function renderContentDiversityDashboard(data) {
+    const metrics = data.overall_metrics;
+    const categoryUsage = data.category_usage;
+    const typeUsage = data.type_usage;
+    
+    return `
+        <div class="report-section diversity-dashboard">
+            <h3>Content Diversity Dashboard</h3>
+            
+            <div class="overall-metrics">
+                <div class="metric-card">
+                    <h4>Library Usage</h4>
+                    <div class="metric-value">${metrics.usage_rate.toFixed(1)}%</div>
+                    <div class="metric-label">${metrics.total_used} of ${metrics.total_available} content items used</div>
+                    ${metrics.include_expired && metrics.expired_count > 0 ? 
+                        `<div class="metric-sublabel">${metrics.expired_count} expired, ${metrics.active_count} active</div>` : ''}
+                </div>
+                <div class="metric-card">
+                    <h4>Diversity Score</h4>
+                    <div class="metric-value">${metrics.diversity_score.toFixed(1)}%</div>
+                    <div class="metric-label">Unique content per slot</div>
+                </div>
+            </div>
+            
+            <div class="usage-by-category">
+                <h4>Usage by Duration Category</h4>
+                <div class="usage-grid">
+                    ${Object.entries(categoryUsage).map(([category, usage]) => `
+                        <div class="category-usage">
+                            <h5>${category.toUpperCase()}</h5>
+                            <div class="usage-bar">
+                                <div class="usage-fill" style="width: ${usage.usage_rate}%"></div>
+                            </div>
+                            <div class="usage-stats">
+                                <span>${usage.usage_rate.toFixed(1)}%</span>
+                                <span>${usage.used}/${usage.available}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div class="insights-section">
+                <h4>Key Insights</h4>
+                <ul class="insights-list">
+                    ${data.insights.map(insight => `<li>${insight}</li>`).join('')}
+                </ul>
+            </div>
+            
+            <div class="underutilized-content">
+                <h4>Never Used Content (${data.never_used.length} items)</h4>
+                <div class="content-list">
+                    ${data.never_used.slice(0, 10).map(item => `
+                        <div class="unused-item">
+                            <span class="title" title="${item.title}">${item.title}</span>
+                            <span class="category">${item.category}</span>
+                            <span class="days">${item.days_in_library} days in library</span>
+                        </div>
+                    `).join('')}
+                    ${data.never_used.length > 10 ? `<div class="more-items">... and ${data.never_used.length - 10} more items</div>` : ''}
+                </div>
+            </div>
+            
+            <div class="underutilized-content">
+                <h4>Underutilized Content (≤2 plays)</h4>
+                <div class="content-list">
+                    ${data.underutilized.slice(0, 10).map(item => `
+                        <div class="unused-item">
+                            <span class="title" title="${item.title}">${item.title}</span>
+                            <span class="category">${item.category}</span>
+                            <span class="plays">${item.play_count} plays</span>
+                        </div>
+                    `).join('')}
+                    ${data.underutilized.length > 10 ? `<div class="more-items">... and ${data.underutilized.length - 10} more items</div>` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 // Initialize charts based on report type
 function initializeCharts(reportId, data) {
     switch (reportId) {
@@ -1186,7 +1320,7 @@ function initReplayDistributionChart(data) {
                 x: {
                     title: {
                         display: true,
-                        text: 'Number of Plays'
+                        text: data.x_axis || 'Number of Plays'
                     },
                     min: 0,
                     max: Math.max(maxReplayCount + 1, 3),
@@ -1211,9 +1345,126 @@ function initReplayDistributionChart(data) {
 }
 
 function initReplayHeatmap(data) {
-    // Implement heatmap visualization
-    // This would require a heatmap library or custom implementation
-    console.log('Heatmap data:', data);
+    // Create heatmap using Canvas
+    const container = document.getElementById('replayHeatmap');
+    if (!container || !data.heatmap_data || data.heatmap_data.length === 0) {
+        if (container) {
+            container.innerHTML = '<p class="no-data">No replay data available for heatmap visualization.</p>';
+        }
+        return;
+    }
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Determine dimensions
+    const cellSize = data.is_weekly ? 6 : 20;  // Smaller cells for weekly view
+    const labelWidth = 200;
+    const labelHeight = 30;
+    const hours = data.max_hours || 24;
+    const contentCount = Object.keys(data.content_info).length;
+    
+    canvas.width = labelWidth + (hours * cellSize);
+    canvas.height = labelHeight + (contentCount * cellSize);
+    
+    // Set font
+    ctx.font = '12px Arial';
+    
+    // Draw hour labels
+    ctx.fillStyle = '#666';
+    ctx.font = data.is_weekly ? '10px Arial' : '12px Arial';
+    
+    if (data.is_weekly) {
+        // For weekly, show day markers
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        for (let d = 0; d < 7; d++) {
+            const x = labelWidth + (d * 24 * cellSize) + (12 * cellSize);
+            ctx.textAlign = 'center';
+            ctx.fillText(days[d], x, labelHeight - 5);
+        }
+    } else {
+        // For daily, show hourly labels
+        for (let h = 0; h < hours; h++) {
+            const x = labelWidth + (h * cellSize) + cellSize/2;
+            ctx.textAlign = 'center';
+            ctx.fillText(h.toString(), x, labelHeight - 5);
+        }
+    }
+    
+    // Draw content labels and heatmap cells
+    const maxPlays = data.max_plays || 1;
+    
+    // First, draw all cells as light gray (no plays)
+    ctx.fillStyle = '#f0f0f0';
+    for (let i = 0; i < contentCount; i++) {
+        // Draw content label
+        ctx.fillStyle = '#333';
+        ctx.textAlign = 'right';
+        const contentInfo = data.content_info[i];
+        const label = contentInfo ? contentInfo.title.substring(0, 25) : 'Unknown';
+        ctx.fillText(label, labelWidth - 5, labelHeight + (i * cellSize) + cellSize/2 + 4);
+        
+        // Draw empty cells
+        ctx.fillStyle = '#f0f0f0';
+        for (let h = 0; h < hours; h++) {
+            ctx.fillRect(labelWidth + (h * cellSize), labelHeight + (i * cellSize), cellSize - 1, cellSize - 1);
+        }
+    }
+    
+    // Draw actual data points
+    data.heatmap_data.forEach(point => {
+        const intensity = point.play_count / maxPlays;
+        const hue = 240 - (intensity * 60); // Blue to red gradient
+        const saturation = 50 + (intensity * 50);
+        ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${50 - intensity * 20}%)`;
+        
+        ctx.fillRect(
+            labelWidth + (point.hour * cellSize),
+            labelHeight + (point.content_index * cellSize),
+            cellSize - 1,
+            cellSize - 1
+        );
+    });
+    
+    container.appendChild(canvas);
+    
+    // Add tooltip functionality
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        if (x > labelWidth && y > labelHeight) {
+            const hour = Math.floor((x - labelWidth) / cellSize);
+            const contentIndex = Math.floor((y - labelHeight) / cellSize);
+            
+            if (hour >= 0 && hour < hours && contentIndex >= 0 && contentIndex < contentCount) {
+                // Find data point
+                const point = data.heatmap_data.find(p => 
+                    p.hour === hour && p.content_index === contentIndex
+                );
+                
+                if (point) {
+                    let timeLabel = '';
+                    if (data.is_weekly) {
+                        const day = Math.floor(hour / 24);
+                        const hourInDay = hour % 24;
+                        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        timeLabel = `${days[day]} ${hourInDay}:00`;
+                    } else {
+                        timeLabel = `Hour ${hour}`;
+                    }
+                    canvas.title = `${point.content_title}\n${timeLabel}: ${point.play_count} plays`;
+                } else {
+                    canvas.title = '';
+                }
+            }
+        }
+    });
 }
 
 function initReplayBoxplotChart(data) {
@@ -1945,6 +2196,56 @@ function reportsPrint() {
     window.print();
 }
 
+// Filter by day for weekly schedules
+async function reportsFilterByDay() {
+    const daySelect = document.getElementById('weeklyDayFilter');
+    if (!daySelect) return;
+    
+    const selectedDay = daySelect.value;
+    
+    // Get the schedule ID from the report data or state
+    const scheduleId = reportsState.reportData?.schedule?.id;
+    
+    if (!scheduleId) {
+        console.error('No schedule ID found in report data');
+        return;
+    }
+    
+    // Show loading state
+    const reportResults = document.getElementById('reportResults');
+    reportResults.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Regenerating report...</div>';
+    
+    try {
+        // Determine current report type
+        const currentReportId = reportsState.currentReport.id;
+        
+        // Build request with day filter
+        let requestData = {
+            report_type: currentReportId,
+            schedule_id: parseInt(scheduleId)
+        };
+        
+        // Add day filter to URL params
+        let url = '/generate-report';
+        if (selectedDay) {
+            url += `?day=${selectedDay}`;
+        }
+        
+        const response = await window.API.post(url, requestData);
+        
+        if (response.success) {
+            // Store the updated report data
+            reportsState.reportData = response.data;
+            renderVisualization(currentReportId, response.data, reportResults);
+        } else {
+            reportResults.innerHTML = `<div class="error">Failed to generate report: ${response.message || 'Unknown error'}</div>`;
+        }
+    } catch (error) {
+        console.error('Error filtering report:', error);
+        reportResults.innerHTML = '<div class="error">Failed to regenerate report</div>';
+    }
+}
+
 // Export functions
 window.reportsInit = reportsInit;
 window.reportsOpenReport = reportsOpenReport;
@@ -1954,3 +2255,4 @@ window.reportsLoadScheduleBasedReport = reportsLoadScheduleBasedReport;
 window.reportsBackToMenu = reportsBackToMenu;
 window.reportsExportToCSV = reportsExportToCSV;
 window.reportsPrint = reportsPrint;
+window.reportsFilterByDay = reportsFilterByDay;

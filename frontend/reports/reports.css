@@ -230,12 +230,17 @@ mark {
     border-radius: 8px;
     text-align: center;
     border: 1px solid var(--border-color);
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
 }
 
 .stat-value {
     font-size: 2.5rem;
     font-weight: bold;
     color: var(--primary-color);
+    margin: 0.5rem 0;
 }
 
 .stat-label {
@@ -548,6 +553,21 @@ body.dark-mode .type-badge {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    line-height: 1.4;
+}
+
+.stat-details span {
+    display: block;
+    white-space: nowrap;
+}
+
+.stat-card h4 {
+    font-size: 1rem;
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 /* Heatmap Styles */
@@ -948,4 +968,128 @@ body.dark-mode .type-badge {
     .score-circle {
         margin: 0 auto;
     }
+}
+
+/* Content Diversity Dashboard Styles */
+.diversity-dashboard .overall-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin: 2rem 0;
+}
+
+.diversity-dashboard .usage-by-category {
+    background: var(--card-background);
+    border-radius: 8px;
+    padding: 2rem;
+    margin: 2rem 0;
+}
+
+.diversity-dashboard .usage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.diversity-dashboard .category-usage {
+    background: var(--background-color);
+    border-radius: 6px;
+    padding: 1.5rem;
+}
+
+.diversity-dashboard .category-usage h5 {
+    margin: 0 0 1rem 0;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.diversity-dashboard .usage-bar {
+    background: #e0e0e0;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 0.5rem 0;
+}
+
+.diversity-dashboard .usage-fill {
+    height: 100%;
+    background: var(--primary-color);
+    transition: width 0.5s ease;
+}
+
+.diversity-dashboard .usage-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.diversity-dashboard .insights-section {
+    background: var(--info-bg);
+    border-left: 4px solid var(--info-color);
+    padding: 2rem;
+    margin: 2rem 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.diversity-dashboard .insights-list {
+    margin: 1rem 0 0 1.5rem;
+    list-style-type: disc;
+}
+
+.diversity-dashboard .insights-list li {
+    margin-bottom: 0.75rem;
+    line-height: 1.6;
+}
+
+.diversity-dashboard .underutilized-content {
+    background: var(--card-background);
+    border-radius: 8px;
+    padding: 2rem;
+    margin: 2rem 0;
+}
+
+.diversity-dashboard .content-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.diversity-dashboard .unused-item {
+    display: grid;
+    grid-template-columns: 1fr 150px 150px;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--background-color);
+    border-radius: 4px;
+    gap: 1rem;
+}
+
+.diversity-dashboard .unused-item .title {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.diversity-dashboard .unused-item .category {
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 0.875rem;
+}
+
+.diversity-dashboard .unused-item .days,
+.diversity-dashboard .unused-item .plays {
+    text-align: right;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.diversity-dashboard .more-items {
+    text-align: center;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 0.5rem;
 }

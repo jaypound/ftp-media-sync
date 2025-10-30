@@ -145,6 +145,23 @@ async function fillGraphicsLoadFiles(regionNum) {
         });
         
         if (response.success) {
+            // Sort files by creation date (newest first) for region 1 (graphics)
+            if (regionNum === 1) {
+                response.files.sort((a, b) => {
+                    // Sort by creation time, newest first
+                    // Try ctime (creation time) first, then fall back to mtime
+                    const aTime = a.ctime || a.mtime;
+                    const bTime = b.ctime || b.mtime;
+                    
+                    if (aTime && bTime) {
+                        return new Date(bTime) - new Date(aTime);
+                    }
+                    // Fall back to reverse alphabetical if no timestamps
+                    return b.name.localeCompare(a.name);
+                });
+                console.log('Sorted region 1 files by creation date (newest first)');
+            }
+            
             region.files = response.files;
             fillGraphicsDisplayFiles(regionNum, response.files);
             
@@ -335,12 +352,30 @@ async function fillGraphicsGenerateProjectFile(event) {
     
     try {
         console.log('DEBUG: Sending request with slide_duration:', slideDuration);
+        
+        // Get region1 files in sorted order (newest first by creation date)
+        const sortedRegion1Files = fillGraphicsState.region1.files
+            .filter(file => fillGraphicsState.region1.selected.includes(file.name))
+            .sort((a, b) => {
+                // Same sorting logic as when loading - newest first by creation date
+                const aTime = a.ctime || a.mtime;
+                const bTime = b.ctime || b.mtime;
+                
+                if (aTime && bTime) {
+                    return new Date(bTime) - new Date(aTime);
+                }
+                return b.name.localeCompare(a.name);
+            })
+            .map(file => file.name);
+        
+        console.log('Region 1 files for project (sorted newest first):', sortedRegion1Files);
+        
         const requestData = {
             project_name: projectName,
             export_path: pathInput.value,
             export_server: serverSelect.value,
             slide_duration: slideDuration,
-            region1_files: fillGraphicsState.region1.selected,
+            region1_files: sortedRegion1Files,
             region1_path: fillGraphicsState.region1.path,
             region2_file: fillGraphicsState.region2.selected,
             region2_path: fillGraphicsState.region2.path,
@@ -438,6 +473,23 @@ async function fillGraphicsGenerateVideoFile() {
     }
     
     try {
+        // Get region1 files in sorted order (newest first by creation date)
+        const sortedRegion1Files = fillGraphicsState.region1.files
+            .filter(file => fillGraphicsState.region1.selected.includes(file.name))
+            .sort((a, b) => {
+                // Same sorting logic as when loading - newest first by creation date
+                const aTime = a.ctime || a.mtime;
+                const bTime = b.ctime || b.mtime;
+                
+                if (aTime && bTime) {
+                    return new Date(bTime) - new Date(aTime);
+                }
+                return b.name.localeCompare(a.name);
+            })
+            .map(file => file.name);
+        
+        console.log('Region 1 files for video (sorted newest first):', sortedRegion1Files);
+        
         const requestData = {
             file_name: fileName,
             export_path: exportPath,
@@ -446,7 +498,7 @@ async function fillGraphicsGenerateVideoFile() {
             video_format: videoFormat,
             region1_server: fillGraphicsState.region1.server,
             region1_path: fillGraphicsState.region1.path,
-            region1_files: fillGraphicsState.region1.selected,
+            region1_files: sortedRegion1Files,
             region2_server: fillGraphicsState.region2.server,
             region2_path: fillGraphicsState.region2.path,
             region2_file: fillGraphicsState.region2.selected,
