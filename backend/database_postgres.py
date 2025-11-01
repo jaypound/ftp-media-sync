@@ -1140,7 +1140,7 @@ class PostgreSQLDatabaseManager:
         finally:
             self._put_connection(conn)
     
-    def get_analyzed_content_for_scheduling(self, content_type: str = '', duration_category: str = '', search: str = '') -> List[Dict[str, Any]]:
+    def get_analyzed_content_for_scheduling(self, content_type: str = '', duration_category: str = '', search: str = '', featured_filter: str = '') -> List[Dict[str, Any]]:
         """Get analyzed content for scheduling with filters"""
         if not self.connected:
             return []
@@ -1199,6 +1199,30 @@ class PostgreSQLDatabaseManager:
                 )"""
                 search_pattern = f'%{search}%'
                 params.extend([search_pattern, search_pattern, search_pattern])
+            
+            # Add featured filter if provided
+            if featured_filter == 'featured':
+                query += """ AND (
+                    CASE 
+                        WHEN EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'scheduling_metadata' 
+                            AND column_name = 'featured'
+                        ) THEN COALESCE(sm.featured, FALSE) = TRUE
+                        ELSE FALSE
+                    END
+                )"""
+            elif featured_filter == 'not_featured':
+                query += """ AND (
+                    CASE 
+                        WHEN EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_name = 'scheduling_metadata' 
+                            AND column_name = 'featured'
+                        ) THEN COALESCE(sm.featured, FALSE) = FALSE
+                        ELSE TRUE
+                    END
+                )"""
             
             # Filter by availability flag only
             # NOTE: Expiration date filtering should be done at schedule creation time

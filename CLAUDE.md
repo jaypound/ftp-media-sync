@@ -5,6 +5,97 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Related Documentation
 - [Content Rotation System](./CONTENT_ROTATION.md) - Detailed guide for configuring and troubleshooting the content rotation system
 
+## Current Work: Enhanced Featured Content System (2025-10-30)
+
+### Overview
+Implementing an improved featured content system with:
+1. Time-based decay for meeting relevance
+2. AI engagement score integration
+3. Daytime scheduling priority
+4. Separate replay delays for featured vs regular content
+
+### Implementation Plan
+
+#### Phase 1: Configuration Schema Updates ✅ (In Progress)
+- Add `featured_content` section to scheduling config
+- Add `meeting_relevance` configuration
+- Add `content_priorities` by type
+- Ensure backward compatibility
+
+#### Phase 2: Meeting Decay Logic (Pending)
+- Modify `get_featured_content()` in scheduler_postgres.py
+- Calculate meeting age from meeting_date
+- Apply relevance tiers (fresh/relevant/archive)
+- Adjust featured status based on age
+
+#### Phase 3: Daytime Priority (Pending)
+- Add time-of-day check to scheduling logic
+- Implement 75% daytime probability for featured content
+- Use existing timeslot configuration
+
+#### Phase 4: AI Engagement Integration (Pending)
+- Check for engagement_score in scheduling_metadata
+- Auto-feature high engagement content
+- Apply thresholds by content type
+
+#### Phase 5: Frontend Updates (Pending)
+- Add UI controls for featured content settings
+- Display meeting age and relevance status
+- Show featured content metrics in reports
+
+### Configuration Structure
+```json
+{
+  "scheduling": {
+    "featured_content": {
+      "daytime_hours": {"start": 6, "end": 18},
+      "daytime_probability": 0.75,
+      "minimum_spacing": 2,
+      "meeting_decay": true
+    },
+    "meeting_relevance": {
+      "fresh_days": 3,
+      "relevant_days": 7,
+      "archive_days": 14,
+      "expire_after": 18
+    },
+    "content_priorities": {
+      "MTG": {
+        "auto_feature_days": 3,
+        "engagement_threshold": 70,
+        "max_daily_plays": {
+          "fresh": 4,
+          "relevant": 2,
+          "archive": 1
+        }
+      }
+    },
+    "replay_delays": {
+      "featured": {
+        "id": 2,
+        "spots": 3,
+        "short_form": 4,
+        "long_form": 6
+      },
+      "regular": {
+        "id": 24,
+        "spots": 48,
+        "short_form": 72,
+        "long_form": 72
+      }
+    }
+  }
+}
+```
+
+### Progress Tracking
+- [ ] Update config_manager.py defaults
+- [ ] Modify scheduler_postgres.py featured content logic
+- [ ] Add meeting age calculation
+- [ ] Implement daytime scheduling bias
+- [ ] Test with weekly schedules
+- [ ] Update documentation
+
 ## Development Commands
 
 ### Running the Application

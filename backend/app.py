@@ -1,13 +1,20 @@
+# -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 import json
 import os
+import sys
 from dotenv import load_dotenv
 from ftp_manager import FTPManager
 from file_scanner import FileScanner
 from config_manager import ConfigManager
 from file_analyzer import file_analyzer
 from database import db_manager
+
+# Ensure UTF-8 encoding
+if sys.version_info[0] < 3:
+    reload(sys)
+    sys.setdefaultencoding('utf-8')
 # from scheduler import scheduler  # MongoDB scheduler - no longer used
 from scheduler_postgres import scheduler_postgres
 from scheduler_jobs import SchedulerJobs
@@ -2579,6 +2586,139 @@ def save_ai_config():
         logger.error(f"Error saving AI config: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/ai/test-connection', methods=['POST'])
+def test_ai_connection():
+    """Test AI provider connection"""
+    try:
+        data = request.json
+        provider = data.get('provider', 'openai')
+        model = data.get('model')
+        
+        logger.info(f"Testing AI connection: provider={provider}, model={model}")
+        
+        # Debug log the data received
+        logger.debug(f"Received data keys: {list(data.keys())}")
+        logger.debug(f"Provider: {provider}, Model: {model}")
+        
+        # Create a test AI analyzer instance
+        from ai_analyzer import AIAnalyzer
+        
+        # Ensure all strings are properly encoded
+        try:
+            api_key = data.get(f'{provider}_api_key', '')
+            if api_key:
+                # Ensure it's a string and handle any encoding issues
+                if isinstance(api_key, bytes):
+                    api_key = api_key.decode('utf-8', errors='replace')
+                else:
+                    api_key = str(api_key)
+            
+            test_analyzer = AIAnalyzer(
+                api_provider=provider,
+                api_key=api_key,
+                model=str(model) if model else None,
+                ollama_url=str(data.get('ollama_url', 'http://localhost:11434')),
+                auto_setup=False
+            )
+        except UnicodeError as ue:
+            logger.error(f"Unicode error creating test analyzer: {ue}")
+            return jsonify({
+                'success': False,
+                'message': 'There was an encoding issue with the API key. Please check your API key contains only valid characters.'
+            })
+        
+        # Try to setup the client
+        try:
+            test_analyzer.setup_client()
+        except Exception as setup_error:
+            logger.error(f"Error setting up AI client: {str(setup_error)}")
+            return jsonify({
+                'success': False,
+                'message': f'Failed to setup {provider} client: {str(setup_error)}'
+            })
+        
+        if test_analyzer.client is None and provider != 'ollama':
+            return jsonify({
+                'success': False,
+                'message': f'Failed to initialize {provider} client. Please check your API key.'
+            })
+        
+        # Test with a simple prompt
+        test_text = "Hello, this is a test."
+        
+        try:
+            if provider == 'openai':
+                response = test_analyzer.client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": test_text}],
+                    max_tokens=10
+                )
+                return jsonify({
+                    'success': True,
+                    'message': f'Successfully connected to OpenAI with model {model}'
+                })
+                
+            elif provider == 'anthropic':
+                response = test_analyzer.client.messages.create(
+                    model=model,
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": test_text}]
+                )
+                return jsonify({
+                    'success': True,
+                    'message': f'Successfully connected to Anthropic with model {model}'
+                })
+                
+            elif provider == 'ollama':
+                import requests
+                url = f"{data.get('ollama_url', 'http://localhost:11434')}/api/generate"
+                response = requests.post(url, json={
+                    "model": model,
+                    "prompt": test_text,
+                    "stream": False
+                }, timeout=5)
+                
+                if response.status_code == 200:
+                    return jsonify({
+                        'success': True,
+                        'message': f'Successfully connected to Ollama with model {model}'
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': f'Ollama connection failed: {response.text}'
+                    })
+                    
+        except Exception as e:
+            error_msg = str(e)
+            if "not_found_error" in error_msg:
+                return jsonify({
+                    'success': False,
+                    'message': f'Model "{model}" not found. Please select a valid model for {provider}.'
+                })
+            elif "authentication" in error_msg.lower() or "api" in error_msg.lower():
+                return jsonify({
+                    'success': False,
+                    'message': f'Authentication failed. Please check your {provider} API key.'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': f'Connection test failed: {error_msg}'
+                })
+        
+        return jsonify({
+            'success': False,
+            'message': f'Unknown provider: {provider}'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error testing AI connection: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Test failed: {str(e)}'
+        })
+
 @app.route('/api/analyzed-content', methods=['POST'])
 def get_analyzed_content():
     """Get analyzed content for scheduling with filters"""
@@ -2588,8 +2728,9 @@ def get_analyzed_content():
         content_type = data.get('content_type', '')
         duration_category = data.get('duration_category', '')
         search = data.get('search', '').lower()
+        featured_filter = data.get('featured_filter', '')
         
-        logger.info(f"Filters: content_type={content_type}, duration_category={duration_category}, search={search}")
+        logger.info(f"Filters: content_type={content_type}, duration_category={duration_category}, featured={featured_filter}, search={search}")
         
         # Connect to database if not already connected
         if not db_manager.connected:
@@ -2604,7 +2745,8 @@ def get_analyzed_content():
         content_list = db_manager.get_analyzed_content_for_scheduling(
             content_type=content_type,
             duration_category=duration_category,
-            search=search
+            search=search,
+            featured_filter=featured_filter
         )
         
         logger.info(f"Found {len(content_list)} content items")
@@ -7727,9 +7869,10 @@ def fill_template_gaps():
             else:
                 logger.info(f"\n--- Processing Gap {gap_idx + 1}/{len(gaps)} ---")
             
-            # Skip very small gaps (less than 10 seconds)
-            if gap_duration < 10:
-                logger.info(f"Skipping gap of {gap_duration:.1f} seconds (too small to fill)")
+            # Skip very small gaps (less than minimum content duration)
+            skip_threshold = min_content_duration if min_content_duration > 0 else 10
+            if gap_duration < skip_threshold:
+                logger.info(f"Skipping gap of {gap_duration:.1f} seconds (too small to fill, min content: {skip_threshold:.1f}s)")
                 continue
             
             logger.info(f"Filling gap from {gap_start/3600:.1f}h to {gap_end/3600:.1f}h (duration: {gap_duration/3600:.1f}h)")
@@ -8238,9 +8381,10 @@ def fill_template_gaps():
                                 # Check if current position is within threshold of midnight
                                 is_end_of_day = seconds_in_day >= 86400 - end_of_day_threshold  # Within 2 hours of midnight
                             
-                            # Check if gap is too small to fill (less than 10 seconds)
-                            if remaining < 10:
-                                logger.info(f"Gap of {remaining:.1f} seconds is too small to fill. Moving to next gap.")
+                            # Check if gap is too small to fill (less than minimum content duration)
+                            min_gap_threshold = min_content_duration if min_content_duration > 0 else 15  # Use actual min or 15s fallback
+                            if remaining < min_gap_threshold:
+                                logger.info(f"Gap of {remaining:.1f} seconds is too small to fill (min content: {min_gap_threshold:.1f}s). Moving to next gap.")
                                 break
                             
                             if is_end_of_day:
@@ -8406,9 +8550,10 @@ def fill_template_gaps():
                                         logger.debug(f"  {cat}: 0 items")
                                 
                                 # Check if gap is small enough to accept
-                                minimum_fillable_gap = 10  # 10 seconds minimum
+                                # Use actual minimum content duration instead of hardcoded value
+                                minimum_fillable_gap = min_content_duration if min_content_duration > 0 else 15  # Use actual min or 15s fallback
                                 if remaining < minimum_fillable_gap:
-                                    logger.info(f"Gap of {remaining:.1f} seconds is below minimum fillable threshold. Accepting unfilled gap.")
+                                    logger.info(f"Gap of {remaining:.1f} seconds is below minimum fillable threshold ({minimum_fillable_gap:.1f}s). Accepting unfilled gap.")
                                     break
                                 
                                 # For gaps less than 1 minute, be more lenient
@@ -12882,23 +13027,29 @@ def toggle_scheduler():
 @app.route('/api/scheduler/run-now', methods=['POST'])
 def run_sync_now():
     """Manually trigger the sync all expirations job"""
-    global scheduler_jobs
-    
     try:
-        # Initialize scheduler if needed
-        if scheduler_jobs is None:
-            scheduler_jobs = SchedulerJobs(db_manager, config_manager)
-            
+        logger.info("Manual sync requested via API")
+        
+        # Ensure database is connected
+        if not db_manager.connected:
+            logger.info("Connecting to database for manual sync")
+            db_manager.connect()
+        
+        # Create a fresh scheduler instance for this sync
+        logger.info("Creating scheduler instance for manual sync")
+        temp_scheduler = SchedulerJobs(db_manager, config_manager)
+        
+        logger.info("Running sync_all_expirations_from_castus")
         # Run the sync job
-        scheduler_jobs.sync_all_expirations_from_castus()
+        temp_scheduler.sync_all_expirations_from_castus()
         
         return jsonify({
             'success': True,
-            'message': 'Sync job started successfully'
+            'message': 'Sync job started successfully. Check scheduler logs for details.'
         })
         
     except Exception as e:
-        logger.error(f"Error running sync job: {str(e)}")
+        logger.error(f"Error running sync job: {str(e)}", exc_info=True)
         return jsonify({'success': False, 'message': str(e)})
 
 # ============================================================================

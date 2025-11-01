@@ -32,11 +32,11 @@
                     <i class="fas fa-home"></i>
                     Dashboard
                 </button>
-                <button class="nav-item" onclick="showPanel('servers')">
+                <button class="nav-item" onclick="showPanel('servers')" style="display: none;">
                     <i class="fas fa-server"></i>
                     Servers
                 </button>
-                <button class="nav-item" onclick="showPanel('settings')">
+                <button class="nav-item" onclick="showPanel('settings')" style="display: none;">
                     <i class="fas fa-cog"></i>
                     Settings
                 </button>
@@ -44,7 +44,7 @@
                     <i class="fas fa-brain"></i>
                     AI Settings
                 </button>
-                <button class="nav-item" onclick="showPanel('admin')">
+                <button class="nav-item" onclick="showPanel('admin')" style="display: none;">
                     <i class="fas fa-tools"></i>
                     Admin
                 </button>
@@ -419,8 +419,9 @@
                         <select id="aiModel" class="form-control">
                             <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
                             <option value="gpt-4">GPT-4</option>
-                            <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                            <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
                             <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                            <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
                         </select>
                     </div>
                 </div>
@@ -560,6 +561,11 @@
                                 <option value="short_form">Short Form (2-20min)</option>
                                 <option value="long_form">Long Form (> 20min)</option>
                             </select>
+                            <select id="featuredFilter">
+                                <option value="">All Content</option>
+                                <option value="featured">Featured Only</option>
+                                <option value="not_featured">Non-Featured Only</option>
+                            </select>
                         </div>
                         <div class="filter-row">
                             <input type="text" id="contentSearchFilter" placeholder="Search content titles...">
@@ -593,6 +599,9 @@
                         </button>
                         <button class="button secondary" onclick="showScheduleConfig('rotation')">
                             <i class="fas fa-sync-alt"></i> Category Rotation
+                        </button>
+                        <button class="button secondary" onclick="showScheduleConfig('featured')">
+                            <i class="fas fa-star"></i> Featured Content
                         </button>
                         </div>
                     </div>
@@ -1026,6 +1035,9 @@
                 <button class="button secondary small" id="toggleUnanalyzedOnlyBtn" onclick="toggleUnanalyzedOnly()" style="display: none; margin-left: 0.5rem;">
                     <i class="fas fa-filter"></i> Show Unanalyzed Only
                 </button>
+                <button class="button secondary small" id="toggleZeroEngagementBtn" onclick="toggleZeroEngagement()" style="display: none; margin-left: 0.5rem;">
+                    <i class="fas fa-exclamation-triangle"></i> Show Zero Engagement
+                </button>
                 <select id="scannedFilesContentTypeFilter" class="form-control" style="display: none; margin-left: 0.5rem; width: auto; max-width: 200px;" onchange="filterScannedFilesByContentType()">
                     <option value="">All Content Types</option>
                     <option value="AN">AN - Atlanta Now</option>
@@ -1074,7 +1086,7 @@
                 </div>
                 <div class="comparison-buttons">
                     <button class="button secondary small" id="toggleComparisonBtn" onclick="toggleComparisonView()">
-                        <i class="fas fa-eye-slash"></i> Show Analyzed Files
+                        <i class="fas fa-eye"></i> Show All Files
                     </button>
                     <button class="button secondary small" id="toggleTargetOnlyBtn" onclick="toggleTargetOnlyView()">
                         <i class="fas fa-eye"></i> Show Target-Only Files

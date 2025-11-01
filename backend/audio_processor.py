@@ -8,6 +8,19 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Create dedicated logger for transcription
+transcription_logger = logging.getLogger('ai_transcription')
+
+# Set up file handler for transcription logs if not already setup
+if not transcription_logger.handlers:
+    logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    trans_handler = logging.FileHandler(os.path.join(logs_dir, f'ai_transcription_{datetime.now().strftime("%Y%m%d")}.log'))
+    trans_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    transcription_logger.addHandler(trans_handler)
+    transcription_logger.setLevel(logging.INFO)
+
 def validate_language(detected_language):
     """
     Validate detected language and ensure it's only English or Spanish.
@@ -64,9 +77,10 @@ def validate_language(detected_language):
     return 'en'
 
 class AudioProcessor:
-    def __init__(self, model_size="base", device="cpu"):
+    def __init__(self, model_size="base", device="cpu", compute_type="int8"):
         self.model_size = model_size
         self.device = device
+        self.compute_type = compute_type  # Add compute_type attribute
         self.model = None
         self.temp_dir = tempfile.gettempdir()
         
@@ -74,8 +88,8 @@ class AudioProcessor:
         """Load the Whisper model"""
         try:
             if not self.model:
-                logger.info(f"Loading Whisper model: {self.model_size}")
-                self.model = WhisperModel(self.model_size, device=self.device)
+                logger.info(f"Loading Whisper model: {self.model_size}, device: {self.device}, compute_type: {self.compute_type}")
+                self.model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
                 logger.info("Whisper model loaded successfully")
             return True
         except Exception as e:
@@ -205,9 +219,30 @@ class AudioProcessor:
                 logger.error(f"Audio file is empty: {audio_path}")
                 return None
             
+            # Extract filename for logging
+            file_name = os.path.basename(audio_path)
+            file_dir = os.path.dirname(audio_path)
+            
+            # Log transcription request details
+            transcription_logger.info(f"{'='*80}")
+            transcription_logger.info(f"WHISPER TRANSCRIPTION REQUEST - {datetime.now().isoformat()}")
+            transcription_logger.info(f"File Name: {file_name}")
+            transcription_logger.info(f"Full Path: {audio_path}")
+            transcription_logger.info(f"Directory: {file_dir}")
+            transcription_logger.info(f"File Size: {audio_size:,} bytes ({audio_size/1024/1024:.2f} MB)")
+            transcription_logger.info(f"Whisper Model: {self.model_size}")
+            transcription_logger.info(f"Device: {self.device}")
+            transcription_logger.info(f"Compute Type: {self.compute_type}")
+            transcription_logger.info(f"Beam Size: 5")
+            
+            start_time = datetime.now()
+            
             # Transcribe with Whisper
             logger.info("Starting Whisper transcription...")
             segments, info = self.model.transcribe(audio_path, beam_size=5)
+            
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
             
             # Collect all segments
             transcript_segments = []
@@ -227,8 +262,22 @@ class AudioProcessor:
             logger.info(f"Transcription completed. Detected language: {info.language}, Validated language: {validated_language}, Duration: {info.duration:.2f}s")
             logger.info(f"Transcript length: {len(full_transcript)} characters")
             
+            # Log transcription response details
+            transcription_logger.info(f"WHISPER TRANSCRIPTION RESPONSE - {end_time.isoformat()}")
+            transcription_logger.info(f"File Name: {file_name}")
+            transcription_logger.info(f"Processing Duration: {duration:.2f} seconds")
+            transcription_logger.info(f"Audio Duration: {info.duration:.2f} seconds")
+            transcription_logger.info(f"Processing Speed: {info.duration/duration:.2f}x realtime")
+            transcription_logger.info(f"Detected Language: {info.language}")
+            transcription_logger.info(f"Validated Language: {validated_language}")
+            transcription_logger.info(f"Number of Segments: {len(transcript_segments)}")
+            transcription_logger.info(f"Transcript Length: {len(full_transcript)} characters")
+            transcription_logger.info(f"First 500 chars: {full_transcript[:500]}..." if len(full_transcript) > 500 else f"Full transcript: {full_transcript}")
+            transcription_logger.info(f"{'='*80}\n")
+            
             if len(full_transcript) == 0:
                 logger.warning("Transcription resulted in empty text")
+                transcription_logger.warning(f"EMPTY TRANSCRIPT for file: {file_name}")
             
             return {
                 "transcript": full_transcript,
@@ -239,6 +288,15 @@ class AudioProcessor:
             
         except Exception as e:
             logger.error(f"Error transcribing audio: {str(e)}")
+            # Log transcription error
+            if 'file_name' in locals():
+                transcription_logger.error(f"{'='*80}")
+                transcription_logger.error(f"WHISPER TRANSCRIPTION ERROR - {datetime.now().isoformat()}")
+                transcription_logger.error(f"File Name: {file_name}")
+                transcription_logger.error(f"Full Path: {audio_path}")
+                transcription_logger.error(f"Error: {str(e)}")
+                transcription_logger.error(f"Error Type: {type(e).__name__}")
+                transcription_logger.error(f"{'='*80}\n")
             return None
     
     def process_video_file(self, video_path, keep_audio=False):

@@ -18,10 +18,10 @@ function filterScannedFilesByContentType() {
 
 // Content type filter for comparison results
 function filterComparisonByContentType() {
-    const filterValue = document.getElementById('comparisonContentTypeFilter').value;
-    const fileList = document.getElementById('fileList');
-    
-    filterFileListByContentType(fileList, filterValue);
+    // Re-render comparison results which will apply the content type filter
+    if (typeof renderComparisonResults === 'function') {
+        renderComparisonResults();
+    }
 }
 
 // Helper function to filter file lists by content type

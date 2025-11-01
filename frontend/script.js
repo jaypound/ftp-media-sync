@@ -31,6 +31,7 @@ let showAllFiles = false; // Toggle for showing all files vs unsynced only
 let showTargetOnly = false; // Toggle for showing target-only files
 let showAnalysisAll = false; // Toggle for showing all analysis files
 let showUnanalyzedOnly = true; // Toggle for showing only unanalyzed files in scanned files (default to true)
+let showZeroEngagement = false; // Toggle for showing only files with zero engagement score
 let isScanning = false;
 let isSyncing = false;
 let isAnalyzing = false;
@@ -428,10 +429,23 @@ function renderComparisonResults() {
     const fileListDiv = document.getElementById('fileList');
     fileListDiv.innerHTML = '';
     
+    // Get current content type filter
+    const contentTypeFilter = document.getElementById('comparisonContentTypeFilter')?.value || '';
+    
     if (showTargetOnly) {
         // Show only target-only files
         fileListDiv.classList.remove('dashboard-comparison-container');
-        targetOnlyFiles.forEach(result => {
+        
+        // Filter target-only files by content type
+        let filteredTargetOnlyFiles = targetOnlyFiles;
+        if (contentTypeFilter) {
+            const pattern = `_${contentTypeFilter}_`;
+            filteredTargetOnlyFiles = targetOnlyFiles.filter(result => 
+                result.targetFile.name.includes(pattern)
+            );
+        }
+        
+        filteredTargetOnlyFiles.forEach(result => {
             const fileItem = document.createElement('div');
             fileItem.className = 'file-item target-only';
             
@@ -475,9 +489,17 @@ function renderComparisonResults() {
         targetSection.innerHTML = '<h4><i class="fas fa-folder-plus"></i> Target-Only Files</h4>';
         
         // Add files that need syncing to source section
-        const resultsToShow = showAllFiles ? allComparisonResults : allComparisonResults.filter(result => 
+        let resultsToShow = showAllFiles ? allComparisonResults : allComparisonResults.filter(result => 
             result.status !== 'identical' || result.justSynced
         );
+        
+        // Apply content type filter
+        if (contentTypeFilter) {
+            const pattern = `_${contentTypeFilter}_`;
+            resultsToShow = resultsToShow.filter(result => 
+                result.sourceFile.name.includes(pattern)
+            );
+        }
         let hasSourceDifferences = false;
         
         console.log('Rendering comparison results:', {
@@ -562,11 +584,25 @@ function renderComparisonResults() {
             placeholder.className = 'dashboard-empty-state';
             placeholder.innerHTML = '<p style="color: #666; text-align: center;">All files are in sync</p>';
             sourceSection.appendChild(placeholder);
+        } else if (resultsToShow.length === 0 && contentTypeFilter) {
+            // No files match the content type filter
+            const placeholder = document.createElement('div');
+            placeholder.className = 'dashboard-empty-state';
+            placeholder.innerHTML = `<p style="color: #666; text-align: center;">No ${contentTypeFilter} files found</p>`;
+            sourceSection.appendChild(placeholder);
         }
         
         // Add target-only files to target section
-        if (targetOnlyFiles.length > 0) {
-            targetOnlyFiles.forEach(result => {
+        let filteredTargetOnlyFiles = targetOnlyFiles;
+        if (contentTypeFilter) {
+            const pattern = `_${contentTypeFilter}_`;
+            filteredTargetOnlyFiles = targetOnlyFiles.filter(result => 
+                result.targetFile.name.includes(pattern)
+            );
+        }
+        
+        if (filteredTargetOnlyFiles.length > 0) {
+            filteredTargetOnlyFiles.forEach(result => {
                 const fileItem = document.createElement('div');
                 fileItem.className = 'file-item target-only';
                 
@@ -599,7 +635,11 @@ function renderComparisonResults() {
         } else {
             const placeholder = document.createElement('div');
             placeholder.className = 'dashboard-empty-state';
-            placeholder.innerHTML = '<p style="color: #666; text-align: center;">No target-only files</p>';
+            if (contentTypeFilter) {
+                placeholder.innerHTML = `<p style="color: #666; text-align: center;">No ${contentTypeFilter} files found on target only</p>`;
+            } else {
+                placeholder.innerHTML = '<p style="color: #666; text-align: center;">No target-only files</p>';
+            }
             targetSection.appendChild(placeholder);
         }
         
@@ -634,14 +674,30 @@ function displayScannedFiles() {
     updateScannedFilesSummary();
     
     // Calculate filtered counts
-    const filteredSourceFiles = showUnanalyzedOnly ? 
-        sourceFiles.filter(file => !(file.is_analyzed || false)) : 
-        sourceFiles;
+    let filteredSourceFiles = sourceFiles;
+    
+    // Apply unanalyzed filter
+    if (showUnanalyzedOnly) {
+        filteredSourceFiles = filteredSourceFiles.filter(file => !(file.is_analyzed || false));
+    }
+    
+    // Apply zero engagement filter
+    if (showZeroEngagement) {
+        filteredSourceFiles = filteredSourceFiles.filter(file => {
+            const engagementScore = file.analysis_info?.engagement_score;
+            return engagementScore === 0;
+        });
+    }
     
     // Update file counts
-    const sourceCountText = showUnanalyzedOnly ? 
-        `${filteredSourceFiles.length} unanalyzed files (${sourceFiles.length} total)` :
-        `${sourceFiles.length} files found`;
+    let sourceCountText;
+    if (showZeroEngagement) {
+        sourceCountText = `${filteredSourceFiles.length} zero engagement files (${sourceFiles.length} total)`;
+    } else if (showUnanalyzedOnly) {
+        sourceCountText = `${filteredSourceFiles.length} unanalyzed files (${sourceFiles.length} total)`;
+    } else {
+        sourceCountText = `${sourceFiles.length} files found`;
+    }
     
     sourceFileCount.textContent = sourceCountText;
     sourceFileCount.setAttribute('data-original-text', sourceCountText);
@@ -670,9 +726,16 @@ function displayScannedFiles() {
         const hasEngagementScore = engagementScore !== undefined && engagementScore !== null;
         console.log(`File ${file.name} analyzed status:`, isAnalyzed, 'engagement:', engagementScore);
         
-        // Filter based on showUnanalyzedOnly toggle
+        // Filter based on toggles
         if (showUnanalyzedOnly && isAnalyzed) {
             return; // Skip analyzed files when showing unanalyzed only
+        }
+        
+        if (showZeroEngagement) {
+            const score = file.analysis_info?.engagement_score;
+            if (score === undefined || score === null || score !== 0) {
+                return; // Skip files without zero engagement
+            }
         }
         
         fileItem.innerHTML = `
@@ -704,14 +767,30 @@ function displayScannedFiles() {
     targetFilesList.innerHTML = '';
     
     // Calculate filtered target files
-    const filteredTargetFiles = showUnanalyzedOnly ? 
-        targetFiles.filter(file => !(file.is_analyzed || false)) : 
-        targetFiles;
+    let filteredTargetFiles = targetFiles;
+    
+    // Apply unanalyzed filter
+    if (showUnanalyzedOnly) {
+        filteredTargetFiles = filteredTargetFiles.filter(file => !(file.is_analyzed || false));
+    }
+    
+    // Apply zero engagement filter
+    if (showZeroEngagement) {
+        filteredTargetFiles = filteredTargetFiles.filter(file => {
+            const engagementScore = file.analysis_info?.engagement_score;
+            return engagementScore === 0;
+        });
+    }
     
     // Update target file count to match the filtered count
-    const targetCountText = showUnanalyzedOnly ? 
-        `${filteredTargetFiles.length} unanalyzed files (${targetFiles.length} total)` :
-        `${targetFiles.length} files found`;
+    let targetCountText;
+    if (showZeroEngagement) {
+        targetCountText = `${filteredTargetFiles.length} zero engagement files (${targetFiles.length} total)`;
+    } else if (showUnanalyzedOnly) {
+        targetCountText = `${filteredTargetFiles.length} unanalyzed files (${targetFiles.length} total)`;
+    } else {
+        targetCountText = `${targetFiles.length} files found`;
+    }
     targetFileCount.textContent = targetCountText;
     targetFileCount.setAttribute('data-original-text', targetCountText);
     
@@ -2118,6 +2197,7 @@ function toggleScannedFiles() {
     const summaryDiv = document.getElementById('scannedFilesSummary');
     const toggleBtn = document.getElementById('toggleScannedFilesBtn');
     const filterBtn = document.getElementById('toggleUnanalyzedOnlyBtn');
+    const zeroEngagementBtn = document.getElementById('toggleZeroEngagementBtn');
     const contentTypeFilter = document.getElementById('scannedFilesContentTypeFilter');
     
     if (detailsDiv.style.display === 'none') {
@@ -2125,6 +2205,11 @@ function toggleScannedFiles() {
         summaryDiv.style.display = 'none';
         toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide Details';
         filterBtn.style.display = 'inline-block'; // Show filter button when details are shown
+        
+        // Show zero engagement button when details are shown
+        if (zeroEngagementBtn) {
+            zeroEngagementBtn.style.display = 'inline-block';
+        }
         
         // Show content type filter when details are shown
         if (contentTypeFilter) {
@@ -2135,6 +2220,11 @@ function toggleScannedFiles() {
         summaryDiv.style.display = 'block';
         toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show Details';
         filterBtn.style.display = 'none'; // Hide filter button when details are hidden
+        
+        // Hide zero engagement button when details are hidden
+        if (zeroEngagementBtn) {
+            zeroEngagementBtn.style.display = 'none';
+        }
         
         // Hide content type filter when details are hidden
         if (contentTypeFilter) {
@@ -2151,8 +2241,40 @@ function toggleUnanalyzedOnly() {
     if (showUnanalyzedOnly) {
         toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Show Analyzed Files';
         toggleBtn.className = 'button warning small';
+        
+        // Turn off zero engagement filter when unanalyzed filter is on
+        if (showZeroEngagement) {
+            showZeroEngagement = false;
+            const zeroEngagementBtn = document.getElementById('toggleZeroEngagementBtn');
+            zeroEngagementBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Show Zero Engagement';
+            zeroEngagementBtn.className = 'button secondary small';
+        }
     } else {
         toggleBtn.innerHTML = '<i class="fas fa-filter"></i> Show Unanalyzed Only';
+        toggleBtn.className = 'button secondary small';
+    }
+    
+    // Re-render the scanned files with the new filter
+    displayScannedFiles();
+}
+
+function toggleZeroEngagement() {
+    showZeroEngagement = !showZeroEngagement;
+    const toggleBtn = document.getElementById('toggleZeroEngagementBtn');
+    
+    if (showZeroEngagement) {
+        toggleBtn.innerHTML = '<i class="fas fa-check"></i> Show All Engagement';
+        toggleBtn.className = 'button danger small';
+        
+        // Turn off unanalyzed filter when zero engagement filter is on
+        if (showUnanalyzedOnly) {
+            showUnanalyzedOnly = false;
+            const unanalyzedBtn = document.getElementById('toggleUnanalyzedOnlyBtn');
+            unanalyzedBtn.innerHTML = '<i class="fas fa-filter"></i> Show Unanalyzed Only';
+            unanalyzedBtn.className = 'button secondary small';
+        }
+    } else {
+        toggleBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Show Zero Engagement';
         toggleBtn.className = 'button secondary small';
     }
     
@@ -2639,38 +2761,52 @@ function updateModelOptions(provider) {
 async function testAIConnection() {
     try {
         const provider = document.getElementById('aiProvider').value;
-        const apiKey = provider === 'openai' ? 
-            document.getElementById('openaiApiKey').value : 
-            document.getElementById('anthropicApiKey').value;
+        let apiKey;
         
-        if (!apiKey) {
-            log('Please enter an API key before testing connection', 'error');
+        if (provider === 'openai') {
+            apiKey = document.getElementById('openaiApiKey').value;
+        } else if (provider === 'anthropic') {
+            apiKey = document.getElementById('anthropicApiKey').value;
+        }
+        
+        if (!apiKey && provider !== 'ollama') {
+            showNotification('Error', 'Please enter an API key before testing connection', 'error');
             return;
         }
         
-        log(`Testing ${provider} connection...`);
+        showNotification('Testing AI Connection', `Testing ${provider} connection...`, 'info');
         
-        // Create a test file for analysis
-        const testFile = {
-            name: 'test_connection.mp4',
-            path: 'test_connection.mp4',
-            size: 1000000
-        };
-        
-        const aiConfig = {
-            enabled: true,
+        // Prepare test configuration
+        const testConfig = {
             provider: provider,
             model: document.getElementById('aiModel').value,
-            api_key: apiKey,
-            max_chunk_size: 1000
+            openai_api_key: provider === 'openai' ? apiKey : '',
+            anthropic_api_key: provider === 'anthropic' ? apiKey : '',
+            ollama_url: document.getElementById('ollamaUrl')?.value || 'http://localhost:11434'
         };
         
-        // We'll just test if the settings are valid by saving them
-        await saveAISettings();
-        log(`${provider} connection test completed - settings saved`);
+        // Call the test endpoint
+        const response = await fetch('/api/ai/test-connection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(testConfig)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('Success', `AI connection test successful!\n\nProvider: ${provider}\nModel: ${testConfig.model}\n${result.message || ''}`, 'success', 5000);
+            log(`✅ ${provider} connection test successful`, 'success');
+        } else {
+            showNotification('Connection Failed', `AI connection test failed:\n\n${result.message || 'Unknown error'}\n\nPlease check your API key and model selection.`, 'error', 8000);
+            log(`❌ ${provider} connection test failed: ${result.message}`, 'error');
+        }
         
     } catch (error) {
-        log(`AI connection test failed: ${error.message}`, 'error');
+        showNotification('Error', `AI connection test failed:\n\n${error.message}`, 'error');
+        log(`AI connection test error: ${error.message}`, 'error');
     }
 }
 
@@ -3924,6 +4060,43 @@ const SCHEDULING_CONFIG = {
         'SZL': 0,          // SIZZLES
         'SPP': 0,          // SPECIAL PROJECTS
         'OTHER': 0         // OTHER
+    },
+    
+    // Featured content configuration
+    FEATURED_CONTENT: {
+        daytime_hours: { start: 6, end: 18 },
+        daytime_probability: 0.75,
+        minimum_spacing: 2.0,
+        meeting_decay: true
+    },
+    
+    // Meeting relevance configuration
+    MEETING_RELEVANCE: {
+        fresh_days: 3,
+        relevant_days: 7,
+        archive_days: 14,
+        expire_after: 18
+    },
+    
+    // Content type priorities
+    CONTENT_PRIORITIES: {
+        MTG: {
+            auto_feature_days: 3,
+            engagement_threshold: 70,
+            max_daily_plays: {
+                fresh: 4,
+                relevant: 2,
+                archive: 1
+            }
+        },
+        PSA: {
+            always_featured: true,
+            max_daily_plays: 3
+        },
+        MAF: {
+            engagement_based: true,
+            feature_threshold: 80
+        }
     }
 };
 
@@ -3978,6 +4151,10 @@ function showScheduleConfig(configType) {
         case 'rotation':
             titleText = 'Category Rotation Configuration';
             bodyContent = generateRotationConfigHTML();
+            break;
+        case 'featured':
+            titleText = 'Featured Content Configuration';
+            bodyContent = generateFeaturedContentConfigHTML();
             break;
     }
     
@@ -4297,6 +4474,129 @@ function generateExpirationConfigHTML() {
     return html;
 }
 
+function generateFeaturedContentConfigHTML() {
+    // Get current featured content settings from config
+    const featuredConfig = scheduleConfig.FEATURED_CONTENT || {
+        daytime_hours: { start: 6, end: 18 },
+        daytime_probability: 0.75,
+        minimum_spacing: 2.0,
+        meeting_decay: true
+    };
+    
+    const meetingConfig = scheduleConfig.MEETING_RELEVANCE || {
+        fresh_days: 3,
+        relevant_days: 7,
+        archive_days: 14,
+        expire_after: 18
+    };
+    
+    const contentPriorities = scheduleConfig.CONTENT_PRIORITIES || {};
+    
+    return `
+        <div class="config-section">
+            <h4>Configure Featured Content</h4>
+            <p>Control how featured content is scheduled and prioritized throughout the day:</p>
+            
+            <div class="featured-config">
+                <h5>Daytime Priority Settings</h5>
+                <div class="form-group">
+                    <label>Daytime Hours (Start - End):</label>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="number" id="daytime_start" value="${featuredConfig.daytime_hours.start}" min="0" max="23" style="width: 60px;">
+                        <span>to</span>
+                        <input type="number" id="daytime_end" value="${featuredConfig.daytime_hours.end}" min="0" max="23" style="width: 60px;">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Daytime Priority %:</label>
+                    <input type="number" id="daytime_probability" value="${Math.round(featuredConfig.daytime_probability * 100)}" min="0" max="100" style="width: 60px;">
+                    <span>% chance to schedule featured content during daytime hours</span>
+                </div>
+                
+                <div class="form-group">
+                    <label>Minimum Spacing (hours):</label>
+                    <input type="number" id="minimum_spacing" value="${featuredConfig.minimum_spacing}" min="0.5" max="12" step="0.5" style="width: 60px;">
+                    <span>hours between featured content plays</span>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="meeting_decay" ${featuredConfig.meeting_decay ? 'checked' : ''}>
+                        Enable Meeting Relevance Decay
+                    </label>
+                </div>
+                
+                <h5>Meeting Relevance Tiers</h5>
+                <div class="form-group">
+                    <label>Fresh (auto-feature for):</label>
+                    <input type="number" id="fresh_days" value="${meetingConfig.fresh_days}" min="0" max="30" style="width: 60px;"> days
+                </div>
+                
+                <div class="form-group">
+                    <label>Relevant (auto-feature for):</label>
+                    <input type="number" id="relevant_days" value="${meetingConfig.relevant_days}" min="0" max="30" style="width: 60px;"> days
+                </div>
+                
+                <div class="form-group">
+                    <label>Archive (stop featuring after):</label>
+                    <input type="number" id="archive_days" value="${meetingConfig.archive_days}" min="0" max="30" style="width: 60px;"> days
+                </div>
+                
+                <div class="form-group">
+                    <label>Expire After:</label>
+                    <input type="number" id="expire_after" value="${meetingConfig.expire_after}" min="0" max="365" style="width: 60px;"> days
+                </div>
+                
+                <h5>Content Type Priorities</h5>
+                <p>Configure auto-featuring rules for specific content types:</p>
+                
+                <div class="content-priorities">
+                    <div class="priority-config" style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
+                        <h6>MTG (Meetings)</h6>
+                        <div class="form-group">
+                            <label>Auto-feature for:</label>
+                            <input type="number" id="mtg_auto_feature_days" value="${contentPriorities.MTG?.auto_feature_days || 3}" min="0" max="30" style="width: 60px;"> days
+                        </div>
+                        <div class="form-group">
+                            <label>Engagement threshold:</label>
+                            <input type="number" id="mtg_engagement_threshold" value="${contentPriorities.MTG?.engagement_threshold || 70}" min="0" max="100" style="width: 60px;">%
+                        </div>
+                    </div>
+                    
+                    <div class="priority-config" style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
+                        <h6>PSA (Public Service Announcements)</h6>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="psa_always_featured" ${contentPriorities.PSA?.always_featured ? 'checked' : ''}>
+                                Always Featured
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>Max daily plays:</label>
+                            <input type="number" id="psa_max_daily_plays" value="${contentPriorities.PSA?.max_daily_plays || 3}" min="1" max="10" style="width: 60px;">
+                        </div>
+                    </div>
+                    
+                    <div class="priority-config" style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
+                        <h6>MAF (Member Asks First)</h6>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="maf_engagement_based" ${contentPriorities.MAF?.engagement_based ? 'checked' : ''}>
+                                Feature based on engagement
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>Feature threshold:</label>
+                            <input type="number" id="maf_feature_threshold" value="${contentPriorities.MAF?.feature_threshold || 80}" min="0" max="100" style="width: 60px;">%
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function generateRotationConfigHTML() {
     // Get current rotation order from config or use default
     const currentOrder = scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form'];
@@ -4519,6 +4819,9 @@ async function saveScheduleConfig() {
         case 'rotation':
             saveRotationConfig();
             break;
+        case 'featured':
+            saveFeaturedContentConfig();
+            break;
     }
     
     // Save to backend
@@ -4530,7 +4833,10 @@ async function saveScheduleConfig() {
                 content_expiration: scheduleConfig.CONTENT_EXPIRATION,
                 timeslots: scheduleConfig.TIMESLOTS,
                 duration_categories: scheduleConfig.DURATION_CATEGORIES,
-                rotation_order: scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form']
+                rotation_order: scheduleConfig.ROTATION_ORDER || ['id', 'spots', 'short_form', 'long_form'],
+                featured_content: scheduleConfig.FEATURED_CONTENT,
+                meeting_relevance: scheduleConfig.MEETING_RELEVANCE,
+                content_priorities: scheduleConfig.CONTENT_PRIORITIES
             }
         });
         
@@ -5261,6 +5567,50 @@ function saveRotationConfig() {
     log(`✅ Rotation order updated: ${scheduleConfig.ROTATION_ORDER.join(' → ')}`);
 }
 
+function saveFeaturedContentConfig() {
+    // Save featured content settings
+    scheduleConfig.FEATURED_CONTENT = {
+        daytime_hours: {
+            start: parseInt(document.getElementById('daytime_start').value),
+            end: parseInt(document.getElementById('daytime_end').value)
+        },
+        daytime_probability: parseFloat(document.getElementById('daytime_probability').value) / 100,
+        minimum_spacing: parseFloat(document.getElementById('minimum_spacing').value),
+        meeting_decay: document.getElementById('meeting_decay').checked
+    };
+    
+    // Save meeting relevance settings
+    scheduleConfig.MEETING_RELEVANCE = {
+        fresh_days: parseInt(document.getElementById('fresh_days').value),
+        relevant_days: parseInt(document.getElementById('relevant_days').value),
+        archive_days: parseInt(document.getElementById('archive_days').value),
+        expire_after: parseInt(document.getElementById('expire_after').value)
+    };
+    
+    // Save content priorities
+    scheduleConfig.CONTENT_PRIORITIES = {
+        MTG: {
+            auto_feature_days: parseInt(document.getElementById('mtg_auto_feature_days').value),
+            engagement_threshold: parseInt(document.getElementById('mtg_engagement_threshold').value),
+            max_daily_plays: {
+                fresh: 4,
+                relevant: 2,
+                archive: 1
+            }
+        },
+        PSA: {
+            always_featured: document.getElementById('psa_always_featured').checked,
+            max_daily_plays: parseInt(document.getElementById('psa_max_daily_plays').value)
+        },
+        MAF: {
+            engagement_based: document.getElementById('maf_engagement_based').checked,
+            feature_threshold: parseInt(document.getElementById('maf_feature_threshold').value)
+        }
+    };
+    
+    log(`✅ Featured content configuration updated`);
+}
+
 // Content Loading and Filtering Functions
 async function loadAvailableContent() {
     log('📺 Loading available content for scheduling...');
@@ -5270,8 +5620,9 @@ async function loadAvailableContent() {
         const contentTypeFilter = document.getElementById('contentTypeFilter')?.value || '';
         const durationCategoryFilter = document.getElementById('durationCategoryFilter')?.value || '';
         const searchFilter = document.getElementById('contentSearchFilter')?.value?.toLowerCase() || '';
+        const featuredFilter = document.getElementById('featuredFilter')?.value || '';
         
-        log(`🔍 Applying filters - Type: ${contentTypeFilter || 'All'}, Duration: ${durationCategoryFilter || 'All'}, Search: ${searchFilter || 'None'}`);
+        log(`🔍 Applying filters - Type: ${contentTypeFilter || 'All'}, Duration: ${durationCategoryFilter || 'All'}, Featured: ${featuredFilter || 'All'}, Search: ${searchFilter || 'None'}`);
         
         const response = await fetch('/api/analyzed-content', {
             method: 'POST',
@@ -5279,7 +5630,8 @@ async function loadAvailableContent() {
             body: JSON.stringify({
                 content_type: contentTypeFilter,
                 duration_category: durationCategoryFilter,
-                search: searchFilter
+                search: searchFilter,
+                featured_filter: featuredFilter
             })
         });
         
@@ -9576,6 +9928,20 @@ async function loadSchedulingConfig() {
                     }
                 }
                 scheduleConfig.DURATION_CATEGORIES = categories;
+            }
+            
+            // Load featured content configuration
+            if (config.scheduling.featured_content) {
+                scheduleConfig.FEATURED_CONTENT = config.scheduling.featured_content;
+                console.log('Loaded featured content config:', scheduleConfig.FEATURED_CONTENT);
+            }
+            if (config.scheduling.meeting_relevance) {
+                scheduleConfig.MEETING_RELEVANCE = config.scheduling.meeting_relevance;
+                console.log('Loaded meeting relevance config:', scheduleConfig.MEETING_RELEVANCE);
+            }
+            if (config.scheduling.content_priorities) {
+                scheduleConfig.CONTENT_PRIORITIES = config.scheduling.content_priorities;
+                console.log('Loaded content priorities:', scheduleConfig.CONTENT_PRIORITIES);
             }
         }
     } catch (error) {

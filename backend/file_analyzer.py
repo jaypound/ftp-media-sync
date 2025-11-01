@@ -178,7 +178,8 @@ class FileAnalyzer:
                     max_chunk_size = ai_config.get('max_chunk_size', 4000)
                     ai_result = ai_analyzer.analyze_transcript(
                         audio_result['transcript'], 
-                        max_chunk_size=max_chunk_size
+                        max_chunk_size=max_chunk_size,
+                        file_name=file_name
                     )
                 
                 # Step 4: Parse filename metadata

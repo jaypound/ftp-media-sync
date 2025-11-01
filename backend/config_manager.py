@@ -60,7 +60,38 @@ class ConfigManager:
             "scheduling": {
                 "default_export_server": "target",
                 "default_export_path": "/mnt/md127/Schedules/Contributors/Jay",
-                "max_consecutive_errors": 100
+                "max_consecutive_errors": 100,
+                "featured_content": {
+                    "daytime_hours": {"start": 6, "end": 18},
+                    "daytime_probability": 0.75,
+                    "minimum_spacing": 2.0,
+                    "meeting_decay": True
+                },
+                "meeting_relevance": {
+                    "fresh_days": 3,
+                    "relevant_days": 7,
+                    "archive_days": 14,
+                    "expire_after": 18
+                },
+                "content_priorities": {
+                    "MTG": {
+                        "auto_feature_days": 3,
+                        "engagement_threshold": 70,
+                        "max_daily_plays": {
+                            "fresh": 4,
+                            "relevant": 2,
+                            "archive": 1
+                        }
+                    },
+                    "PSA": {
+                        "always_featured": True,
+                        "max_daily_plays": 3
+                    },
+                    "MAF": {
+                        "engagement_based": True,
+                        "feature_threshold": 80
+                    }
+                }
             }
         }
     

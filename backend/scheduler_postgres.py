@@ -77,8 +77,128 @@ class PostgreSQLScheduler:
         # or after the delay has passed
         return time_since_last_featured >= featured_delay_seconds
     
+    def _get_meeting_relevance_tier(self, meeting_date, schedule_date, config) -> str:
+        """Determine the relevance tier for a meeting based on age
+        
+        Args:
+            meeting_date: Date of the meeting (datetime or string)
+            schedule_date: Date being scheduled (string YYYY-MM-DD)
+            config: Meeting relevance configuration
+            
+        Returns:
+            'fresh', 'relevant', 'archive', or 'expired'
+        """
+        from datetime import datetime
+        
+        # Convert dates to datetime objects if needed
+        if isinstance(meeting_date, str):
+            meeting_date = datetime.strptime(meeting_date[:10], '%Y-%m-%d')
+        if isinstance(schedule_date, str):
+            schedule_date = datetime.strptime(schedule_date, '%Y-%m-%d')
+        
+        # Calculate days since meeting
+        days_old = (schedule_date - meeting_date).days
+        
+        # Determine tier
+        if days_old < 0:
+            return 'future'  # Meeting hasn't happened yet
+        elif days_old <= config.get('fresh_days', 3):
+            return 'fresh'
+        elif days_old <= config.get('relevant_days', 7):
+            return 'relevant'
+        elif days_old <= config.get('archive_days', 14):
+            return 'archive'
+        else:
+            return 'expired'
+    
+    def _should_auto_feature_content(self, content: Dict, schedule_date: str) -> bool:
+        """Determine if content should be automatically featured
+        
+        Args:
+            content: Content item dictionary
+            schedule_date: Date being scheduled
+            
+        Returns:
+            True if content should be featured
+        """
+        try:
+            from config_manager import ConfigManager
+            config_mgr = ConfigManager()
+            scheduling_config = config_mgr.get_scheduling_settings()
+            content_priorities = scheduling_config.get('content_priorities', {})
+            meeting_config = scheduling_config.get('meeting_relevance', {})
+            
+            content_type = content.get('content_type', '')
+            type_config = content_priorities.get(content_type, {})
+            
+            # Check if type is always featured
+            if type_config.get('always_featured', False):
+                return True
+            
+            # Check meeting relevance for MTG content
+            if content_type == 'MTG' and type_config.get('auto_feature_days', 0) > 0:
+                # Get meeting date from content
+                meeting_date = content.get('meeting_date') or content.get('encoded_date')
+                if meeting_date:
+                    tier = self._get_meeting_relevance_tier(meeting_date, schedule_date, meeting_config)
+                    return tier in ['fresh', 'relevant']
+            
+            # Check engagement-based featuring
+            if type_config.get('engagement_based', False):
+                engagement_score = content.get('engagement_score', 0)
+                threshold = type_config.get('feature_threshold', 80)
+                if engagement_score >= threshold:
+                    return True
+            
+            # Check if manually marked as featured
+            return content.get('featured', False)
+            
+        except Exception as e:
+            logger.error(f"Error checking auto-feature status: {e}")
+            return content.get('featured', False)
+    
+    def _is_daytime_slot(self, total_duration: float, config: Dict) -> bool:
+        """Check if the current scheduling position is during daytime hours
+        
+        Args:
+            total_duration: Current position in schedule (seconds from start)
+            config: Featured content configuration
+            
+        Returns:
+            True if position falls within daytime hours
+        """
+        # Calculate hour of day for this position
+        hour_of_day = (total_duration / 3600) % 24
+        
+        daytime_start = config.get('daytime_hours', {}).get('start', 6)
+        daytime_end = config.get('daytime_hours', {}).get('end', 18)
+        
+        return daytime_start <= hour_of_day < daytime_end
+    
+    def _should_prioritize_featured_for_daytime(self, total_duration: float, config: Dict) -> bool:
+        """Determine if featured content should be prioritized for this time slot
+        
+        Args:
+            total_duration: Current position in schedule (seconds)
+            config: Featured content configuration
+            
+        Returns:
+            True if featured content should be given priority
+        """
+        import random
+        
+        # Get daytime probability (default 75%)
+        daytime_prob = config.get('daytime_probability', 0.75)
+        
+        # If we're in daytime, use the probability
+        if self._is_daytime_slot(total_duration, config):
+            return random.random() < daytime_prob
+        else:
+            # Outside daytime, use inverse probability
+            return random.random() < (1 - daytime_prob)
+    
     def get_featured_content(self, exclude_ids: List[int] = None, schedule_date: str = None) -> List[Dict[str, Any]]:
-        """Get available featured content
+        """Get available featured content (both manually marked and auto-featured)
         
         Args:
             exclude_ids: List of asset IDs to exclude
@@ -90,6 +210,19 @@ class PostgreSQLScheduler:
         conn = db_manager._get_connection()
         try:
             cursor = conn.cursor()
+            
+            # Get configuration for auto-featuring
+            from config_manager import ConfigManager
+            config_mgr = ConfigManager()
+            scheduling_config = config_mgr.get_scheduling_settings()
+            meeting_config = scheduling_config.get('meeting_relevance', {})
+            content_priorities = scheduling_config.get('content_priorities', {})
+            
+            # Parse schedule date
+            if schedule_date:
+                schedule_date_obj = datetime.strptime(schedule_date, '%Y-%m-%d').date()
+            else:
+                schedule_date_obj = datetime.now().date()
             
             # Parameters for the query
             params = []
@@ -105,6 +238,7 @@ class PostgreSQLScheduler:
                     a.duration_category,
                     a.engagement_score,
                     a.theme,
+                    a.meeting_date,
                     i.id as instance_id,
                     i.file_name,
                     i.file_path,
@@ -131,17 +265,36 @@ class PostgreSQLScheduler:
             """
             params.append('%FILL%')
             
-            # Add featured filter - only if column exists
-            query += """
-                AND CASE 
-                    WHEN EXISTS (
-                        SELECT 1 FROM information_schema.columns 
-                        WHERE table_name = 'scheduling_metadata' 
-                        AND column_name = 'featured'
-                    ) THEN COALESCE(sm.featured, FALSE) = TRUE
-                    ELSE FALSE
-                END
-            """
+            # Don't filter by featured flag here - we'll check auto-featuring logic later
+            # Get content types that might be featured
+            from config_manager import ConfigManager
+            config_mgr = ConfigManager()
+            scheduling_config = config_mgr.get_scheduling_settings()
+            content_priorities = scheduling_config.get('content_priorities', {})
+            
+            # Build list of content types that could be featured
+            featurable_types = []
+            for content_type, config in content_priorities.items():
+                if config.get('always_featured') or config.get('engagement_based') or config.get('auto_feature_days'):
+                    featurable_types.append(content_type)
+            
+            # Also include manually featured content
+            if featurable_types:
+                placeholders = ','.join(['%s'] * len(featurable_types))
+                query += f"""
+                    AND (
+                        a.content_type IN ({placeholders})
+                        OR CASE 
+                            WHEN EXISTS (
+                                SELECT 1 FROM information_schema.columns 
+                                WHERE table_name = 'scheduling_metadata' 
+                                AND column_name = 'featured'
+                            ) THEN COALESCE(sm.featured, FALSE) = TRUE
+                            ELSE FALSE
+                        END
+                    )
+                """
+                params.extend(featurable_types)
             
             # Add expiry date check
             if schedule_date:
@@ -175,7 +328,13 @@ class PostgreSQLScheduler:
             results = cursor.fetchall()
             cursor.close()
             
-            return results
+            # Filter results to only include content that should be featured
+            featured_results = []
+            for content in results:
+                if self._should_auto_feature_content(content, schedule_date):
+                    featured_results.append(content)
+            
+            return featured_results
             
         except Exception as e:
             logger.error(f"Error getting featured content: {str(e)}")
@@ -490,7 +649,8 @@ class PostgreSQLScheduler:
                         scheduling_config = config_mgr.get_scheduling_settings()
                         replay_delays = scheduling_config.get('replay_delays', {})
                         additional_delays = scheduling_config.get('additional_delay_per_airing', {})
-                        featured_delay = scheduling_config.get('featured_delay', 1.5)
+                        featured_config = scheduling_config.get('featured_content', {})
+                        featured_delay = featured_config.get('minimum_spacing', 2.0)
                         
                         base_delay = replay_delays.get(duration_category, 24)
                         additional_delay = additional_delays.get(duration_category, 2)
@@ -784,15 +944,25 @@ class PostgreSQLScheduler:
                 from config_manager import ConfigManager
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
-                featured_delay = scheduling_config.get('featured_delay', 1.5)
-                logger.info(f"Featured content delay configured: {featured_delay} hours")
+                featured_config = scheduling_config.get('featured_content', {})
+                featured_delay = featured_config.get('minimum_spacing', 2.0)
+                logger.info(f"Featured content minimum spacing: {featured_delay} hours")
             except:
-                featured_delay = 1.5
-                logger.info(f"Using default featured delay: {featured_delay} hours")
+                featured_config = {}
+                featured_delay = 2.0
+                logger.info(f"Using default featured config")
                 
             while total_duration < self.target_duration_seconds:
-                # Check if we should try to schedule featured content
+                # Determine if we should prioritize featured content based on time of day
+                should_try_featured = False
+                
+                # First check if it's time for featured content (minimum spacing)
                 if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
+                    # Check daytime priority
+                    if self._should_prioritize_featured_for_daytime(total_duration, featured_config):
+                        should_try_featured = True
+                
+                if should_try_featured:
                     # Get all available featured content
                     featured_content = self.get_featured_content(
                         exclude_ids=[],
@@ -800,13 +970,14 @@ class PostgreSQLScheduler:
                     )
                     
                     if featured_content:
-                        # We have featured content and enough time has passed
+                        # We have featured content and it's appropriate for this time slot
                         # Use round-robin selection of featured content
                         content = featured_content[featured_content_index % len(featured_content)]
                         featured_content_index += 1
                         
+                        is_daytime = self._is_daytime_slot(total_duration, featured_config)
                         logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} "
-                                  f"at {total_duration/3600:.2f} hours")
+                                  f"at {total_duration/3600:.2f} hours ({'daytime' if is_daytime else 'nighttime'})")
                         
                         available_content = [content]
                     else:
@@ -819,7 +990,7 @@ class PostgreSQLScheduler:
                             scheduled_asset_times=scheduled_asset_times
                         )
                 else:
-                    # Not time for featured content yet, get regular content
+                    # Not appropriate time/slot for featured content, get regular content
                     duration_category = self._get_next_duration_category()
                     available_content = self._get_content_with_progressive_delays(
                         duration_category, 
@@ -1020,6 +1191,12 @@ class PostgreSQLScheduler:
                     if not found_fitting_content:
                         # No content fits in remaining time
                         logger.info(f"No content fits in remaining {remaining_seconds/60:.1f} minutes, stopping at {total_duration/3600:.2f} hours")
+                        
+                        # Special handling for very small gaps at end of schedule
+                        if remaining_seconds < 60:  # Less than 1 minute
+                            logger.warning(f"Accepting {remaining_seconds:.1f} second gap at end of schedule to prevent infinite loop")
+                            # Move to next target duration to exit gracefully
+                            total_duration = self.target_duration_seconds
                         break
                 
                 # Calculate scheduled time
@@ -2181,11 +2358,13 @@ class PostgreSQLScheduler:
                 from config_manager import ConfigManager
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
-                featured_delay = scheduling_config.get('featured_delay', 1.5)
-                logger.info(f"Featured content delay configured: {featured_delay} hours")
+                featured_config = scheduling_config.get('featured_content', {})
+                featured_delay = featured_config.get('minimum_spacing', 2.0)
+                logger.info(f"Featured content minimum spacing: {featured_delay} hours")
             except:
-                featured_delay = 1.5
-                logger.info(f"Using default featured delay: {featured_delay} hours")
+                featured_config = {}
+                featured_delay = 2.0
+                logger.info(f"Using default featured config")
             
             # Generate content for each day
             days_completed = 0
@@ -2206,8 +2385,32 @@ class PostgreSQLScheduler:
                 day_start_time = total_duration  # Track where this day started
                 
                 while total_duration < day_target_seconds:
-                    # Check if we should try to schedule featured content
+                    # Check if we're stuck at the same position
+                    current_position_hours = round(total_duration / 3600, 2)
+                    if current_position_hours == last_position:
+                        position_stuck_counter += 1
+                        if position_stuck_counter >= max_position_stuck:
+                            logger.error(f"❌ Stuck at position {current_position_hours}h for {position_stuck_counter} iterations")
+                            remaining_gap = (day_target_seconds - total_duration) / 60
+                            logger.warning(f"Accepting remaining gap of {remaining_gap:.1f} minutes on {day_name} to prevent infinite loop")
+                            # Move to next day
+                            total_duration = day_target_seconds
+                            no_progress_iterations = 0  # Reset to avoid triggering other checks
+                            break
+                    else:
+                        last_position = current_position_hours
+                        position_stuck_counter = 0
+                    
+                    # Determine if we should prioritize featured content based on time of day
+                    should_try_featured = False
+                    
+                    # First check if it's time for featured content (minimum spacing)
                     if self._should_schedule_featured_content(total_duration, last_featured_time, featured_delay):
+                        # Check daytime priority
+                        if self._should_prioritize_featured_for_daytime(total_duration, featured_config):
+                            should_try_featured = True
+                    
+                    if should_try_featured:
                         # Get all available featured content
                         featured_content = self.get_featured_content(
                             exclude_ids=[],
@@ -2215,13 +2418,14 @@ class PostgreSQLScheduler:
                         )
                         
                         if featured_content:
-                            # We have featured content and enough time has passed
+                            # We have featured content and it's appropriate for this time slot
                             # Use round-robin selection of featured content
                             content = featured_content[featured_content_index % len(featured_content)]
                             featured_content_index += 1
                             
+                            is_daytime = self._is_daytime_slot(total_duration, featured_config)
                             logger.info(f"Scheduling featured content: {content.get('content_title', 'Unknown')} "
-                                      f"at {total_duration/3600:.2f} hours on {day_name}")
+                                      f"at {total_duration/3600:.2f} hours on {day_name} ({'daytime' if is_daytime else 'nighttime'})")
                             
                             available_content = [content]
                         else:
@@ -2234,7 +2438,7 @@ class PostgreSQLScheduler:
                                 scheduled_asset_times=None
                             )
                     else:
-                        # Not time for featured content yet, get regular content
+                        # Not time for featured content yet or outside preferred time, get regular content
                         duration_category = self._get_next_duration_category()
                         available_content = self._get_content_with_progressive_delays(
                             duration_category, 
@@ -2438,6 +2642,13 @@ class PostgreSQLScheduler:
                         if not found_fitting_content:
                             # No content fits in remaining time, move to next day
                             logger.info(f"No content fits in remaining {remaining_seconds/60:.1f} minutes on {day_name}, moving to next day")
+                            
+                            # Special handling for very small gaps
+                            if remaining_seconds < 60:  # Less than 1 minute
+                                logger.warning(f"Accepting {remaining_seconds:.1f} second gap at end of {day_name} to prevent infinite loop")
+                                # Count this as a completed iteration to prevent infinite loops
+                                no_progress_iterations = 0
+                            
                             # IMPORTANT: Advance total_duration to the start of the next day
                             # This ensures the next item starts at midnight, not in the gap
                             total_duration = day_target_seconds
@@ -2711,11 +2922,13 @@ class PostgreSQLScheduler:
                 from config_manager import ConfigManager
                 config_mgr = ConfigManager()
                 scheduling_config = config_mgr.get_scheduling_settings()
-                featured_delay = scheduling_config.get('featured_delay', 1.5)
-                logger.info(f"Featured content delay configured: {featured_delay} hours")
+                featured_config = scheduling_config.get('featured_content', {})
+                featured_delay = featured_config.get('minimum_spacing', 2.0)
+                logger.info(f"Featured content minimum spacing: {featured_delay} hours")
             except:
-                featured_delay = 1.5
-                logger.info(f"Using default featured delay: {featured_delay} hours")
+                featured_config = {}
+                featured_delay = 2.0
+                logger.info(f"Using default featured config")
             
             # Generate content for each day of the month
             for day in range(1, days_in_month + 1):

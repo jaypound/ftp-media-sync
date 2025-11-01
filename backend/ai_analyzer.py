@@ -6,8 +6,34 @@ from openai import OpenAI
 from anthropic import Anthropic
 import math
 import requests
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Create dedicated loggers for transcription and analysis
+transcription_logger = logging.getLogger('ai_transcription')
+analysis_logger = logging.getLogger('ai_analysis')
+
+# Set up file handlers for dedicated logs
+def setup_ai_loggers():
+    """Setup dedicated loggers for AI transcription and analysis"""
+    logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Transcription logger
+    trans_handler = logging.FileHandler(os.path.join(logs_dir, f'ai_transcription_{datetime.now().strftime("%Y%m%d")}.log'))
+    trans_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    transcription_logger.addHandler(trans_handler)
+    transcription_logger.setLevel(logging.INFO)
+    
+    # Analysis logger
+    analysis_handler = logging.FileHandler(os.path.join(logs_dir, f'ai_analysis_{datetime.now().strftime("%Y%m%d")}.log'))
+    analysis_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    analysis_logger.addHandler(analysis_handler)
+    analysis_logger.setLevel(logging.INFO)
+
+# Initialize the loggers
+setup_ai_loggers()
 
 class AIAnalyzer:
     def __init__(self, api_provider="openai", api_key=None, model=None, ollama_url=None, auto_setup=True):
@@ -22,7 +48,7 @@ class AIAnalyzer:
             if self.api_provider == "openai":
                 self.model = "gpt-3.5-turbo"
             elif self.api_provider == "anthropic":
-                self.model = "claude-3-5-sonnet-20241022"
+                self.model = "claude-3-5-sonnet-20240620"  # Updated to current model
             elif self.api_provider == "ollama":
                 self.model = "llama2"
         
@@ -32,8 +58,26 @@ class AIAnalyzer:
     def setup_client(self):
         """Setup API client"""
         try:
-            logger.info(f"Setting up AI client: provider={self.api_provider}, model={self.model}")
-            logger.debug(f"API key present: {bool(self.api_key)}")
+            # Validate and fix model names
+            if self.api_provider == "anthropic":
+                # Map incorrect model names to valid ones
+                model_mapping = {
+                    "claude-3-5-sonnet-20241022": "claude-3-5-sonnet-20240620",
+                    "claude-3.5-sonnet": "claude-3-5-sonnet-20240620",
+                    "claude-3-sonnet-20240229": "claude-3-5-sonnet-20240620",
+                    "claude-3-sonnet": "claude-3-5-sonnet-20240620"
+                }
+                if self.model in model_mapping:
+                    logger.warning(f"Invalid Anthropic model '{self.model}' detected, using '{model_mapping[self.model]}' instead")
+                    self.model = model_mapping[self.model]
+            
+            try:
+                logger.info(f"Setting up AI client: provider={self.api_provider}, model={self.model}")
+                logger.debug(f"API key present: {bool(self.api_key)}")
+            except UnicodeError:
+                # Handle Unicode errors in logging
+                logger.info("Setting up AI client")
+                logger.debug(f"API key present: {bool(self.api_key)}")
             
             if self.api_provider == "openai":
                 # For OpenAI client initialization
@@ -83,7 +127,11 @@ class AIAnalyzer:
                     try:
                         # Initialize with only api_key
                         if self.api_key:
-                            self.client = Anthropic(api_key=self.api_key)
+                            # Ensure API key is properly encoded as UTF-8 string
+                            api_key_str = self.api_key
+                            if isinstance(api_key_str, bytes):
+                                api_key_str = api_key_str.decode('utf-8')
+                            self.client = Anthropic(api_key=api_key_str)
                         else:
                             self.client = Anthropic()
                         logger.info(f"Anthropic client setup successful with model: {self.model}")
@@ -236,6 +284,18 @@ Transcript:
             if not self.client:
                 logger.error("OpenAI client not initialized")
                 return None
+            
+            # Log the request details
+            analysis_logger.info(f"{'='*80}")
+            analysis_logger.info(f"OPENAI ANALYSIS REQUEST - {datetime.now().isoformat()}")
+            analysis_logger.info(f"Model: {self.model}")
+            analysis_logger.info(f"Temperature: 0.3")
+            analysis_logger.info(f"Max Tokens: 1000")
+            analysis_logger.info(f"Chunk Length: {len(chunk)} chars")
+            analysis_logger.info(f"Prompt Length: {len(prompt)} chars")
+            analysis_logger.info(f"First 500 chars of chunk: {chunk[:500]}...")
+            
+            start_time = datetime.now()
                 
             # Use the modern OpenAI client (v1.0.0+)
             response = self.client.chat.completions.create(
@@ -247,7 +307,19 @@ Transcript:
                 temperature=0.3,
                 max_tokens=1000
             )
+            
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
             content = response.choices[0].message.content.strip()
+            
+            # Log the response details
+            analysis_logger.info(f"OPENAI ANALYSIS RESPONSE - {end_time.isoformat()}")
+            analysis_logger.info(f"Duration: {duration:.2f} seconds")
+            analysis_logger.info(f"Response Length: {len(content)} chars")
+            analysis_logger.info(f"Tokens Used: {response.usage.total_tokens if hasattr(response, 'usage') else 'N/A'}")
+            analysis_logger.info(f"Response Content: {content}")
+            analysis_logger.info(f"{'='*80}\n")
             
             logger.info(f"OpenAI response received (length: {len(content)} chars)")
             logger.debug(f"OpenAI response: {content}")
@@ -273,6 +345,14 @@ Transcript:
                     
         except Exception as e:
             logger.error(f"Error analyzing chunk with OpenAI: {str(e)}")
+            # Log analysis error
+            analysis_logger.error(f"{'='*80}")
+            analysis_logger.error(f"OPENAI ANALYSIS ERROR - {datetime.now().isoformat()}")
+            analysis_logger.error(f"Model: {self.model}")
+            analysis_logger.error(f"Chunk Length: {len(chunk) if 'chunk' in locals() else 'Unknown'}")
+            analysis_logger.error(f"Error: {str(e)}")
+            analysis_logger.error(f"Error Type: {type(e).__name__}")
+            analysis_logger.error(f"{'='*80}\n")
             return None
     
     def analyze_chunk_anthropic(self, chunk: str) -> Dict[str, Any]:
@@ -280,6 +360,18 @@ Transcript:
         try:
             prompt = self.create_analysis_prompt(chunk)
             logger.debug(f"Sending prompt to Anthropic (length: {len(prompt)} chars)")
+            
+            # Log the request details
+            analysis_logger.info(f"{'='*80}")
+            analysis_logger.info(f"ANTHROPIC ANALYSIS REQUEST - {datetime.now().isoformat()}")
+            analysis_logger.info(f"Model: {self.model}")
+            analysis_logger.info(f"Temperature: 0.3")
+            analysis_logger.info(f"Max Tokens: 1000")
+            analysis_logger.info(f"Chunk Length: {len(chunk)} chars")
+            analysis_logger.info(f"Prompt Length: {len(prompt)} chars")
+            analysis_logger.info(f"First 500 chars of chunk: {chunk[:500]}...")
+            
+            start_time = datetime.now()
             
             response = self.client.messages.create(
                 model=self.model,
@@ -290,7 +382,20 @@ Transcript:
                 ]
             )
             
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
             content = response.content[0].text.strip()
+            
+            # Log the response details
+            analysis_logger.info(f"ANTHROPIC ANALYSIS RESPONSE - {end_time.isoformat()}")
+            analysis_logger.info(f"Duration: {duration:.2f} seconds")
+            analysis_logger.info(f"Response Length: {len(content)} chars")
+            analysis_logger.info(f"Input Tokens: {response.usage.input_tokens if hasattr(response, 'usage') else 'N/A'}")
+            analysis_logger.info(f"Output Tokens: {response.usage.output_tokens if hasattr(response, 'usage') else 'N/A'}")
+            analysis_logger.info(f"Response Content: {content}")
+            analysis_logger.info(f"{'='*80}\n")
+            
             logger.info(f"Anthropic response received (length: {len(content)} chars)")
             logger.debug(f"Anthropic response: {content}")
             
@@ -315,6 +420,22 @@ Transcript:
                     
         except Exception as e:
             logger.error(f"Error analyzing chunk with Anthropic: {str(e)}")
+            # Log analysis error
+            analysis_logger.error(f"{'='*80}")
+            analysis_logger.error(f"ANTHROPIC ANALYSIS ERROR - {datetime.now().isoformat()}")
+            analysis_logger.error(f"Model: {self.model}")
+            analysis_logger.error(f"Chunk Length: {len(chunk) if 'chunk' in locals() else 'Unknown'}")
+            analysis_logger.error(f"Error: {str(e)}")
+            analysis_logger.error(f"Error Type: {type(e).__name__}")
+            if "not_found_error" in str(e) and "model" in str(e):
+                analysis_logger.error(f"NOTE: Model '{self.model}' not found. Valid Anthropic models include:")
+                analysis_logger.error(f"  - claude-3-5-sonnet-20240620")
+                analysis_logger.error(f"  - claude-3-opus-20240229") 
+                analysis_logger.error(f"  - claude-3-haiku-20240307")
+                analysis_logger.error(f"  - claude-2.1")
+                analysis_logger.error(f"  - claude-2.0")
+                analysis_logger.error(f"  - claude-instant-1.2")
+            analysis_logger.error(f"{'='*80}\n")
             return None
     
     def analyze_chunk(self, chunk: str) -> Dict[str, Any]:
@@ -504,7 +625,7 @@ Transcript:
         
         return merged
     
-    def analyze_transcript(self, transcript: str, max_chunk_size: int = 4000) -> Dict[str, Any]:
+    def analyze_transcript(self, transcript: str, max_chunk_size: int = 4000, file_name: str = None) -> Dict[str, Any]:
         """Analyze a transcript, handling chunking if necessary"""
         try:
             if not self.client:
@@ -512,6 +633,17 @@ Transcript:
                 return None
             
             logger.info(f"Analyzing transcript of {len(transcript)} characters")
+            
+            # Log analysis start
+            if file_name:
+                analysis_logger.info(f"{'='*80}")
+                analysis_logger.info(f"STARTING TRANSCRIPT ANALYSIS - {datetime.now().isoformat()}")
+                analysis_logger.info(f"File: {file_name}")
+                analysis_logger.info(f"Provider: {self.api_provider.upper()}")
+                analysis_logger.info(f"Model: {self.model}")
+                analysis_logger.info(f"Transcript Length: {len(transcript)} characters")
+                analysis_logger.info(f"Max Chunk Size: {max_chunk_size}")
+                analysis_logger.info(f"{'='*80}\n")
             
             # Split into chunks if necessary
             chunks = self.chunk_text(transcript, max_chunk_size)
@@ -531,13 +663,35 @@ Transcript:
             if chunk_analyses:
                 merged_analysis = self.merge_analyses(chunk_analyses)
                 logger.info("Successfully completed transcript analysis")
+                
+                # Log analysis completion
+                if file_name:
+                    analysis_logger.info(f"{'='*80}")
+                    analysis_logger.info(f"COMPLETED TRANSCRIPT ANALYSIS - {datetime.now().isoformat()}")
+                    analysis_logger.info(f"File: {file_name}")
+                    analysis_logger.info(f"Total Chunks Analyzed: {len(chunk_analyses)}/{len(chunks)}")
+                    analysis_logger.info(f"Summary: {merged_analysis.get('summary', 'N/A')[:200]}...")
+                    analysis_logger.info(f"Theme: {merged_analysis.get('theme', 'N/A')}")
+                    analysis_logger.info(f"Engagement Score: {merged_analysis.get('engagement_score', 'N/A')}")
+                    analysis_logger.info(f"Topics: {', '.join(merged_analysis.get('topics', []))}")
+                    analysis_logger.info(f"{'='*80}\n")
+                
                 return merged_analysis
             else:
                 logger.error("No chunks were successfully analyzed")
+                if file_name:
+                    analysis_logger.error(f"FAILED ANALYSIS - No chunks analyzed for file: {file_name}")
                 return None
                 
         except Exception as e:
             logger.error(f"Error analyzing transcript: {str(e)}")
+            if file_name:
+                analysis_logger.error(f"{'='*80}")
+                analysis_logger.error(f"TRANSCRIPT ANALYSIS ERROR - {datetime.now().isoformat()}")
+                analysis_logger.error(f"File: {file_name}")
+                analysis_logger.error(f"Error: {str(e)}")
+                analysis_logger.error(f"Error Type: {type(e).__name__}")
+                analysis_logger.error(f"{'='*80}\n")
             return None
 
 # Global AI analyzer instance

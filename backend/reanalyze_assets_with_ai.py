@@ -70,7 +70,7 @@ def reanalyze_asset_with_ai(asset):
         logger.info(f"  Transcript length: {len(transcript)} chars")
         
         # Analyze with AI
-        ai_result = ai_analyzer.analyze_transcript(transcript)
+        ai_result = ai_analyzer.analyze_transcript(transcript, file_name=asset.get('content_title', f'Asset_{asset_id}'))
         
         if not ai_result:
             logger.error(f"  Failed to get AI analysis for asset {asset_id}")
