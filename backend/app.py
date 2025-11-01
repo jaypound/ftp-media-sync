@@ -11790,10 +11790,11 @@ def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_p
         # Build filter complex with concat and overlay
         filter_parts = []
         
-        # First concatenate all region1 inputs
+        # First normalize SAR for all inputs, then concatenate
         concat_inputs = ''
         for i in range(num_region1_inputs):
-            concat_inputs += f'[{i}:v]'
+            filter_parts.append(f'[{i}:v]setsar=1:1[v{i}]')  # Normalize SAR to 1:1
+            concat_inputs += f'[v{i}]'
         filter_parts.append(f'{concat_inputs}concat=n={num_region1_inputs}:v=1:a=0[region1]')
         
         # Now handle overlay based on dimensions
@@ -11819,10 +11820,11 @@ def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_p
         # Just concatenate and scale the images
         filter_parts = []
         
-        # Concatenate all inputs
+        # First normalize SAR for all inputs, then concatenate
         concat_inputs = ''
         for i in range(num_region1_inputs):
-            concat_inputs += f'[{i}:v]'
+            filter_parts.append(f'[{i}:v]setsar=1:1[v{i}]')  # Normalize SAR to 1:1
+            concat_inputs += f'[v{i}]'
         filter_parts.append(f'{concat_inputs}concat=n={num_region1_inputs}:v=1:a=0[region1]')
         filter_parts.append('[region1]scale=1920:1080,format=yuv420p[out]')
         
