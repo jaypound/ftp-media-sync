@@ -1,4 +1,5 @@
 venv
+logs
 .env
 backend/config.json
 backend/postgres_backups

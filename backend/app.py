@@ -8556,12 +8556,10 @@ def fill_template_gaps():
                                     logger.info(f"Gap of {remaining:.1f} seconds is below minimum fillable threshold ({minimum_fillable_gap:.1f}s). Accepting unfilled gap.")
                                     break
                                 
-                                # For gaps less than 1 minute, be more lenient
-                                if remaining < 60:
-                                    # For 30-60 second gaps, try all categories once before giving up
-                                    if consecutive_errors >= len(scheduler.duration_rotation):
-                                        logger.info(f"Small gap of {remaining:.1f} seconds. Accepting after trying all {len(scheduler.duration_rotation)} categories.")
-                                        break
+                                # For gaps less than 1 minute, accept them as unfillable
+                                if remaining <= 60:
+                                    logger.info(f"Gap of {remaining:.1f} seconds ({remaining/60:.1f} min) is 1 minute or less. Accepting unfilled gap.")
+                                    break
                                 
                                 logger.info(f"Gap of {remaining/60:.1f} min. Advancing rotation to find fitting content.")
                                 scheduler._advance_rotation()

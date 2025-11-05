@@ -10,6 +10,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from database import db_manager
 import json
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -652,8 +653,33 @@ class PostgreSQLScheduler:
                         featured_config = scheduling_config.get('featured_content', {})
                         featured_delay = featured_config.get('minimum_spacing', 2.0)
                         
-                        base_delay = replay_delays.get(duration_category, 24)
-                        additional_delay = additional_delays.get(duration_category, 2)
+                        # Define default delays for content types
+                        content_type_defaults = {
+                            'an': 2,
+                            'atld': 2,
+                            'bmp': 3,
+                            'imow': 4,
+                            'im': 3,
+                            'ia': 4,
+                            'lm': 3,
+                            'mtg': 8,
+                            'maf': 4,
+                            'pkg': 3,
+                            'pmo': 3,
+                            'psa': 2,
+                            'szl': 3,
+                            'spp': 3
+                        }
+                        
+                        # Check if this is a content type or duration category
+                        if duration_category.lower() in content_type_defaults:
+                            # It's a content type, use content type defaults
+                            base_delay = replay_delays.get(duration_category.lower(), content_type_defaults.get(duration_category.lower(), 4))
+                            additional_delay = additional_delays.get(duration_category.lower(), 0.5)
+                        else:
+                            # It's a duration category, use regular defaults
+                            base_delay = replay_delays.get(duration_category, 24)
+                            additional_delay = additional_delays.get(duration_category, 2)
                         
                         if delay_reduction_factor < 1.0:
                             original_base = base_delay
@@ -808,8 +834,9 @@ class PostgreSQLScheduler:
                     
                     sm.last_scheduled_date ASC NULLS FIRST,
                     sm.total_airings ASC NULLS FIRST,
-                    i.encoded_date DESC NULLS LAST
-                LIMIT 100
+                    i.encoded_date DESC NULLS LAST,
+                    RANDOM()  -- Add randomization to break ties and avoid same content order
+                LIMIT 200  -- Increased to get more variety
             """)
             
             # Add date parameters for ORDER BY
@@ -2516,64 +2543,124 @@ class PostgreSQLScheduler:
                         # Always check theme conflicts for IDs and spots regardless of content type
                         # These short durations are typically PSAs/announcements that shouldn't repeat themes
                         
+                        # Store the requested category for penalty calculations
+                        requested_category = duration_category if 'duration_category' in locals() else 'unknown'
+                        
+                        # Define content type defaults for penalty calculations
+                        content_type_defaults = {
+                            'an': 2,
+                            'atld': 2,
+                            'bmp': 3,
+                            'imow': 4,
+                            'im': 3,
+                            'ia': 4,
+                            'lm': 3,
+                            'mtg': 8,
+                            'maf': 4,
+                            'pkg': 3,
+                            'pmo': 3,
+                            'psa': 2,
+                            'szl': 3,
+                            'spp': 3
+                        }
+                        
                         # Score and rank all available content
                         for candidate in available_content:
                             asset_id = candidate['asset_id']
                             current_category = candidate.get('duration_category', '')
                             current_theme = candidate.get('theme', '').strip() if candidate.get('theme') else None
-                        
-                        # Start with base score from SQL query (already calculated)
-                        score = 100  # Base score
-                        
-                        # Boost score for featured content
-                        if candidate.get('featured', False):
-                            score += 150  # Significant boost for featured content
-                            logger.debug(f"Featured content boost for '{candidate.get('content_title', 'Unknown')}'")
-                        
-                        # Apply fatigue penalty based on recent plays within this schedule
-                        if asset_id in recent_plays:
-                            plays = recent_plays[asset_id]
-                            for play_time in plays:
-                                time_gap = (total_duration - play_time) / 3600  # Hours since last play
+                            
+                            # Start with base score from SQL query (already calculated)
+                            # Add small random component to break ties between similar content
+                            score = 100 + random.uniform(-5, 5)  # Base score with small random variation
+                            
+                            # Boost score for featured content
+                            if candidate.get('featured', False):
+                                score += 150  # Significant boost for featured content
+                                logger.debug(f"Featured content boost for '{candidate.get('content_title', 'Unknown')}'")
+                            
+                            # Apply fatigue penalty based on recent plays within this schedule
+                            if asset_id in recent_plays:
+                                plays = recent_plays[asset_id]
+                                for play_time in plays:
+                                    time_gap = (total_duration - play_time) / 3600  # Hours since last play
+                                    
+                                    if time_gap < 1:
+                                        score -= 100  # Heavy penalty for content played within 1 hour
+                                    elif time_gap < 2:
+                                        score -= 50   # Medium penalty for 1-2 hours
+                                    elif time_gap < 4:
+                                        score -= 25   # Light penalty for 2-4 hours
+                                    elif time_gap < 6:
+                                        score -= 10   # Very light penalty for 4-6 hours
                                 
-                                if time_gap < 1:
-                                    score -= 100  # Heavy penalty for content played within 1 hour
-                                elif time_gap < 2:
-                                    score -= 50   # Medium penalty for 1-2 hours
-                                elif time_gap < 4:
-                                    score -= 25   # Light penalty for 2-4 hours
-                                elif time_gap < 6:
-                                    score -= 10   # Very light penalty for 4-6 hours
+                                # Additional penalty for multiple plays
+                                if len(plays) >= 3:
+                                    score -= 50 * (len(plays) - 2)  # Heavy penalty for 3+ plays
                             
-                            # Additional penalty for multiple plays
-                            if len(plays) >= 3:
-                                score -= 50 * (len(plays) - 2)  # Heavy penalty for 3+ plays
-                        
-                        # Special handling for IDs - stronger rotation requirements
-                        if current_category == 'id':
-                            if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
-                                last_play = recent_plays[asset_id][-1]
-                                time_gap = (total_duration - last_play) / 3600
-                                if time_gap < 2:
-                                    score -= 300  # Very heavy penalty for IDs within 2 hours
+                            # Get the actual content type
+                            content_type = candidate.get('content_type', '').lower()
                             
-                            # Bonus for IDs not recently played
-                            if asset_id not in recent_plays:
-                                score += 50
-                        
-                        # Theme conflict penalty for IDs and spots (regardless of content type)
-                        # These short-form content should never have the same theme back-to-back
-                        if (last_scheduled_category in ['id', 'spots'] and 
-                            current_category in ['id', 'spots'] and
-                            current_theme and last_scheduled_theme and
-                            current_theme.lower() == last_scheduled_theme.lower()):
-                            score -= 200  # Heavy penalty for same theme
-                            logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
-                        
-                        # Track best scoring content
-                        if score > best_score:
-                            best_score = score
-                            content = candidate
+                            # Check what was requested in the rotation - content type or duration category
+                            # Use the actual requested category from the current rotation position
+                            requested_category_lower = requested_category.lower()
+                            
+                            # Determine which delay rules to apply based on what was requested
+                            if requested_category_lower in content_type_defaults:
+                                # A content type was requested (like BMP, PSA, MAF)
+                                # Use content-type specific delays regardless of duration category
+                                if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
+                                    last_play = recent_plays[asset_id][-1]
+                                    time_gap = (total_duration - last_play) / 3600
+                                    
+                                    min_delay = content_type_defaults.get(content_type, 3)
+                                    if time_gap < min_delay:
+                                        penalty = 200 * (min_delay - time_gap) / min_delay
+                                        score -= penalty
+                                        logger.debug(f"Content type {content_type} penalty: -{penalty:.0f} (gap: {time_gap:.1f}h < {min_delay}h)")
+                                
+                                # Bonus for content types not recently played
+                                if asset_id not in recent_plays:
+                                    score += 30
+                                
+                                # Extra penalty if this content has been used multiple times today
+                                if asset_id in recent_plays:
+                                    plays_today = len(recent_plays[asset_id])
+                                    if plays_today >= 2:
+                                        score -= 30 * (plays_today - 1)  # Increasing penalty for multiple uses
+                            else:
+                                # A duration category was requested (id, spots, short_form, long_form)
+                                # Apply duration category rules
+                                if current_category == 'id':
+                                    if asset_id in recent_plays and len(recent_plays[asset_id]) > 0:
+                                        last_play = recent_plays[asset_id][-1]
+                                        time_gap = (total_duration - last_play) / 3600
+                                        if time_gap < 2:
+                                            score -= 300  # Very heavy penalty for IDs within 2 hours
+                                    
+                                    # Bonus for IDs not recently played
+                                    if asset_id not in recent_plays:
+                                        score += 50
+                                    
+                                    # Extra penalty if this ID has been used multiple times today
+                                    if asset_id in recent_plays:
+                                        plays_today = len(recent_plays[asset_id])
+                                        if plays_today >= 2:
+                                            score -= 50 * (plays_today - 1)  # Heavier penalty for IDs
+                            
+                            # Theme conflict penalty for IDs and spots (regardless of content type)
+                            # These short-form content should never have the same theme back-to-back
+                            if (last_scheduled_category in ['id', 'spots'] and 
+                                current_category in ['id', 'spots'] and
+                                current_theme and last_scheduled_theme and
+                                current_theme.lower() == last_scheduled_theme.lower()):
+                                score -= 200  # Heavy penalty for same theme
+                                logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
+                            
+                            # Track best scoring content
+                            if score > best_score:
+                                best_score = score
+                                content = candidate
                     
                     # If no good content found (all have very negative scores), use the first available
                     if not content and available_content:

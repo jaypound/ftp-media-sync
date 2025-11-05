@@ -10310,6 +10310,13 @@ function hideFillGapsProgress() {
     const modal = document.getElementById('fillGapsProgressModal');
     if (modal) {
         modal.style.display = 'none';
+        
+        // Reset cancel button state
+        const cancelButton = modal.querySelector('.button.danger');
+        if (cancelButton) {
+            cancelButton.disabled = false;
+            cancelButton.innerHTML = '<i class="fas fa-stop"></i> Cancel';
+        }
     }
     
     // Stop polling
@@ -10349,6 +10356,19 @@ async function updateFillGapsProgress() {
 // Function to cancel fill gaps operation
 async function cancelFillGaps() {
     try {
+        // Disable the cancel button to prevent multiple clicks
+        const cancelButton = document.querySelector('#fillGapsProgressModal .button.danger');
+        if (cancelButton) {
+            cancelButton.disabled = true;
+            cancelButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cancelling...';
+        }
+        
+        // Update the progress message immediately
+        const progressMessage = document.getElementById('fillGapsMessage');
+        if (progressMessage) {
+            progressMessage.textContent = 'Cancelling operation...';
+        }
+        
         const response = await fetch('/api/cancel-fill-gaps', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
@@ -10357,10 +10377,18 @@ async function cancelFillGaps() {
         if (response.ok) {
             log('Fill gaps operation cancelled', 'warning');
             hideFillGapsProgress();
+        } else {
+            // If the request failed, still close the modal but show an error
+            log('Error response from server while cancelling', 'error');
+            hideFillGapsProgress();
+            alert('The cancel request was sent, but there was an issue with the server response.');
         }
     } catch (error) {
         console.error('Error cancelling fill gaps:', error);
         log(`Error cancelling fill gaps: ${error.message}`, 'error');
+        // Still close the modal even if there's an error
+        hideFillGapsProgress();
+        alert('There was an error cancelling the operation, but the modal has been closed.');
     }
 }
 
