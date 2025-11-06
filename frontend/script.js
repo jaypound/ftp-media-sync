@@ -14068,7 +14068,7 @@ async function autoStartAutomation() {
         // Sort files by modification time to get the newest
         const newestFile = result.files.sort((a, b) => b.mtime - a.mtime)[0];
         const selectedFile = newestFile.path;
-        const programmingDelay = 120; // Default 120 seconds
+        const programmingDelay = 300; // Default 300 seconds (5 minutes)
         
         // Get the current template
         const currentTemplate = window.currentTemplate;
@@ -14181,7 +14181,7 @@ async function loadProjectFiles() {
 async function startAutomation() {
     const projectFileSelect = document.getElementById('projectFileSelect');
     const selectedProjectFile = projectFileSelect.value;
-    const programmingDelay = parseInt(document.getElementById('programmingDelayInput').value) || 120;
+    const programmingDelay = parseInt(document.getElementById('programmingDelayInput').value) || 300;
     
     if (!selectedProjectFile) {
         alert('Please select a project file');
@@ -14281,7 +14281,7 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
         
         // Call the existing fillScheduleGaps function
         if (typeof fillScheduleGaps === 'function') {
-            log(`Calling fillScheduleGaps function with ${programmingDelay}s delay...`, 'info');
+            log(`Calling fillScheduleGaps function with ${programmingDelay}s (${programmingDelay/60} minutes) delay...`, 'info');
             
             try {
                 await fillScheduleGaps(programmingDelay);
