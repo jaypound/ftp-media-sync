@@ -6713,10 +6713,12 @@ def fill_template_gaps():
         timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
         expiration_log_path = os.path.join(logs_dir, f'expiration_{timestamp}.log')
         json_debug_log_path = os.path.join(logs_dir, f'fill_gaps_json_debug_{timestamp}.log')
+        bump_scheduling_log_path = os.path.join(logs_dir, f'bump_scheduling_{timestamp}.log')
         
         # Open log files for writing
         expiration_log = open(expiration_log_path, 'w')
         json_debug_log = open(json_debug_log_path, 'w')
+        bump_scheduling_log = open(bump_scheduling_log_path, 'w')
         
         def log_expiration(message):
             """Log to both expiration log file and regular logger"""
@@ -6758,8 +6760,15 @@ def fill_template_gaps():
                 
             json_debug_log.flush()
         
+        def log_bump_scheduling(message):
+            """Log bump scheduling decisions"""
+            bump_scheduling_log.write(f"[{dt.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+            bump_scheduling_log.flush()  # Ensure immediate write
+            logger.info(f"[BUMP_SCHEDULING] {message}")
+        
         log_expiration(f"=== FILL TEMPLATE GAPS SESSION STARTED ===")
         log_json_debug("=== JSON DEBUG LOG STARTED ===")
+        log_bump_scheduling("=== BUMP SCHEDULING LOG STARTED ===")
         
         # Helper function to sanitize numeric values
         def sanitize_numeric_value(value, name="value"):
@@ -8050,6 +8059,45 @@ def fill_template_gaps():
                         if not can_schedule:
                             continue
                     
+                    # Special filtering for BMP (BUMPS) content based on DAY/NIGHT in filename
+                    if duration_category.upper() == 'BMP' or content.get('content_type', '').upper() == 'BMP':
+                        file_name = content.get('file_name', '').upper()
+                        content_title = content.get('content_title', content.get('file_name', ''))
+                        
+                        # Calculate the actual air time for this position
+                        if schedule_type == 'weekly':
+                            days_offset = int(current_position // 86400)
+                            time_in_day = current_position % 86400
+                            air_date = base_date + timedelta(days=days_offset)
+                        else:
+                            time_in_day = current_position
+                            air_date = base_date
+                        
+                        hour_of_day = int(time_in_day / 3600)
+                        air_datetime = air_date.strftime('%Y-%m-%d') + f" {hour_of_day:02d}:{int((time_in_day % 3600) / 60):02d}"
+                        
+                        # Define day/night hours (6 AM - 6 PM is day, 6 PM - 6 AM is night)
+                        is_daytime = 6 <= hour_of_day < 18
+                        
+                        # Check if this is a DAY or NIGHT specific bump
+                        if 'DAY' in file_name and 'NIGHT' not in file_name:
+                            # This is a DAY-only bump
+                            if not is_daytime:
+                                log_bump_scheduling(f"REJECTED: DAY bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - night time")
+                                continue
+                            else:
+                                log_bump_scheduling(f"ACCEPTED: DAY bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - day time")
+                        elif 'NIGHT' in file_name and 'DAY' not in file_name:
+                            # This is a NIGHT-only bump
+                            if is_daytime:
+                                log_bump_scheduling(f"REJECTED: NIGHT bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - day time")
+                                continue
+                            else:
+                                log_bump_scheduling(f"ACCEPTED: NIGHT bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - night time")
+                        else:
+                            # Generic bump without DAY/NIGHT restriction
+                            log_bump_scheduling(f"ACCEPTED: Generic bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - no time restriction")
+                    
                     category_content.append(content)
             
                 if not category_content:
@@ -8109,8 +8157,80 @@ def fill_template_gaps():
                                             break
                                     
                                     if can_schedule:
+                                        # Apply BMP day/night filtering before adding
+                                        if duration_category.upper() == 'BMP' or content.get('content_type', '').upper() == 'BMP':
+                                            file_name = content.get('file_name', '').upper()
+                                            content_title = content.get('content_title', content.get('file_name', ''))
+                                            
+                                            # Calculate the actual air time for this position
+                                            if schedule_type == 'weekly':
+                                                days_offset = int(current_position // 86400)
+                                                time_in_day = current_position % 86400
+                                                air_date = base_date + timedelta(days=days_offset)
+                                            else:
+                                                time_in_day = current_position
+                                                air_date = base_date
+                                            
+                                            hour_of_day = int(time_in_day / 3600)
+                                            air_datetime = air_date.strftime('%Y-%m-%d') + f" {hour_of_day:02d}:{int((time_in_day % 3600) / 60):02d}"
+                                            
+                                            # Define day/night hours (6 AM - 6 PM is day, 6 PM - 6 AM is night)
+                                            is_daytime = 6 <= hour_of_day < 18
+                                            
+                                            # Check if this is a DAY or NIGHT specific bump
+                                            if 'DAY' in file_name and 'NIGHT' not in file_name:
+                                                if not is_daytime:
+                                                    log_bump_scheduling(f"REJECTED (reduced delay): DAY bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - night time")
+                                                    continue
+                                                else:
+                                                    log_bump_scheduling(f"ACCEPTED (reduced delay): DAY bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - day time")
+                                            elif 'NIGHT' in file_name and 'DAY' not in file_name:
+                                                if is_daytime:
+                                                    log_bump_scheduling(f"REJECTED (reduced delay): NIGHT bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - day time")
+                                                    continue
+                                                else:
+                                                    log_bump_scheduling(f"ACCEPTED (reduced delay): NIGHT bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - night time")
+                                            else:
+                                                log_bump_scheduling(f"ACCEPTED (reduced delay): Generic bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - no time restriction")
+                                        
                                         temp_category_content.append(content)
                                 else:
+                                    # Apply BMP day/night filtering before adding
+                                    if duration_category.upper() == 'BMP' or content.get('content_type', '').upper() == 'BMP':
+                                        file_name = content.get('file_name', '').upper()
+                                        content_title = content.get('content_title', content.get('file_name', ''))
+                                        
+                                        # Calculate the actual air time for this position
+                                        if schedule_type == 'weekly':
+                                            days_offset = int(current_position // 86400)
+                                            time_in_day = current_position % 86400
+                                            air_date = base_date + timedelta(days=days_offset)
+                                        else:
+                                            time_in_day = current_position
+                                            air_date = base_date
+                                        
+                                        hour_of_day = int(time_in_day / 3600)
+                                        air_datetime = air_date.strftime('%Y-%m-%d') + f" {hour_of_day:02d}:{int((time_in_day % 3600) / 60):02d}"
+                                        
+                                        # Define day/night hours (6 AM - 6 PM is day, 6 PM - 6 AM is night)
+                                        is_daytime = 6 <= hour_of_day < 18
+                                        
+                                        # Check if this is a DAY or NIGHT specific bump
+                                        if 'DAY' in file_name and 'NIGHT' not in file_name:
+                                            if not is_daytime:
+                                                log_bump_scheduling(f"REJECTED (reduced delay): DAY bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - night time")
+                                                continue
+                                            else:
+                                                log_bump_scheduling(f"ACCEPTED (reduced delay): DAY bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - day time")
+                                        elif 'NIGHT' in file_name and 'DAY' not in file_name:
+                                            if is_daytime:
+                                                log_bump_scheduling(f"REJECTED (reduced delay): NIGHT bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - day time")
+                                                continue
+                                            else:
+                                                log_bump_scheduling(f"ACCEPTED (reduced delay): NIGHT bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - night time")
+                                        else:
+                                            log_bump_scheduling(f"ACCEPTED (reduced delay): Generic bump '{content_title}' at {air_datetime} (hour {hour_of_day}) - no time restriction")
+                                    
                                     temp_category_content.append(content)
                         
                         if temp_category_content:
@@ -9089,10 +9209,15 @@ def fill_template_gaps():
         log_json_debug("=== JSON DEBUG LOG COMPLETED ===")
         json_debug_log.close()
         
+        # Close the bump scheduling log
+        log_bump_scheduling("=== BUMP SCHEDULING LOG COMPLETED ===")
+        bump_scheduling_log.close()
+        
         # Close the expiration log
         expiration_log.close()
         logger.info(f"Expiration decision log saved to: {expiration_log_path}")
         logger.info(f"JSON debug log saved to: {json_debug_log_path}")
+        logger.info(f"Bump scheduling log saved to: {bump_scheduling_log_path}")
         
         return jsonify(response_data)
         
@@ -9113,6 +9238,15 @@ def fill_template_gaps():
                 log_expiration(f"Error: {str(e)}")
                 expiration_log.close()
                 logger.info(f"Expiration decision log saved to: {expiration_log_path}")
+        except:
+            pass  # Ignore errors during cleanup
+            
+        try:
+            if 'bump_scheduling_log' in locals() and bump_scheduling_log:
+                log_bump_scheduling(f"\n=== SESSION TERMINATED DUE TO ERROR ===")
+                log_bump_scheduling(f"Error: {str(e)}")
+                bump_scheduling_log.close()
+                logger.info(f"Bump scheduling log saved to: {bump_scheduling_log_path}")
         except:
             pass  # Ignore errors during cleanup
         
@@ -11457,6 +11591,7 @@ def generate_video():
         export_to_source = data.get('export_to_source', False)
         export_to_target = data.get('export_to_target', False)
         video_format = data.get('video_format', 'mp4')
+        max_length = data.get('max_length', 300)  # Default 300 seconds (5 minutes)
         
         # Region data
         region1_server = data.get('region1_server')
@@ -11545,7 +11680,8 @@ def generate_video():
                 region2_temp_file,
                 region3_temp_files,
                 output_video,
-                video_format
+                video_format,
+                max_length
             )
             
             if not ffmpeg_cmd:
@@ -11680,7 +11816,7 @@ def generate_video():
         logger.error(f"Error generating video: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
-def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_path, format='mp4'):
+def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_path, format='mp4', max_length=300):
     """Generate FFmpeg command for video creation"""
     import subprocess
     from PIL import Image
@@ -11727,11 +11863,10 @@ def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_p
     
     # Input images from region1 (upper graphics)
     if valid_region1_files:
-        # Calculate how many loops we need to cover typical audio duration
-        # Assuming max audio is ~12 minutes (720 seconds)
+        # Calculate how many loops we need to cover the requested duration
         # Each image shows for 10 seconds
         seconds_per_cycle = len(valid_region1_files) * 10
-        loops_needed = max(720 // seconds_per_cycle, 1) + 1  # Add 1 for safety
+        loops_needed = max(max_length // seconds_per_cycle, 1) + 1  # Add 1 for safety
         
         # Create individual image inputs with proper frame rate
         # Repeat the image list to ensure we have enough content
@@ -11836,11 +11971,13 @@ def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_p
     if region3_files:
         audio_index = num_region1_inputs + (1 if region2_file else 0)
         cmd.extend(['-map', f'{audio_index}:a'])
-        # Make the output duration match the audio duration
+        # Make the output duration match the audio duration or max_length, whichever is shorter
         cmd.extend(['-shortest'])
+        # Also apply max_length as a hard limit
+        cmd.extend(['-t', str(max_length)])
     else:
-        # If no audio, limit to a reasonable duration
-        cmd.extend(['-t', '300'])  # 5 minutes max
+        # If no audio, limit to max_length
+        cmd.extend(['-t', str(max_length)])
     
     # Output file
     cmd.append(output_path)

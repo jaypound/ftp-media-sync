@@ -454,6 +454,8 @@ async function fillGraphicsGenerateVideoFile() {
     const exportToSource = document.getElementById('videoExportToSource').checked;
     const exportToTarget = document.getElementById('videoExportToTarget').checked;
     const videoFormat = document.getElementById('videoFormat').value;
+    const maxLength = parseInt(document.getElementById('videoMaxLength').value) || 300;
+    const sortOrder = document.getElementById('videoSortOrder').value || 'newest';
     
     if (!fileName) {
         window.showNotification('Please enter a video file name', 'error');
@@ -473,22 +475,47 @@ async function fillGraphicsGenerateVideoFile() {
     }
     
     try {
-        // Get region1 files in sorted order (newest first by creation date)
-        const sortedRegion1Files = fillGraphicsState.region1.files
-            .filter(file => fillGraphicsState.region1.selected.includes(file.name))
-            .sort((a, b) => {
-                // Same sorting logic as when loading - newest first by creation date
-                const aTime = a.ctime || a.mtime;
-                const bTime = b.ctime || b.mtime;
-                
-                if (aTime && bTime) {
-                    return new Date(bTime) - new Date(aTime);
-                }
-                return b.name.localeCompare(a.name);
-            })
-            .map(file => file.name);
+        // Get region1 files in sorted order based on user selection
+        let sortedRegion1Files = fillGraphicsState.region1.files
+            .filter(file => fillGraphicsState.region1.selected.includes(file.name));
         
-        console.log('Region 1 files for video (sorted newest first):', sortedRegion1Files);
+        // Apply sort order
+        switch(sortOrder) {
+            case 'newest':
+                sortedRegion1Files.sort((a, b) => {
+                    const aTime = a.ctime || a.mtime;
+                    const bTime = b.ctime || b.mtime;
+                    if (aTime && bTime) {
+                        return new Date(bTime) - new Date(aTime);
+                    }
+                    return b.name.localeCompare(a.name);
+                });
+                break;
+            case 'oldest':
+                sortedRegion1Files.sort((a, b) => {
+                    const aTime = a.ctime || a.mtime;
+                    const bTime = b.ctime || b.mtime;
+                    if (aTime && bTime) {
+                        return new Date(aTime) - new Date(bTime);
+                    }
+                    return a.name.localeCompare(b.name);
+                });
+                break;
+            case 'random':
+                // Fisher-Yates shuffle
+                for (let i = sortedRegion1Files.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [sortedRegion1Files[i], sortedRegion1Files[j]] = [sortedRegion1Files[j], sortedRegion1Files[i]];
+                }
+                break;
+            case 'alphabetical':
+                sortedRegion1Files.sort((a, b) => a.name.localeCompare(b.name));
+                break;
+        }
+        
+        sortedRegion1Files = sortedRegion1Files.map(file => file.name);
+        
+        console.log(`Region 1 files for video (sorted ${sortOrder}):`, sortedRegion1Files);
         
         const requestData = {
             file_name: fileName,
@@ -496,6 +523,7 @@ async function fillGraphicsGenerateVideoFile() {
             export_to_source: exportToSource,
             export_to_target: exportToTarget,
             video_format: videoFormat,
+            max_length: maxLength,
             region1_server: fillGraphicsState.region1.server,
             region1_path: fillGraphicsState.region1.path,
             region1_files: sortedRegion1Files,

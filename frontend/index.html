@@ -1829,6 +1829,21 @@
                     </select>
                 </div>
                 <div class="form-group">
+                    <label for="videoMaxLength">Maximum Video Length (seconds)</label>
+                    <input type="number" id="videoMaxLength" class="form-control" value="300" min="30" max="3600" required>
+                    <small class="form-text text-muted">Video will be generated up to this length (default: 300 seconds / 5 minutes)</small>
+                </div>
+                <div class="form-group">
+                    <label for="videoSortOrder">Graphics Sort Order</label>
+                    <select id="videoSortOrder" class="form-control">
+                        <option value="newest">Newest First</option>
+                        <option value="oldest">Oldest First</option>
+                        <option value="random">Random</option>
+                        <option value="alphabetical">Alphabetical</option>
+                    </select>
+                    <small class="form-text text-muted">Order in which graphics will appear in the video</small>
+                </div>
+                <div class="form-group">
                     <label>Summary</label>
                     <div class="summary-box" id="videoSummary">
                         <!-- Summary will be populated here -->
