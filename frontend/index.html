@@ -924,6 +924,47 @@
             <div class="dashboard-panel-header">
                 <h2><i class="fas fa-image"></i> Fill Graphics Generator</h2>
                 <p>Create slideshow project files (.prj) with graphics and music for Castus servers</p>
+                <div class="header-actions" style="margin-top: 10px;">
+                    <button class="button primary" onclick="fillGraphicsScanFolder()">
+                        <i class="fas fa-sync"></i> Scan DEFAULT ROTATION Folder
+                    </button>
+                    <button class="button secondary" onclick="fillGraphicsShowHistory()">
+                        <i class="fas fa-history"></i> Generation History
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Database-driven Graphics Management Section -->
+            <div class="fill-graphics-card" id="databaseGraphicsCard" style="display: none;">
+                <div class="fill-graphics-card-header">
+                    <h3><i class="fas fa-database"></i> Default Graphics Management</h3>
+                    <div class="card-header-actions">
+                        <span id="activeGraphicsCount" class="badge">0 active</span>
+                        <button class="button secondary small" onclick="fillGraphicsToggleView()">
+                            <i class="fas fa-exchange-alt"></i> Switch to Manual Mode
+                        </button>
+                    </div>
+                </div>
+                <div class="fill-graphics-card-content">
+                    <div class="graphics-filters" style="margin-bottom: 1rem;">
+                        <select id="graphicsStatusFilter" class="form-control" onchange="fillGraphicsLoadFromDatabase()" style="display: inline-block; width: auto;">
+                            <option value="">All Graphics</option>
+                            <option value="active" selected>Active</option>
+                            <option value="pending">Pending</option>
+                            <option value="expired">Expired</option>
+                            <option value="disabled">Disabled</option>
+                        </select>
+                        <button class="button secondary small" onclick="fillGraphicsEditSelectedDates()">
+                            <i class="fas fa-calendar-alt"></i> Edit Dates
+                        </button>
+                        <button class="button secondary small" onclick="fillGraphicsRefresh()">
+                            <i class="fas fa-refresh"></i> Refresh
+                        </button>
+                    </div>
+                    <div id="databaseGraphicsList" class="graphics-table-container">
+                        <!-- Database graphics will be loaded here -->
+                    </div>
+                </div>
             </div>
             
             <div class="fill-graphics-card fill-graphics-region1-card">
@@ -2191,6 +2232,73 @@
                 <button class="button primary" onclick="refreshLoudnessDisplay()">
                     <i class="fas fa-sync"></i> Refresh
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Default Graphics Date Edit Modal -->
+    <div id="graphicsDateEditModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-calendar-alt"></i> Edit Graphic Dates</h3>
+                <button class="modal-close" onclick="fillGraphicsCloseDateEditModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="editGraphicIds">Selected Graphics</label>
+                    <div id="selectedGraphicsCount" style="margin: 10px 0; font-weight: bold;"></div>
+                    <div id="selectedGraphicsList" style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-bottom: 15px;"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editStartDate">Start Date</label>
+                    <input type="date" id="editStartDate" class="form-control">
+                    <small class="form-text text-muted">Leave blank to keep existing dates</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editEndDate">End Date (Pull Date)</label>
+                    <input type="date" id="editEndDate" class="form-control">
+                    <small class="form-text text-muted">Leave blank for no expiration</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editGraphicStatus">Status</label>
+                    <select id="editGraphicStatus" class="form-control">
+                        <option value="">Keep existing status</option>
+                        <option value="active">Active</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="editGraphicNotes">Notes</label>
+                    <textarea id="editGraphicNotes" class="form-control" rows="3" placeholder="Optional notes about these graphics"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="fillGraphicsCloseDateEditModal()">Cancel</button>
+                <button class="button primary" onclick="fillGraphicsSaveDateEdits()">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Default Graphics History Modal -->
+    <div id="graphicsHistoryModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-history"></i> Generated Video History</h3>
+                <button class="modal-close" onclick="fillGraphicsCloseHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="graphicsHistoryContent" style="max-height: 600px; overflow-y: auto;">
+                    <!-- History will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="fillGraphicsCloseHistoryModal()">Close</button>
             </div>
         </div>
     </div>

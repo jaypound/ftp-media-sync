@@ -23,7 +23,10 @@ const fillGraphicsState = {
         files: [],
         selected: []
     },
-    canGenerate: false
+    canGenerate: false,
+    databaseMode: true,  // Start in database mode
+    databaseGraphics: [],
+    selectedGraphicIds: []
 };
 
 // Initialize Fill Graphics Module
@@ -38,6 +41,19 @@ function fillGraphicsInit() {
     
     // Update AppState
     AppState.setModule('fill_graphics', fillGraphicsState);
+    
+    // Initialize database view
+    if (fillGraphicsState.databaseMode) {
+        const dbCard = document.getElementById('databaseGraphicsCard');
+        const region1Card = document.querySelector('.fill-graphics-region1-card');
+        if (dbCard) {
+            dbCard.style.display = 'block';
+        }
+        if (region1Card) {
+            region1Card.classList.add('fill-graphics-region-hidden');
+        }
+        fillGraphicsLoadFromDatabase();
+    }
 }
 
 // Set up event listeners
@@ -274,14 +290,31 @@ function fillGraphicsDeselectAllRegion1Graphics() {
 // Update generate button state
 function fillGraphicsUpdateGenerateButton() {
     console.log('DEBUG: Updating generate button state');
-    console.log(`  Region 1 selected: ${fillGraphicsState.region1.selected.length} files`);
-    console.log(`  Region 2 selected: ${fillGraphicsState.region2.selected}`);
-    console.log(`  Region 3 selected: ${fillGraphicsState.region3.selected.length} files`);
+    console.log(`  Database mode: ${fillGraphicsState.databaseMode}`);
     
-    const canGenerate = 
-        fillGraphicsState.region1.selected.length > 0 &&
-        fillGraphicsState.region2.selected !== null &&
-        fillGraphicsState.region3.selected.length > 0;
+    let canGenerate = false;
+    
+    if (fillGraphicsState.databaseMode) {
+        // In database mode, only require music files (Region 3)
+        // Region 1 graphics are selected automatically from database
+        console.log(`  Region 2 selected: ${fillGraphicsState.region2.selected}`);
+        console.log(`  Region 3 selected: ${fillGraphicsState.region3.selected.length} files`);
+        console.log(`  Active graphics in DB: ${fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length}`);
+        
+        canGenerate = 
+            fillGraphicsState.region3.selected.length > 0 &&
+            fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length > 0;
+    } else {
+        // Manual mode - require all three regions
+        console.log(`  Region 1 selected: ${fillGraphicsState.region1.selected.length} files`);
+        console.log(`  Region 2 selected: ${fillGraphicsState.region2.selected}`);
+        console.log(`  Region 3 selected: ${fillGraphicsState.region3.selected.length} files`);
+        
+        canGenerate = 
+            fillGraphicsState.region1.selected.length > 0 &&
+            fillGraphicsState.region2.selected !== null &&
+            fillGraphicsState.region3.selected.length > 0;
+    }
     
     console.log(`  Can generate: ${canGenerate}`);
     
@@ -435,11 +468,20 @@ function fillGraphicsShowGenerateVideoModal() {
     // Update summary in modal
     const summaryEl = document.getElementById('videoSummary');
     if (summaryEl) {
-        summaryEl.innerHTML = `
-            <p><strong>Region 1 (Upper Graphics):</strong> ${fillGraphicsState.region1.selected.length} files selected</p>
-            <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected || 'None'}</p>
-            <p><strong>Region 3 (Music):</strong> ${fillGraphicsState.region3.selected.length} files selected</p>
-        `;
+        if (fillGraphicsState.databaseMode) {
+            const activeGraphics = fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length;
+            summaryEl.innerHTML = `
+                <p><strong>Region 1 (Upper Graphics):</strong> ${activeGraphics} active graphics from database</p>
+                <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected || 'None'}</p>
+                <p><strong>Region 3 (Music):</strong> ${fillGraphicsState.region3.selected.length} files selected</p>
+            `;
+        } else {
+            summaryEl.innerHTML = `
+                <p><strong>Region 1 (Upper Graphics):</strong> ${fillGraphicsState.region1.selected.length} files selected</p>
+                <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected || 'None'}</p>
+                <p><strong>Region 3 (Music):</strong> ${fillGraphicsState.region3.selected.length} files selected</p>
+            `;
+        }
     }
     
     // Show modal
@@ -449,7 +491,7 @@ function fillGraphicsShowGenerateVideoModal() {
 
 // Generate video file
 async function fillGraphicsGenerateVideoFile() {
-    const fileName = document.getElementById('videoFileName').value.trim();
+    let fileName = document.getElementById('videoFileName').value.trim();
     const exportPath = document.getElementById('videoExportPath').value.trim();
     const exportToSource = document.getElementById('videoExportToSource').checked;
     const exportToTarget = document.getElementById('videoExportToTarget').checked;
@@ -462,17 +504,74 @@ async function fillGraphicsGenerateVideoFile() {
         return;
     }
     
+    // Ensure filename has the correct extension
+    const extension = `.${videoFormat}`;
+    if (!fileName.toLowerCase().endsWith(extension)) {
+        fileName += extension;
+    }
+    
     if (!exportToSource && !exportToTarget) {
         window.showNotification('Please select at least one server to export to', 'error');
         return;
     }
     
-    // Disable button during generation
+    // Get the generate button and show spinner
     const button = document.querySelector('#generateVideoModal .button.primary');
     if (button) {
         button.disabled = true;
         button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
     }
+    
+    // Check if we're in database mode
+    if (fillGraphicsState.databaseMode) {
+        // Use the database-aware endpoint
+        try {
+            const response = await window.API.post('/default-graphics/generate-video', {
+                file_name: fileName,
+                export_path: exportPath,
+                export_to_source: exportToSource,
+                export_to_target: exportToTarget,
+                video_format: videoFormat,
+                max_length: maxLength,
+                sort_order: sortOrder,
+                region2_file: fillGraphicsState.region2.selected,
+                region2_path: fillGraphicsState.region2.path,
+                region3_files: fillGraphicsState.region3.selected,
+                region3_path: fillGraphicsState.region3.path
+            });
+            
+            if (response && response.success) {
+                window.showNotification('Video generated successfully!', 'success');
+                fillGraphicsCloseGenerateVideoModal();
+                
+                // Reload graphics to update usage stats
+                fillGraphicsLoadFromDatabase();
+                
+                // Reset selections
+                fillGraphicsState.region2.selected = null;
+                fillGraphicsState.region3.selected = [];
+                
+                // Refresh displays
+                fillGraphicsDisplayFiles(2, fillGraphicsState.region2.files);
+                fillGraphicsDisplayFiles(3, fillGraphicsState.region3.files);
+                fillGraphicsUpdateGenerateButton();
+            } else {
+                window.showNotification(`Failed to generate video: ${response.message || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            console.error('Video generation error:', error);
+            window.showNotification(`Failed to generate video: ${error.message}`, 'error');
+        } finally {
+            // Restore button state
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '<i class="fas fa-video"></i> Generate & Export';
+            }
+        }
+        return;
+    }
+    
+    // Button spinner is already shown above
     
     try {
         // Get region1 files in sorted order based on user selection
@@ -583,6 +682,315 @@ function fillGraphicsFormatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Database-related functions
+
+// Scan DEFAULT ROTATION folder and add to database
+async function fillGraphicsScanFolder() {
+    console.log('Scanning DEFAULT ROTATION folder...');
+    
+    try {
+        const response = await window.API.post('/default-graphics/scan', {
+            server: 'source',
+            path: '/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION'
+        });
+        
+        if (response.success) {
+            window.showNotification(response.message, 'success');
+            // Reload graphics from database
+            fillGraphicsLoadFromDatabase();
+        } else {
+            window.showNotification(response.message || 'Failed to scan folder', 'error');
+        }
+    } catch (error) {
+        console.error('Scan error:', error);
+        window.showNotification('Failed to scan folder', 'error');
+    }
+}
+
+// Load graphics from database
+async function fillGraphicsLoadFromDatabase() {
+    const statusFilter = document.getElementById('graphicsStatusFilter')?.value || 'active';
+    
+    try {
+        const response = await window.API.get(`/default-graphics?status=${statusFilter}`);
+        
+        if (response.success) {
+            fillGraphicsState.databaseGraphics = response.graphics;
+            fillGraphicsDisplayDatabaseGraphics(response.graphics);
+            
+            // Update active count
+            const activeCount = response.graphics.filter(g => g.status === 'active').length;
+            const countEl = document.getElementById('activeGraphicsCount');
+            if (countEl) {
+                countEl.textContent = `${activeCount} active`;
+            }
+            
+            // Update generate button state
+            fillGraphicsUpdateGenerateButton();
+        }
+    } catch (error) {
+        console.error('Failed to load graphics:', error);
+        window.showNotification('Failed to load graphics from database', 'error');
+    }
+}
+
+// Display database graphics in a table
+function fillGraphicsDisplayDatabaseGraphics(graphics) {
+    const container = document.getElementById('databaseGraphicsList');
+    if (!container) return;
+    
+    if (graphics.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #666;">No graphics found. Click "Scan DEFAULT ROTATION Folder" to import graphics.</p>';
+        return;
+    }
+    
+    let html = `
+        <table class="graphics-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    <th style="width: 30px;"><input type="checkbox" onchange="fillGraphicsToggleSelectAll(this)"></th>
+                    <th>File Name</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Days Left</th>
+                    <th>Status</th>
+                    <th>Last Used</th>
+                    <th>Used Count</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    graphics.forEach(graphic => {
+        const isSelected = fillGraphicsState.selectedGraphicIds.includes(graphic.id);
+        const statusClass = graphic.status === 'active' ? 'badge-success' : 
+                          graphic.status === 'expired' ? 'badge-danger' : 
+                          graphic.status === 'pending' ? 'badge-info' : 'badge-secondary';
+        
+        const daysLeft = graphic.days_remaining !== null ? 
+            (graphic.days_remaining > 0 ? `${graphic.days_remaining} days` : 'Expired') : 
+            'No limit';
+        
+        html += `
+            <tr class="${isSelected ? 'selected' : ''}">
+                <td><input type="checkbox" ${isSelected ? 'checked' : ''} onchange="fillGraphicsToggleSelection(${graphic.id})"></td>
+                <td>${graphic.file_name}</td>
+                <td>${graphic.start_date ? new Date(graphic.start_date).toLocaleDateString() : '-'}</td>
+                <td>${graphic.end_date ? new Date(graphic.end_date).toLocaleDateString() : 'No expiry'}</td>
+                <td>${daysLeft}</td>
+                <td><span class="badge ${statusClass}">${graphic.status}</span></td>
+                <td>${graphic.last_included ? new Date(graphic.last_included).toLocaleDateString() : 'Never'}</td>
+                <td>${graphic.include_count || 0}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Toggle graphic selection
+function fillGraphicsToggleSelection(graphicId) {
+    const index = fillGraphicsState.selectedGraphicIds.indexOf(graphicId);
+    if (index > -1) {
+        fillGraphicsState.selectedGraphicIds.splice(index, 1);
+    } else {
+        fillGraphicsState.selectedGraphicIds.push(graphicId);
+    }
+    fillGraphicsDisplayDatabaseGraphics(fillGraphicsState.databaseGraphics);
+}
+
+// Toggle select all graphics
+function fillGraphicsToggleSelectAll(checkbox) {
+    if (checkbox.checked) {
+        fillGraphicsState.selectedGraphicIds = fillGraphicsState.databaseGraphics.map(g => g.id);
+    } else {
+        fillGraphicsState.selectedGraphicIds = [];
+    }
+    fillGraphicsDisplayDatabaseGraphics(fillGraphicsState.databaseGraphics);
+}
+
+// Show date edit modal
+function fillGraphicsEditSelectedDates() {
+    const selectedCount = fillGraphicsState.selectedGraphicIds.length;
+    if (selectedCount === 0) {
+        window.showNotification('Please select at least one graphic to edit', 'warning');
+        return;
+    }
+    
+    // Update modal with selected graphics info
+    const countEl = document.getElementById('selectedGraphicsCount');
+    if (countEl) {
+        countEl.textContent = `${selectedCount} graphic${selectedCount > 1 ? 's' : ''} selected`;
+    }
+    
+    // Show selected graphics list
+    const listEl = document.getElementById('selectedGraphicsList');
+    if (listEl) {
+        const selectedGraphics = fillGraphicsState.databaseGraphics.filter(g => 
+            fillGraphicsState.selectedGraphicIds.includes(g.id)
+        );
+        listEl.innerHTML = selectedGraphics.map(g => `• ${g.file_name}`).join('<br>');
+    }
+    
+    // Clear form fields
+    document.getElementById('editStartDate').value = '';
+    document.getElementById('editEndDate').value = '';
+    document.getElementById('editGraphicStatus').value = '';
+    document.getElementById('editGraphicNotes').value = '';
+    
+    // Show modal
+    document.getElementById('graphicsDateEditModal').style.display = 'block';
+}
+
+// Save date edits
+async function fillGraphicsSaveDateEdits() {
+    const updates = {};
+    
+    const startDate = document.getElementById('editStartDate').value;
+    const endDate = document.getElementById('editEndDate').value;
+    const status = document.getElementById('editGraphicStatus').value;
+    const notes = document.getElementById('editGraphicNotes').value;
+    
+    if (startDate) updates.start_date = startDate;
+    if (endDate !== '') updates.end_date = endDate || null;
+    if (status) updates.status = status;
+    if (notes) updates.notes = notes;
+    
+    if (Object.keys(updates).length === 0) {
+        window.showNotification('No changes to save', 'warning');
+        return;
+    }
+    
+    try {
+        const response = await window.API.post('/default-graphics/batch-update', {
+            ids: fillGraphicsState.selectedGraphicIds,
+            updates: updates
+        });
+        
+        if (response.success) {
+            window.showNotification(response.message, 'success');
+            fillGraphicsCloseDateEditModal();
+            fillGraphicsLoadFromDatabase();
+            fillGraphicsState.selectedGraphicIds = [];
+        } else {
+            window.showNotification(response.message || 'Failed to update graphics', 'error');
+        }
+    } catch (error) {
+        console.error('Update error:', error);
+        window.showNotification('Failed to update graphics', 'error');
+    }
+}
+
+// Show generation history
+async function fillGraphicsShowHistory() {
+    try {
+        const response = await window.API.get('/default-graphics/history?limit=20');
+        
+        if (response.success) {
+            fillGraphicsDisplayHistory(response.history);
+            document.getElementById('graphicsHistoryModal').style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Failed to load history:', error);
+        window.showNotification('Failed to load generation history', 'error');
+    }
+}
+
+// Display generation history
+function fillGraphicsDisplayHistory(history) {
+    const container = document.getElementById('graphicsHistoryContent');
+    if (!container) return;
+    
+    if (history.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #666;">No generation history found.</p>';
+        return;
+    }
+    
+    let html = `
+        <table class="history-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>File Name</th>
+                    <th>Graphics</th>
+                    <th>Duration</th>
+                    <th>Format</th>
+                    <th>Server</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    history.forEach(record => {
+        const genDate = new Date(record.generation_date);
+        const duration = record.total_duration ? `${Math.floor(record.total_duration / 60)}:${Math.floor(record.total_duration % 60).toString().padStart(2, '0')}` : '-';
+        
+        html += `
+            <tr>
+                <td>${genDate.toLocaleString()}</td>
+                <td>${record.file_name}</td>
+                <td>${record.graphics_count || 0}</td>
+                <td>${duration}</td>
+                <td>${record.video_format || 'mp4'}</td>
+                <td>${record.export_server || '-'}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// Toggle between database and manual mode
+function fillGraphicsToggleView() {
+    fillGraphicsState.databaseMode = !fillGraphicsState.databaseMode;
+    
+    const dbCard = document.getElementById('databaseGraphicsCard');
+    const toggleBtn = document.querySelector('.card-header-actions button');
+    const region1Card = document.querySelector('.fill-graphics-region1-card');
+    
+    if (fillGraphicsState.databaseMode) {
+        dbCard.style.display = 'block';
+        if (region1Card) {
+            region1Card.classList.add('fill-graphics-region-hidden');
+        }
+        toggleBtn.innerHTML = '<i class="fas fa-exchange-alt"></i> Switch to Manual Mode';
+        fillGraphicsLoadFromDatabase();
+    } else {
+        dbCard.style.display = 'none';
+        if (region1Card) {
+            region1Card.classList.remove('fill-graphics-region-hidden');
+        }
+        toggleBtn.innerHTML = '<i class="fas fa-exchange-alt"></i> Switch to Database Mode';
+    }
+    
+    // Update generate button state
+    fillGraphicsUpdateGenerateButton();
+}
+
+// Refresh graphics
+function fillGraphicsRefresh() {
+    fillGraphicsLoadFromDatabase();
+}
+
+// Close modals
+function fillGraphicsCloseDateEditModal() {
+    document.getElementById('graphicsDateEditModal').style.display = 'none';
+}
+
+function fillGraphicsCloseHistoryModal() {
+    document.getElementById('graphicsHistoryModal').style.display = 'none';
+}
+
 // Export functions to global scope
 window.fillGraphicsInit = fillGraphicsInit;
 window.fillGraphicsLoadRegion1Graphics = fillGraphicsLoadRegion1Graphics;
@@ -597,6 +1005,19 @@ window.fillGraphicsCloseGenerateProjectModal = fillGraphicsCloseGenerateProjectM
 window.fillGraphicsShowGenerateVideoModal = fillGraphicsShowGenerateVideoModal;
 window.fillGraphicsGenerateVideoFile = fillGraphicsGenerateVideoFile;
 window.fillGraphicsCloseGenerateVideoModal = fillGraphicsCloseGenerateVideoModal;
+
+// Export new database functions
+window.fillGraphicsScanFolder = fillGraphicsScanFolder;
+window.fillGraphicsLoadFromDatabase = fillGraphicsLoadFromDatabase;
+window.fillGraphicsToggleSelection = fillGraphicsToggleSelection;
+window.fillGraphicsToggleSelectAll = fillGraphicsToggleSelectAll;
+window.fillGraphicsEditSelectedDates = fillGraphicsEditSelectedDates;
+window.fillGraphicsSaveDateEdits = fillGraphicsSaveDateEdits;
+window.fillGraphicsShowHistory = fillGraphicsShowHistory;
+window.fillGraphicsToggleView = fillGraphicsToggleView;
+window.fillGraphicsRefresh = fillGraphicsRefresh;
+window.fillGraphicsCloseDateEditModal = fillGraphicsCloseDateEditModal;
+window.fillGraphicsCloseHistoryModal = fillGraphicsCloseHistoryModal;
 
 // Legacy support
 window.loadRegion1Graphics = fillGraphicsLoadRegion1Graphics;

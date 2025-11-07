@@ -13007,6 +13007,9 @@ def list_project_files():
                         'path': f"{path}/{file['name']}",
                         'size': file.get('size', 0),
                         'modified': file.get('modified', ''),
+                        'mtime': file.get('mtime', 0),
+                        'ctime': file.get('ctime', file.get('mtime', 0)),
+                        'created': file.get('created', file.get('modified', '')),
                         'type': 'project'
                     })
             
@@ -13022,6 +13025,9 @@ def list_project_files():
                                 'path': f"{videos_path}/{file['name']}",
                                 'size': file.get('size', 0),
                                 'modified': file.get('modified', ''),
+                                'mtime': file.get('mtime', 0),
+                                'ctime': file.get('ctime', file.get('mtime', 0)),
+                                'created': file.get('created', file.get('modified', '')),
                                 'type': 'video'
                             })
                 except Exception as e:
@@ -14380,6 +14386,588 @@ async def process_loudness_queue():
     # Clean up completed and failed items from queue after a delay
     await asyncio.sleep(5)
     loudness_queue[:] = [item for item in loudness_queue if item['status'] not in ['completed', 'error', 'failed']]
+
+# Default Graphics Management Endpoints
+@app.route('/api/default-graphics/scan', methods=['POST'])
+def scan_default_graphics():
+    """Scan DEFAULT ROTATION folder for graphics files and add to database"""
+    try:
+        # Get the path from config or use default
+        default_path = '/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION'
+        server = request.json.get('server', 'source')
+        path = request.json.get('path', default_path)
+        
+        logger.info(f"Scanning default graphics from {server}:{path}")
+        
+        # Get FTP manager
+        ftp_manager = ftp_managers.get(server)
+        if not ftp_manager or not ftp_manager.connected:
+            return jsonify({
+                'success': False,
+                'message': f'{server.title()} FTP server is not connected'
+            })
+        
+        # List files in the directory
+        files = ftp_manager.list_files(path)
+        logger.info(f"Found {len(files)} total files in directory")
+        
+        if not files:
+            return jsonify({
+                'success': False,
+                'message': 'No files found in directory'
+            })
+        
+        # Log first few files for debugging
+        for i, f in enumerate(files[:5]):
+            logger.debug(f"File {i}: {f.get('name', 'unnamed')} - Size: {f.get('size', 0)}")
+        
+        # Filter for image files
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.JPG', '.JPEG', '.PNG', '.GIF', '.BMP']
+        image_files = []
+        
+        for f in files:
+            file_name = f.get('name', '')
+            # Check if it's an image file
+            is_image = any(file_name.endswith(ext) for ext in image_extensions) or \
+                      any(file_name.lower().endswith(ext.lower()) for ext in image_extensions)
+            
+            if is_image:
+                image_files.append(f)
+                logger.debug(f"Including image file: {file_name}")
+            else:
+                logger.debug(f"Skipping non-image file: {file_name}")
+        
+        logger.info(f"Found {len(image_files)} image files after filtering")
+        
+        # Connect to database and add/update graphics
+        conn = db_manager._get_connection()
+        cursor = conn.cursor()
+        
+        added_count = 0
+        updated_count = 0
+        
+        for file_info in image_files:
+            try:
+                file_name = file_info['name']
+                file_path = os.path.join(path, file_name)
+                file_size = file_info.get('size', 0)
+                
+                # Get timestamp - mtime is now a Unix timestamp (float)
+                file_modified = None
+                if 'mtime' in file_info and file_info['mtime']:
+                    try:
+                        # Convert Unix timestamp to datetime
+                        file_modified = datetime.fromtimestamp(file_info['mtime'])
+                    except:
+                        # Try parsing the 'modified' field as ISO string
+                        if 'modified' in file_info and file_info['modified']:
+                            try:
+                                file_modified = datetime.fromisoformat(file_info['modified'].replace('Z', '+00:00'))
+                            except:
+                                file_modified = None
+                
+                # Check if graphic already exists
+                cursor.execute("""
+                    SELECT id FROM default_graphics WHERE file_name = %s
+                """, (file_name,))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing graphic
+                    cursor.execute("""
+                        UPDATE default_graphics 
+                        SET file_path = %s, file_size = %s, file_modified = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE file_name = %s
+                    """, (file_path, file_size, file_modified, file_name))
+                    updated_count += 1
+                    logger.debug(f"Updated existing graphic: {file_name}")
+                else:
+                    # Add new graphic with default dates
+                    # Default to 30 days from now for end_date
+                    end_date = (datetime.now() + timedelta(days=30)).date()
+                    
+                    logger.info(f"Adding new graphic: {file_name} (size: {file_size}, modified: {file_modified})")
+                    
+                    cursor.execute("""
+                        INSERT INTO default_graphics 
+                        (file_name, file_path, file_size, file_modified, creation_date, start_date, end_date)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s)
+                    """, (file_name, file_path, file_size, file_modified, file_modified, end_date))
+                    added_count += 1
+                    logger.info(f"Successfully added graphic: {file_name}")
+                    
+            except Exception as e:
+                logger.error(f"Error processing graphic {file_name}: {str(e)}", exc_info=True)
+                conn.rollback()  # Rollback the transaction for this file
+                continue
+        
+        conn.commit()
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Scan complete. Added {added_count} new graphics, updated {updated_count} existing graphics.',
+            'added': added_count,
+            'updated': updated_count,
+            'total': len(image_files)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error scanning default graphics: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/default-graphics', methods=['GET'])
+def get_default_graphics():
+    """Get all default graphics with their metadata"""
+    try:
+        status_filter = request.args.get('status', '')  # active, expired, disabled, pending
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        query = """
+            SELECT 
+                id, file_name, file_path, file_size, file_modified,
+                creation_date, scan_date, start_date, end_date,
+                duration_seconds, sort_order, status, metadata, notes,
+                last_included, include_count, created_at, updated_at,
+                CASE 
+                    WHEN end_date IS NOT NULL THEN end_date - CURRENT_DATE
+                    ELSE NULL
+                END as days_remaining
+            FROM default_graphics
+        """
+        
+        params = []
+        if status_filter:
+            query += " WHERE status = %s"
+            params.append(status_filter)
+            
+        query += " ORDER BY COALESCE(sort_order, 0), creation_date DESC"
+        
+        cursor.execute(query, params)
+        graphics = cursor.fetchall()
+        
+        # Convert dates to strings for JSON
+        for graphic in graphics:
+            for date_field in ['creation_date', 'scan_date', 'start_date', 'end_date', 'last_included', 'created_at', 'updated_at']:
+                if graphic.get(date_field):
+                    graphic[date_field] = graphic[date_field].isoformat() if hasattr(graphic[date_field], 'isoformat') else str(graphic[date_field])
+            # Convert file_modified timestamp
+            if graphic.get('file_modified'):
+                graphic['file_modified'] = graphic['file_modified'].isoformat() if hasattr(graphic['file_modified'], 'isoformat') else str(graphic['file_modified'])
+        
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'graphics': graphics
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting default graphics: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/default-graphics/<int:graphic_id>', methods=['PUT'])
+def update_default_graphic(graphic_id):
+    """Update a default graphic's metadata"""
+    try:
+        data = request.json
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor()
+        
+        # Build update query dynamically based on provided fields
+        update_fields = []
+        params = []
+        
+        # Allowed update fields
+        allowed_fields = ['start_date', 'end_date', 'duration_seconds', 'sort_order', 'status', 'notes']
+        
+        for field in allowed_fields:
+            if field in data:
+                update_fields.append(f"{field} = %s")
+                params.append(data[field])
+        
+        if not update_fields:
+            return jsonify({
+                'success': False,
+                'message': 'No valid fields to update'
+            })
+        
+        # Add updated_at
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        
+        # Add graphic_id to params
+        params.append(graphic_id)
+        
+        query = f"UPDATE default_graphics SET {', '.join(update_fields)} WHERE id = %s"
+        cursor.execute(query, params)
+        
+        conn.commit()
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Graphic updated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating default graphic: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/default-graphics/batch-update', methods=['POST'])
+def batch_update_default_graphics():
+    """Update multiple graphics at once"""
+    try:
+        data = request.json
+        graphic_ids = data.get('ids', [])
+        updates = data.get('updates', {})
+        
+        if not graphic_ids or not updates:
+            return jsonify({
+                'success': False,
+                'message': 'No graphics or updates provided'
+            })
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor()
+        
+        # Build update query
+        update_fields = []
+        params = []
+        
+        # Allowed update fields
+        allowed_fields = ['start_date', 'end_date', 'duration_seconds', 'sort_order', 'status', 'notes']
+        
+        for field in allowed_fields:
+            if field in updates:
+                update_fields.append(f"{field} = %s")
+                params.append(updates[field])
+        
+        if not update_fields:
+            return jsonify({
+                'success': False,
+                'message': 'No valid fields to update'
+            })
+        
+        # Add updated_at
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        
+        # Create placeholders for IDs
+        id_placeholders = ','.join(['%s'] * len(graphic_ids))
+        params.extend(graphic_ids)
+        
+        query = f"UPDATE default_graphics SET {', '.join(update_fields)} WHERE id IN ({id_placeholders})"
+        cursor.execute(query, params)
+        
+        updated_count = cursor.rowcount
+        conn.commit()
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Updated {updated_count} graphics successfully',
+            'updated': updated_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error batch updating default graphics: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/default-graphics/generate-video', methods=['POST'])
+def generate_default_graphics_video():
+    """Generate a video from active default graphics"""
+    try:
+        data = request.json
+        
+        # Get parameters
+        file_name = data.get('file_name', f'default_graphics_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4')
+        export_path = data.get('export_path', '/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION')
+        export_to_source = data.get('export_to_source', False)
+        export_to_target = data.get('export_to_target', False)
+        video_format = data.get('video_format', 'mp4')
+        max_length = data.get('max_length', 300)  # Default 5 minutes
+        sort_order = data.get('sort_order', 'creation')  # creation, manual, random
+        region2_file = data.get('region2_file')
+        region3_files = data.get('region3_files', [])
+        
+        # Get active graphics from database
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Query active graphics
+        cursor.execute("""
+            SELECT id, file_name, file_path, duration_seconds, sort_order, creation_date
+            FROM default_graphics
+            WHERE status = 'active' 
+            AND start_date <= CURRENT_DATE 
+            AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+            ORDER BY COALESCE(sort_order, 999999), creation_date DESC
+        """)
+        
+        graphics = cursor.fetchall()
+        
+        if not graphics:
+            return jsonify({
+                'success': False,
+                'message': 'No active graphics found'
+            })
+        
+        # Apply sort order
+        if sort_order == 'manual':
+            # Already sorted by sort_order in query
+            pass
+        elif sort_order == 'random':
+            import random
+            random.shuffle(graphics)
+        else:  # 'creation' or default
+            # Already sorted by creation_date in query
+            pass
+        
+        # Get file paths
+        region1_files = [g['file_name'] for g in graphics]
+        region1_path = '/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION'
+        
+        # Track which graphics are included
+        included_graphics = []
+        video_id = None
+        
+        try:
+            # Generate the video using existing logic
+            # First, create a record in generated_default_videos table
+            cursor.execute("""
+                INSERT INTO generated_default_videos 
+                (file_name, file_path, export_server, graphics_count, video_format, 
+                 region2_file, music_files, generation_params)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                file_name,
+                os.path.join(export_path, file_name),
+                'both' if export_to_source and export_to_target else 'source' if export_to_source else 'target',
+                len(graphics),
+                video_format,
+                region2_file,
+                json.dumps(region3_files) if region3_files else None,
+                json.dumps({
+                    'max_length': max_length,
+                    'sort_order': sort_order
+                })
+            ))
+            video_id = cursor.fetchone()['id']
+            
+            # Need to download the actual files first
+            import tempfile
+            import shutil
+            
+            temp_dir = tempfile.mkdtemp()
+            region1_temp_files = []
+            region2_temp_file = None
+            region3_temp_files = []
+            
+            try:
+                # Download Region 1 files (graphics from database)
+                source_ftp = ftp_managers.get('source')
+                if source_ftp and source_ftp.connected:
+                    for graphic in graphics[:20]:  # Limit to prevent extremely long videos
+                        remote_path = graphic['file_path']
+                        local_path = os.path.join(temp_dir, f"r1_{graphic['file_name']}")
+                        if source_ftp.download_file(remote_path, local_path):
+                            region1_temp_files.append(local_path)
+                            logger.info(f"Downloaded graphic: {graphic['file_name']}")
+                
+                # Download Region 2 file if selected
+                if region2_file:
+                    remote_path = os.path.join(data.get('region2_path', '/mnt/main/Graphics'), region2_file)
+                    region2_temp_file = os.path.join(temp_dir, f"r2_{region2_file}")
+                    if source_ftp.download_file(remote_path, region2_temp_file):
+                        logger.info(f"Downloaded region2 file: {region2_file}")
+                
+                # Download Region 3 files (music)
+                for music_file in region3_files[:5]:  # Limit music files
+                    remote_path = os.path.join(data.get('region3_path', '/mnt/main/Music'), music_file)
+                    local_path = os.path.join(temp_dir, f"r3_{music_file}")
+                    if source_ftp.download_file(remote_path, local_path):
+                        region3_temp_files.append(local_path)
+                        logger.info(f"Downloaded music file: {music_file}")
+                
+                # Generate video using existing function
+                output_video = os.path.join(temp_dir, file_name)
+                cmd = generate_ffmpeg_command(
+                    region1_temp_files,
+                    region2_temp_file,
+                    region3_temp_files,
+                    output_video,
+                    format=video_format,
+                    max_length=max_length
+                )
+            
+                # Execute the command
+                logger.info(f"Generating default graphics video: {file_name}")
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, stderr = process.communicate()
+                
+                if process.returncode != 0:
+                    logger.error(f"FFmpeg error: {stderr.decode()}")
+                    raise Exception(f"Video generation failed: {stderr.decode()}")
+                    
+                logger.info(f"Video generated successfully: {file_name}")
+                
+                # Move the generated video to current directory
+                shutil.move(output_video, file_name)
+                
+            finally:
+                # Clean up temp directory
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            
+            # Update graphics usage tracking - only for graphics that were actually downloaded
+            position = 0
+            total_duration = 0.0
+            graphics_used = graphics[:len(region1_temp_files)]  # Only the ones we downloaded
+            
+            for graphic in graphics_used:
+                if total_duration >= max_length:
+                    break
+                    
+                duration = float(graphic['duration_seconds'])
+                cursor.execute("""
+                    INSERT INTO default_graphics_usage (graphic_id, video_id, position, duration_seconds)
+                    VALUES (%s, %s, %s, %s)
+                """, (graphic['id'], video_id, position, duration))
+                
+                # Update last_included and include_count
+                cursor.execute("""
+                    UPDATE default_graphics 
+                    SET last_included = CURRENT_TIMESTAMP, 
+                        include_count = include_count + 1
+                    WHERE id = %s
+                """, (graphic['id'],))
+                logger.info(f"Updated usage stats for graphic {graphic['id']} - {graphic['file_name']}")
+                
+                included_graphics.append({
+                    'id': graphic['id'],
+                    'file_name': graphic['file_name'],
+                    'position': position,
+                    'duration': duration
+                })
+                
+                position += 1
+                total_duration += duration
+            
+            # Update video record with actual duration and included graphics
+            cursor.execute("""
+                UPDATE generated_default_videos 
+                SET total_duration = %s, graphics_included = %s
+                WHERE id = %s
+            """, (total_duration, json.dumps(included_graphics), video_id))
+            
+            conn.commit()
+            
+            # Handle file export if needed
+            if export_to_source or export_to_target:
+                # Similar to existing export logic
+                temp_file_path = os.path.join('/tmp', file_name)
+                os.rename(file_name, temp_file_path)
+                
+                export_results = []
+                if export_to_source and 'source' in ftp_managers:
+                    success = ftp_managers['source'].upload_file(temp_file_path, os.path.join(export_path, file_name))
+                    export_results.append({'server': 'source', 'success': success})
+                    
+                if export_to_target and 'target' in ftp_managers:
+                    success = ftp_managers['target'].upload_file(temp_file_path, os.path.join(export_path, file_name))
+                    export_results.append({'server': 'target', 'success': success})
+                
+                os.unlink(temp_file_path)
+            
+            db_manager._put_connection(conn)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Video generated successfully with {len(included_graphics)} graphics',
+                'video_id': video_id,
+                'file_name': file_name,
+                'duration': total_duration,
+                'graphics_count': len(included_graphics),
+                'export_results': export_results if 'export_results' in locals() else []
+            })
+            
+        except Exception as e:
+            # Rollback on error
+            conn.rollback()
+            raise e
+            
+    except Exception as e:
+        logger.error(f"Error generating default graphics video: {str(e)}")
+        if 'conn' in locals():
+            db_manager._put_connection(conn)
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/default-graphics/history', methods=['GET'])
+def get_default_graphics_history():
+    """Get history of generated videos"""
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get total count
+        cursor.execute("SELECT COUNT(*) as count FROM generated_default_videos")
+        total_count = cursor.fetchone()['count']
+        
+        # Get history with pagination
+        cursor.execute("""
+            SELECT 
+                id, file_name, file_path, export_server, generation_date,
+                graphics_count, total_duration, video_format, region2_file,
+                music_files, graphics_included, generation_params, created_by, notes
+            FROM generated_default_videos
+            ORDER BY generation_date DESC
+            LIMIT %s OFFSET %s
+        """, (limit, offset))
+        
+        history = cursor.fetchall()
+        
+        # Convert dates to strings
+        for record in history:
+            if record.get('generation_date'):
+                record['generation_date'] = record['generation_date'].isoformat()
+        
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'history': history,
+            'total': total_count,
+            'limit': limit,
+            'offset': offset
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting graphics history: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
 
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")

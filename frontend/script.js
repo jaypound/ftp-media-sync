@@ -14065,8 +14065,12 @@ async function autoStartAutomation() {
             return;
         }
         
-        // Sort files by modification time to get the newest
-        const newestFile = result.files.sort((a, b) => b.mtime - a.mtime)[0];
+        // Sort files by creation time (prefer ctime if available, fall back to mtime)
+        const newestFile = result.files.sort((a, b) => {
+            const aTime = a.ctime || a.mtime || 0;
+            const bTime = b.ctime || b.mtime || 0;
+            return bTime - aTime;
+        })[0];
         const selectedFile = newestFile.path;
         const programmingDelay = 300; // Default 300 seconds (5 minutes)
         
@@ -14077,7 +14081,11 @@ async function autoStartAutomation() {
             return;
         }
         
-        log(`Starting automated process with video: ${newestFile.name}`, 'info');
+        // Log which time was used for selection
+        const timeUsed = newestFile.ctime ? 'creation' : 'modification';
+        const timeValue = newestFile.ctime || newestFile.mtime;
+        const timeDate = timeValue ? new Date(timeValue * 1000).toLocaleString() : 'Unknown';
+        log(`Starting automated process with video: ${newestFile.name} (selected by ${timeUsed} time: ${timeDate})`, 'info');
         
         // Execute the automation process directly
         await executeAutomation(selectedFile, newestFile.name, programmingDelay, currentTemplate);

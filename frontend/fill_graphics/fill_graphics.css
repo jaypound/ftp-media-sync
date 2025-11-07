@@ -285,6 +285,150 @@ body.dark-mode .fill-graphics-file-item.selected {
     background-color: var(--info-background);
 }
 
+/* Graphics Table Styles */
+.graphics-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.graphics-table th {
+    background-color: #f5f5f5;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #ddd;
+}
+
+.graphics-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.graphics-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.graphics-table tbody tr.selected {
+    background-color: #e3f2fd;
+}
+
+.graphics-table-container {
+    overflow-x: auto;
+    margin-top: 10px;
+}
+
+/* History Table */
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.history-table th,
+.history-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.history-table th {
+    background-color: #f5f5f5;
+    font-weight: 600;
+}
+
+/* Badge styles */
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    font-size: 0.85em;
+    font-weight: 600;
+    border-radius: 4px;
+}
+
+.badge-success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.badge-danger {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.badge-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.badge-secondary {
+    background-color: #e2e3e5;
+    color: #383d41;
+}
+
+/* Card header actions */
+.card-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.graphics-filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Dark mode table styles */
+body.dark-mode .graphics-table {
+    background-color: var(--card-background);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+body.dark-mode .graphics-table th {
+    background-color: rgba(255,255,255,0.05);
+    color: var(--text-primary);
+    border-bottom-color: var(--border-color);
+}
+
+body.dark-mode .graphics-table td {
+    border-bottom-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+body.dark-mode .graphics-table tbody tr:hover {
+    background-color: rgba(255,255,255,0.03);
+}
+
+body.dark-mode .graphics-table tbody tr.selected {
+    background-color: rgba(33, 150, 243, 0.1);
+}
+
+/* Database mode hidden indicator */
+.fill-graphics-region-hidden {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.fill-graphics-region-hidden .fill-graphics-card-content {
+    display: none;
+}
+
+.fill-graphics-region-hidden .fill-graphics-card-header::after {
+    content: " (Hidden in Database Mode)";
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-weight: normal;
+    margin-left: 0.5rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .fill-graphics-selection-actions {
