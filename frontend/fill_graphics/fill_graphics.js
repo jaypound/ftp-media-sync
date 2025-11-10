@@ -484,6 +484,19 @@ function fillGraphicsShowGenerateVideoModal() {
         }
     }
     
+    // Set default filename with format: YYMMDD_<sort type>_<duration>
+    const fileNameInput = document.getElementById('videoFileName');
+    if (fileNameInput) {
+        const now = new Date();
+        const year = (now.getFullYear() % 100).toString().padStart(2, '0');
+        const month = (now.getMonth() + 1).toString().padStart(2, '0');
+        const day = now.getDate().toString().padStart(2, '0');
+        const sortOrder = document.getElementById('videoSortOrder').value || 'newest';
+        const duration = document.getElementById('videoMaxLength').value || '360';
+        const sortType = sortOrder.toUpperCase();
+        fileNameInput.value = `${year}${month}${day}_${sortType}_${duration}`;
+    }
+    
     // Show modal
     const modal = document.getElementById('generateVideoModal');
     if (modal) modal.style.display = 'block';
@@ -496,7 +509,7 @@ async function fillGraphicsGenerateVideoFile() {
     const exportToSource = document.getElementById('videoExportToSource').checked;
     const exportToTarget = document.getElementById('videoExportToTarget').checked;
     const videoFormat = document.getElementById('videoFormat').value;
-    const maxLength = parseInt(document.getElementById('videoMaxLength').value) || 300;
+    const maxLength = parseInt(document.getElementById('videoMaxLength').value) || 360;
     const sortOrder = document.getElementById('videoSortOrder').value || 'newest';
     
     if (!fileName) {
@@ -991,7 +1004,25 @@ function fillGraphicsCloseHistoryModal() {
     document.getElementById('graphicsHistoryModal').style.display = 'none';
 }
 
+// Function to update video filename based on current settings
+function fillGraphicsUpdateVideoFilename() {
+    const fileNameInput = document.getElementById('videoFileName');
+    const sortOrderSelect = document.getElementById('videoSortOrder');
+    const maxLengthInput = document.getElementById('videoMaxLength');
+    
+    if (fileNameInput && sortOrderSelect && maxLengthInput) {
+        const now = new Date();
+        const year = (now.getFullYear() % 100).toString().padStart(2, '0');
+        const month = (now.getMonth() + 1).toString().padStart(2, '0');
+        const day = now.getDate().toString().padStart(2, '0');
+        const sortType = sortOrderSelect.value.toUpperCase();
+        const duration = maxLengthInput.value;
+        fileNameInput.value = `${year}${month}${day}_${sortType}_${duration}`;
+    }
+}
+
 // Export functions to global scope
+window.fillGraphicsUpdateVideoFilename = fillGraphicsUpdateVideoFilename;
 window.fillGraphicsInit = fillGraphicsInit;
 window.fillGraphicsLoadRegion1Graphics = fillGraphicsLoadRegion1Graphics;
 window.fillGraphicsLoadRegion2Graphics = fillGraphicsLoadRegion2Graphics;

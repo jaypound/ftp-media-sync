@@ -11183,6 +11183,10 @@ def generate_daily_schedule_template():
             'Committee Room 2': '/mnt/main/tv/inputs/3-SDI in'
         }
         
+        # Import datetime and uuid at the top if not already imported
+        from datetime import datetime, timedelta
+        import uuid
+        
         # Add meetings to template
         for meeting in meetings:
             room = meeting.get('room', '')
@@ -11197,23 +11201,60 @@ def generate_daily_schedule_template():
                 # Ensure time has seconds for precision
                 if end_time.count(':') == 1:  # Only HH:MM format
                     # Add seconds for precision
-                    from datetime import datetime
                     dt = datetime.strptime(end_time, '%I:%M %p')
                     end_time = dt.strftime('%I:%M:%S %p')
             else:
                 # Fallback to calculating from duration for backward compatibility
                 duration_hours = meeting.get('duration_hours', 2.0)
-                from datetime import datetime, timedelta
                 start_dt = datetime.strptime(start_time, '%I:%M %p')
                 end_dt = start_dt + timedelta(hours=duration_hours)
                 end_time = end_dt.strftime('%I:%M:%S %p')
             
             # Ensure start time also has seconds
             if start_time.count(':') == 1:  # Only HH:MM format
-                from datetime import datetime
                 dt = datetime.strptime(start_time, '%I:%M %p')
                 start_time = dt.strftime('%I:%M:%S %p')
             
+            # Calculate meeting duration to check if it's less than 10 minutes
+            meeting_start_dt = datetime.strptime(start_time, '%I:%M:%S %p')
+            meeting_end_dt = datetime.strptime(end_time, '%I:%M:%S %p')
+            meeting_duration = meeting_end_dt - meeting_start_dt
+            meeting_duration_minutes = meeting_duration.total_seconds() / 60
+            
+            # Skip placeholder video for meetings less than 10 minutes
+            if meeting_duration_minutes < 10:
+                logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (duration {meeting_duration_minutes:.1f} minutes < 10 minutes)")
+            else:
+                # Calculate 5-minute video placement
+                # Video is 5 minutes, ends exactly at meeting start time
+                video_duration_seconds = 5 * 60  # 5 minutes
+                
+                # Calculate video start time
+                video_end_dt = meeting_start_dt  # End exactly at meeting start
+                video_start_dt = video_end_dt - timedelta(seconds=video_duration_seconds)
+                
+                # Check if video would start before midnight (handle early morning meetings)
+                if video_start_dt.hour == 23 and meeting_start_dt.hour < 12:
+                    # Video would cross midnight boundary, skip it
+                    logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (would cross midnight)")
+                else:
+                    # Format times for schedule
+                    video_start_time_lower = video_start_dt.strftime('%I:%M:%S %p').lower()
+                    video_end_time_lower = video_end_dt.strftime('%I:%M:%S %p').lower()
+                    
+                    # Add 5-minute video before the meeting
+                    video_guid = '{' + str(uuid.uuid4()) + '}'
+                    template_lines.extend([
+                        '{',
+                        f'\titem=/mnt/main/Videos/251107_RANDOM.mp4',
+                        '\tloop=0',
+                        f'\tguid={video_guid}',
+                        f'\tstart={video_start_time_lower}',
+                        f'\tend={video_end_time_lower}',
+                        '}'
+                    ])
+            
+            # Now add the meeting itself
             start_time_lower = start_time.lower()
             end_time_lower = end_time.lower()
             
@@ -11276,13 +11317,16 @@ def generate_weekly_schedule_template():
             'Committee Room 2': '/mnt/main/tv/inputs/3-SDI in'
         }
         
+        # Import datetime, timedelta and uuid at the top if not already imported
+        from datetime import datetime, timedelta
+        import uuid
+        
         # Add meetings to template
         for meeting in meetings:
             room = meeting.get('room', '')
             sdi_input = room_to_sdi.get(room, '/mnt/main/tv/inputs/1-SDI in')
             
             # Parse meeting date to get day of week
-            from datetime import datetime, timedelta
             meeting_date = datetime.strptime(meeting['meeting_date'], '%Y-%m-%d')
             day_name = meeting_date.strftime('%a').lower()  # mon, tue, wed, etc.
             
@@ -11314,6 +11358,46 @@ def generate_weekly_schedule_template():
                 dt = datetime.strptime(start_time, '%I:%M %p')
                 start_time = dt.strftime('%I:%M:%S %p')
             
+            # Calculate meeting duration to check if it's less than 10 minutes
+            meeting_start_dt = datetime.strptime(start_time, '%I:%M:%S %p')
+            meeting_end_dt = datetime.strptime(end_time, '%I:%M:%S %p')
+            meeting_duration = meeting_end_dt - meeting_start_dt
+            meeting_duration_minutes = meeting_duration.total_seconds() / 60
+            
+            # Skip placeholder video for meetings less than 10 minutes
+            if meeting_duration_minutes < 10:
+                logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (duration {meeting_duration_minutes:.1f} minutes < 10 minutes)")
+            else:
+                # Calculate 5-minute video placement
+                # Video is 5 minutes, ends exactly at meeting start time
+                video_duration_seconds = 5 * 60  # 5 minutes
+                
+                # Calculate video start time
+                video_end_dt = meeting_start_dt  # End exactly at meeting start
+                video_start_dt = video_end_dt - timedelta(seconds=video_duration_seconds)
+                
+                # Check if video would start before midnight (handle early morning meetings)
+                if video_start_dt.hour == 23 and meeting_start_dt.hour < 12:
+                    # Video would cross midnight boundary, skip it
+                    logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (would cross midnight)")
+                else:
+                    # Format times for schedule
+                    video_start_time_lower = video_start_dt.strftime('%I:%M:%S %p').lower()
+                    video_end_time_lower = video_end_dt.strftime('%I:%M:%S %p').lower()
+                    
+                    # Add 5-minute video before the meeting
+                    video_guid = '{' + str(uuid.uuid4()) + '}'
+                    template_lines.extend([
+                        '{',
+                        f'\titem=/mnt/main/Videos/251107_RANDOM.mp4',
+                        '\tloop=0',
+                        f'\tguid={video_guid}',
+                        f'\tstart={day_name} {video_start_time_lower}',
+                        f'\tend={day_name} {video_end_time_lower}',
+                        '}'
+                    ])
+            
+            # Now add the meeting itself
             start_time_lower = start_time.lower()
             end_time_lower = end_time.lower()
             

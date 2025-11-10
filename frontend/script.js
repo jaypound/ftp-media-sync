@@ -14005,14 +14005,24 @@ async function confirmTemplateExport() {
     log(`Exporting template to ${server} server: ${path}/${filename}`, 'info');
     
     try {
+        // Remove placeholder videos before export
+        const placeholderPath = '251107_RANDOM.mp4';
+        const exportTemplate = {
+            ...currentExportTemplate,
+            items: currentExportTemplate.items.filter(item => {
+                const itemPath = item.file_path || item.item || '';
+                return !itemPath.includes(placeholderPath);
+            })
+        };
+        
         // Prepare the schedule data
         const scheduleData = {
-            template: currentExportTemplate,
+            template: exportTemplate,
             export_server: server,
             export_path: path,
             filename: filename,
             format: format,
-            items: currentExportTemplate.items || []
+            items: exportTemplate.items || []
         };
         
         // Export the template as a schedule file
@@ -14351,6 +14361,21 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
         log('Validation passed. Exporting schedule to Castus servers...', 'info');
         window.showNotification('Generating schedules for Castus1 and Castus2', 'info');
         
+        // Remove placeholder videos before export
+        const placeholderPath = '251107_RANDOM.mp4';
+        const originalItemCount = updatedTemplate.items.length;
+        const exportTemplate = {
+            ...updatedTemplate,
+            items: updatedTemplate.items.filter(item => {
+                const itemPath = item.file_path || item.item || '';
+                return !itemPath.includes(placeholderPath);
+            })
+        };
+        const removedCount = originalItemCount - exportTemplate.items.length;
+        if (removedCount > 0) {
+            log(`Removed ${removedCount} placeholder videos before export`, 'info');
+        }
+        
         // Export to both servers
         const exportServers = ['source', 'target']; // Castus1 and Castus2
         const exportPath = '/mnt/main/Schedules/Master';
@@ -14372,11 +14397,11 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        template: updatedTemplate,
+                        template: exportTemplate,
                         export_server: server,
                         export_path: exportPath,
                         filename: filename,
-                        items: updatedTemplate.items || []
+                        items: exportTemplate.items || []
                     })
                 });
                 
@@ -15041,12 +15066,22 @@ async function exportTemplate() {
         }
         
         try {
+            // Remove placeholder videos before export
+            const placeholderPath = '251107_RANDOM.mp4';
+            const exportTemplate = {
+                ...currentTemplate,
+                items: currentTemplate.items.filter(item => {
+                    const itemPath = item.file_path || item.item || '';
+                    return !itemPath.includes(placeholderPath);
+                })
+            };
+            
             // Generate schedule content for the template
             const response = await fetch('/api/export-template', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    template: currentTemplate,
+                    template: exportTemplate,
                     export_server: exportServer,
                     export_path: exportPath,
                     filename: filename

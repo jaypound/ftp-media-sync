@@ -1842,7 +1842,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label for="videoFileName">Video File Name</label>
-                    <input type="text" id="videoFileName" class="form-control" placeholder="Enter video name (without extension)" required>
+                    <input type="text" id="videoFileName" class="form-control" placeholder="e.g., 251110_NEWEST_360 (without extension)" required>
                 </div>
                 <div class="form-group">
                     <label for="videoExportPath">Export Path</label>
@@ -1871,12 +1871,12 @@
                 </div>
                 <div class="form-group">
                     <label for="videoMaxLength">Maximum Video Length (seconds)</label>
-                    <input type="number" id="videoMaxLength" class="form-control" value="300" min="30" max="3600" required>
-                    <small class="form-text text-muted">Video will be generated up to this length (default: 300 seconds / 5 minutes)</small>
+                    <input type="number" id="videoMaxLength" class="form-control" value="360" min="30" max="3600" required onchange="fillGraphicsUpdateVideoFilename()">
+                    <small class="form-text text-muted">Video will be generated up to this length (default: 360 seconds / 6 minutes)</small>
                 </div>
                 <div class="form-group">
                     <label for="videoSortOrder">Graphics Sort Order</label>
-                    <select id="videoSortOrder" class="form-control">
+                    <select id="videoSortOrder" class="form-control" onchange="fillGraphicsUpdateVideoFilename()">
                         <option value="newest">Newest First</option>
                         <option value="oldest">Oldest First</option>
                         <option value="random">Random</option>
