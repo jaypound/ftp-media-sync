@@ -295,15 +295,15 @@ function fillGraphicsUpdateGenerateButton() {
     let canGenerate = false;
     
     if (fillGraphicsState.databaseMode) {
-        // In database mode, only require music files (Region 3)
-        // Region 1 graphics are selected automatically from database
+        // In database mode, require selected graphics and music files
+        console.log(`  Selected graphics: ${fillGraphicsState.selectedGraphicIds.length}`);
         console.log(`  Region 2 selected: ${fillGraphicsState.region2.selected}`);
         console.log(`  Region 3 selected: ${fillGraphicsState.region3.selected.length} files`);
         console.log(`  Active graphics in DB: ${fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length}`);
         
         canGenerate = 
-            fillGraphicsState.region3.selected.length > 0 &&
-            fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length > 0;
+            fillGraphicsState.selectedGraphicIds.length > 0 &&  // Must have selected graphics
+            fillGraphicsState.region3.selected.length > 0;
     } else {
         // Manual mode - require all three regions
         console.log(`  Region 1 selected: ${fillGraphicsState.region1.selected.length} files`);
@@ -469,9 +469,10 @@ function fillGraphicsShowGenerateVideoModal() {
     const summaryEl = document.getElementById('videoSummary');
     if (summaryEl) {
         if (fillGraphicsState.databaseMode) {
-            const activeGraphics = fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length;
+            const selectedCount = fillGraphicsState.selectedGraphicIds.length;
+            const totalActive = fillGraphicsState.databaseGraphics.filter(g => g.status === 'active').length;
             summaryEl.innerHTML = `
-                <p><strong>Region 1 (Upper Graphics):</strong> ${activeGraphics} active graphics from database</p>
+                <p><strong>Region 1 (Upper Graphics):</strong> ${selectedCount} graphics selected (from ${totalActive} active)</p>
                 <p><strong>Region 2 (Lower Graphics):</strong> ${fillGraphicsState.region2.selected || 'None'}</p>
                 <p><strong>Region 3 (Music):</strong> ${fillGraphicsState.region3.selected.length} files selected</p>
             `;
@@ -547,6 +548,7 @@ async function fillGraphicsGenerateVideoFile() {
                 video_format: videoFormat,
                 max_length: maxLength,
                 sort_order: sortOrder,
+                graphic_ids: fillGraphicsState.selectedGraphicIds,  // Send selected graphics IDs
                 region2_file: fillGraphicsState.region2.selected,
                 region2_path: fillGraphicsState.region2.path,
                 region3_files: fillGraphicsState.region3.selected,
@@ -561,6 +563,7 @@ async function fillGraphicsGenerateVideoFile() {
                 fillGraphicsLoadFromDatabase();
                 
                 // Reset selections
+                fillGraphicsState.selectedGraphicIds = [];  // Reset selected graphics
                 fillGraphicsState.region2.selected = null;
                 fillGraphicsState.region3.selected = [];
                 
@@ -747,6 +750,29 @@ async function fillGraphicsLoadFromDatabase() {
     }
 }
 
+// Helper function to format dates properly handling timezone
+function fillGraphicsFormatDate(dateString) {
+    if (!dateString) return '';
+    
+    // For date-only strings (YYYY-MM-DD), parse as local date, not UTC
+    if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = dateString.split('-');
+        const date = new Date(year, month - 1, day);
+        return date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+    }
+    
+    // For full datetime strings, use regular parsing
+    return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+}
+
 // Display database graphics in a table
 function fillGraphicsDisplayDatabaseGraphics(graphics) {
     const container = document.getElementById('databaseGraphicsList');
@@ -778,7 +804,8 @@ function fillGraphicsDisplayDatabaseGraphics(graphics) {
         const isSelected = fillGraphicsState.selectedGraphicIds.includes(graphic.id);
         const statusClass = graphic.status === 'active' ? 'badge-success' : 
                           graphic.status === 'expired' ? 'badge-danger' : 
-                          graphic.status === 'pending' ? 'badge-info' : 'badge-secondary';
+                          graphic.status === 'pending' ? 'badge-info' : 
+                          graphic.status === 'missing' ? 'badge-warning' : 'badge-secondary';
         
         const daysLeft = graphic.days_remaining !== null ? 
             (graphic.days_remaining > 0 ? `${graphic.days_remaining} days` : 'Expired') : 
@@ -788,11 +815,11 @@ function fillGraphicsDisplayDatabaseGraphics(graphics) {
             <tr class="${isSelected ? 'selected' : ''}">
                 <td><input type="checkbox" ${isSelected ? 'checked' : ''} onchange="fillGraphicsToggleSelection(${graphic.id})"></td>
                 <td>${graphic.file_name}</td>
-                <td>${graphic.start_date ? new Date(graphic.start_date).toLocaleDateString() : '-'}</td>
-                <td>${graphic.end_date ? new Date(graphic.end_date).toLocaleDateString() : 'No expiry'}</td>
+                <td>${graphic.start_date ? fillGraphicsFormatDate(graphic.start_date) : '-'}</td>
+                <td>${graphic.end_date ? fillGraphicsFormatDate(graphic.end_date) : 'No expiry'}</td>
                 <td>${daysLeft}</td>
                 <td><span class="badge ${statusClass}">${graphic.status}</span></td>
-                <td>${graphic.last_included ? new Date(graphic.last_included).toLocaleDateString() : 'Never'}</td>
+                <td>${graphic.last_included ? fillGraphicsFormatDate(graphic.last_included) : 'Never'}</td>
                 <td>${graphic.include_count || 0}</td>
             </tr>
         `;
@@ -815,6 +842,7 @@ function fillGraphicsToggleSelection(graphicId) {
         fillGraphicsState.selectedGraphicIds.push(graphicId);
     }
     fillGraphicsDisplayDatabaseGraphics(fillGraphicsState.databaseGraphics);
+    fillGraphicsUpdateGenerateButton();  // Update button state
 }
 
 // Toggle select all graphics
@@ -825,6 +853,44 @@ function fillGraphicsToggleSelectAll(checkbox) {
         fillGraphicsState.selectedGraphicIds = [];
     }
     fillGraphicsDisplayDatabaseGraphics(fillGraphicsState.databaseGraphics);
+    fillGraphicsUpdateGenerateButton();  // Update button state
+}
+
+// Delete selected graphics
+async function fillGraphicsDeleteSelected() {
+    const selectedCount = fillGraphicsState.selectedGraphicIds.length;
+    if (selectedCount === 0) {
+        window.showNotification('Please select at least one graphic to delete', 'warning');
+        return;
+    }
+    
+    // Get selected graphics info
+    const selectedGraphics = fillGraphicsState.databaseGraphics.filter(g => 
+        fillGraphicsState.selectedGraphicIds.includes(g.id)
+    );
+    
+    const confirmMessage = `Are you sure you want to delete ${selectedCount} graphic${selectedCount > 1 ? 's' : ''}?\n\nThis will permanently remove them from the database.`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        const response = await window.API.post('/default-graphics/batch-delete', {
+            ids: fillGraphicsState.selectedGraphicIds
+        });
+        
+        if (response.success) {
+            window.showNotification(`Deleted ${response.deleted} graphics successfully`, 'success');
+            fillGraphicsState.selectedGraphicIds = [];
+            fillGraphicsLoadFromDatabase();
+        } else {
+            window.showNotification(`Failed to delete graphics: ${response.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting graphics:', error);
+        window.showNotification(`Failed to delete graphics: ${error.message}`, 'error');
+    }
 }
 
 // Show date edit modal
@@ -1043,6 +1109,7 @@ window.fillGraphicsLoadFromDatabase = fillGraphicsLoadFromDatabase;
 window.fillGraphicsToggleSelection = fillGraphicsToggleSelection;
 window.fillGraphicsToggleSelectAll = fillGraphicsToggleSelectAll;
 window.fillGraphicsEditSelectedDates = fillGraphicsEditSelectedDates;
+window.fillGraphicsDeleteSelected = fillGraphicsDeleteSelected;
 window.fillGraphicsSaveDateEdits = fillGraphicsSaveDateEdits;
 window.fillGraphicsShowHistory = fillGraphicsShowHistory;
 window.fillGraphicsToggleView = fillGraphicsToggleView;

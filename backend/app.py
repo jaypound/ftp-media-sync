@@ -14501,13 +14501,45 @@ def scan_default_graphics():
                 'message': 'No files found in directory'
             })
         
-        # Log first few files for debugging
-        for i, f in enumerate(files[:5]):
-            logger.debug(f"File {i}: {f.get('name', 'unnamed')} - Size: {f.get('size', 0)}")
+        # Log ALL files for debugging to find our missing file
+        logger.info("=== ALL FILES IN DIRECTORY ===")
+        for i, f in enumerate(files):
+            fname = f.get('name', 'unnamed')
+            if 'OCA-Elevate' in fname or '251001' in fname or fname.endswith('.png'):
+                logger.info(f"File {i}: {fname} - Size: {f.get('size', 0)} - Permissions: {f.get('permissions', 'N/A')}")
+            else:
+                logger.debug(f"File {i}: {fname} - Size: {f.get('size', 0)}")
         
         # Filter for image files
         image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.JPG', '.JPEG', '.PNG', '.GIF', '.BMP']
         image_files = []
+        
+        # Log all files for debugging
+        all_file_names = [f.get('name', 'unnamed') for f in files]
+        logger.info(f"Total files found: {len(all_file_names)}")
+        logger.info(f"First 20 files in directory: {all_file_names[:20]}")
+        
+        # Check specifically for the file we're looking for
+        target_file = "251001_OCA-Elevate-2025-CH26-1920X800.png"
+        if target_file in all_file_names:
+            logger.info(f"✅ Found target file: {target_file}")
+        else:
+            logger.warning(f"❌ Target file NOT found: {target_file}")
+            # Check for similar names
+            similar = [f for f in all_file_names if 'OCA-Elevate' in f or '251001' in f]
+            if similar:
+                logger.info(f"Similar files found: {similar}")
+            
+            # Also check case-insensitive
+            target_lower = target_file.lower()
+            case_insensitive = [f for f in all_file_names if f.lower() == target_lower]
+            if case_insensitive:
+                logger.info(f"Case-insensitive match found: {case_insensitive}")
+            
+            # Check for any PNG files with date prefix
+            date_prefix_pngs = [f for f in all_file_names if f.endswith('.png') and f[:6].isdigit()]
+            if date_prefix_pngs:
+                logger.info(f"PNG files with date prefix: {date_prefix_pngs[:10]}")
         
         for f in files:
             file_name = f.get('name', '')
@@ -14517,18 +14549,40 @@ def scan_default_graphics():
             
             if is_image:
                 image_files.append(f)
-                logger.debug(f"Including image file: {file_name}")
+                if 'OCA-Elevate' in file_name or '251001' in file_name:
+                    logger.info(f"✅ INCLUDING target image file: {file_name}")
+                else:
+                    logger.debug(f"Including image file: {file_name}")
             else:
                 logger.debug(f"Skipping non-image file: {file_name}")
         
         logger.info(f"Found {len(image_files)} image files after filtering")
         
         # Connect to database and add/update graphics
-        conn = db_manager._get_connection()
-        cursor = conn.cursor()
+        try:
+            conn = db_manager._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+        except Exception as e:
+            logger.error(f"Database connection error: {str(e)}")
+            raise Exception(f"Failed to connect to database: {str(e)}")
         
         added_count = 0
         updated_count = 0
+        missing_count = 0
+        
+        try:
+            # Get list of existing files in database
+            cursor.execute("SELECT file_name FROM default_graphics WHERE status != 'deleted'")
+            db_results = cursor.fetchall()
+            existing_in_db = {row['file_name'] for row in db_results} if db_results else set()
+            logger.info(f"Found {len(existing_in_db)} existing graphics in database")
+        except Exception as e:
+            logger.error(f"Error querying existing graphics: {str(e)}")
+            conn.rollback()
+            raise
+        
+        # Get list of files currently in folder
+        files_in_folder = {f['name'] for f in image_files}
         
         for file_info in image_files:
             try:
@@ -14552,9 +14606,12 @@ def scan_default_graphics():
                 
                 # Check if graphic already exists
                 cursor.execute("""
-                    SELECT id FROM default_graphics WHERE file_name = %s
+                    SELECT id, status FROM default_graphics WHERE file_name = %s
                 """, (file_name,))
                 existing = cursor.fetchone()
+                
+                if 'OCA-Elevate' in file_name or '251001' in file_name:
+                    logger.info(f"Checking database for {file_name}: existing = {existing}")
                 
                 if existing:
                     # Update existing graphic
@@ -14580,27 +14637,81 @@ def scan_default_graphics():
                     added_count += 1
                     logger.info(f"Successfully added graphic: {file_name}")
                     
+                    # Verify the insert worked
+                    if '251001' in file_name or 'OCA-Elevate' in file_name:
+                        cursor.execute("SELECT id, file_name FROM default_graphics WHERE file_name = %s", (file_name,))
+                        verify = cursor.fetchone()
+                        logger.info(f"Verification after insert: {verify}")
+                    
             except Exception as e:
                 logger.error(f"Error processing graphic {file_name}: {str(e)}", exc_info=True)
                 conn.rollback()  # Rollback the transaction for this file
                 continue
         
+        # Find missing files (in database but not in folder)
+        try:
+            missing_files = existing_in_db - files_in_folder
+            if missing_files:
+                logger.info(f"Found {len(missing_files)} missing files")
+                for missing_file in missing_files:
+                    try:
+                        cursor.execute("""
+                            UPDATE default_graphics 
+                            SET status = 'disabled', 
+                                notes = COALESCE(notes || E'\n', '') || 'File not found in folder on ' || TO_CHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'),
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE file_name = %s AND status != 'deleted'
+                        """, (missing_file,))
+                        if cursor.rowcount > 0:
+                            missing_count += 1
+                            logger.info(f"Marked as missing: {missing_file}")
+                    except Exception as e:
+                        logger.error(f"Error marking {missing_file} as disabled: {str(e)}")
+                        # Continue with other files
+        except Exception as e:
+            logger.error(f"Error processing missing files: {str(e)}")
+            conn.rollback()  # Rollback if there's an error in missing file processing
+            logger.error("Rolled back transaction due to missing file processing error")
+            # Continue without marking missing files
+        
+        logger.info(f"Before commit: added_count={added_count}, updated_count={updated_count}")
         conn.commit()
+        logger.info("Transaction committed successfully")
         db_manager._put_connection(conn)
+        
+        # Verify our file is in the database
+        if added_count > 0:
+            conn2 = db_manager._get_connection()
+            cursor2 = conn2.cursor(cursor_factory=RealDictCursor)
+            cursor2.execute("SELECT id, file_name FROM default_graphics WHERE file_name LIKE '%251001%' OR file_name LIKE '%OCA-Elevate%'")
+            results = cursor2.fetchall()
+            logger.info(f"After commit verification: found {len(results) if results else 0} files with 251001/OCA-Elevate")
+            if results:
+                for r in results:
+                    logger.info(f"  - ID: {r['id']}, File: {r['file_name']}")
+            db_manager._put_connection(conn2)
+        
+        message_parts = [f'Added {added_count} new graphics', f'updated {updated_count} existing']
+        if missing_count > 0:
+            message_parts.append(f'marked {missing_count} as missing')
         
         return jsonify({
             'success': True,
-            'message': f'Scan complete. Added {added_count} new graphics, updated {updated_count} existing graphics.',
+            'message': f'Scan complete. {", ".join(message_parts)}.',
             'added': added_count,
             'updated': updated_count,
+            'missing': missing_count,
             'total': len(image_files)
         })
         
     except Exception as e:
-        logger.error(f"Error scanning default graphics: {str(e)}")
+        logger.error(f"Error scanning default graphics: {str(e)}", exc_info=True)
+        if 'conn' in locals():
+            conn.rollback()
+            db_manager._put_connection(conn)
         return jsonify({
             'success': False,
-            'message': str(e)
+            'message': f"Scan error: {str(e) or 'Unknown error occurred'}"
         })
 
 @app.route('/api/default-graphics', methods=['GET'])
@@ -14630,7 +14741,7 @@ def get_default_graphics():
             query += " WHERE status = %s"
             params.append(status_filter)
             
-        query += " ORDER BY COALESCE(sort_order, 0), creation_date DESC"
+        query += " ORDER BY file_name DESC"
         
         cursor.execute(query, params)
         graphics = cursor.fetchall()
@@ -14771,6 +14882,48 @@ def batch_update_default_graphics():
             'message': str(e)
         })
 
+@app.route('/api/default-graphics/batch-delete', methods=['POST'])
+def batch_delete_default_graphics():
+    """Delete multiple graphics from database"""
+    try:
+        data = request.json
+        graphic_ids = data.get('ids', [])
+        
+        if not graphic_ids:
+            return jsonify({
+                'success': False,
+                'message': 'No graphics selected for deletion'
+            })
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor()
+        
+        # Create placeholders for IDs
+        id_placeholders = ','.join(['%s'] * len(graphic_ids))
+        
+        # Delete the graphics
+        cursor.execute(f"""
+            DELETE FROM default_graphics 
+            WHERE id IN ({id_placeholders})
+        """, graphic_ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {deleted_count} graphics successfully',
+            'deleted': deleted_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting default graphics: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
 @app.route('/api/default-graphics/generate-video', methods=['POST'])
 def generate_default_graphics_video():
     """Generate a video from active default graphics"""
@@ -14787,20 +14940,33 @@ def generate_default_graphics_video():
         sort_order = data.get('sort_order', 'creation')  # creation, manual, random
         region2_file = data.get('region2_file')
         region3_files = data.get('region3_files', [])
+        graphic_ids = data.get('graphic_ids', [])  # Get selected graphic IDs
         
         # Get active graphics from database
         conn = db_manager._get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        # Query active graphics
-        cursor.execute("""
-            SELECT id, file_name, file_path, duration_seconds, sort_order, creation_date
-            FROM default_graphics
-            WHERE status = 'active' 
-            AND start_date <= CURRENT_DATE 
-            AND (end_date IS NULL OR end_date >= CURRENT_DATE)
-            ORDER BY COALESCE(sort_order, 999999), creation_date DESC
-        """)
+        # Query graphics - if specific IDs provided, use those; otherwise get all active
+        if graphic_ids:
+            # Use selected graphics
+            id_placeholders = ','.join(['%s'] * len(graphic_ids))
+            cursor.execute(f"""
+                SELECT id, file_name, file_path, duration_seconds, sort_order, creation_date
+                FROM default_graphics
+                WHERE id IN ({id_placeholders})
+                AND status = 'active'
+                ORDER BY COALESCE(sort_order, 999999), creation_date DESC
+            """, graphic_ids)
+        else:
+            # Get all active graphics (backward compatibility)
+            cursor.execute("""
+                SELECT id, file_name, file_path, duration_seconds, sort_order, creation_date
+                FROM default_graphics
+                WHERE status = 'active' 
+                AND start_date <= CURRENT_DATE 
+                AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+                ORDER BY COALESCE(sort_order, 999999), creation_date DESC
+            """)
         
         graphics = cursor.fetchall()
         
@@ -14817,6 +14983,33 @@ def generate_default_graphics_video():
         elif sort_order == 'random':
             import random
             random.shuffle(graphics)
+        elif sort_order == 'newest':
+            # Sort by creation date descending (newest first)
+            def get_sort_date(g):
+                if not g['creation_date']:
+                    return datetime(1900, 1, 1)
+                cd = g['creation_date']
+                # Convert date to datetime if needed
+                if hasattr(cd, 'date'):  # It's already a datetime
+                    return cd.replace(tzinfo=None) if cd.tzinfo else cd
+                else:  # It's a date
+                    return datetime.combine(cd, datetime.min.time())
+            graphics.sort(key=get_sort_date, reverse=True)
+        elif sort_order == 'oldest':
+            # Sort by creation date ascending (oldest first)
+            def get_sort_date(g):
+                if not g['creation_date']:
+                    return datetime(1900, 1, 1)
+                cd = g['creation_date']
+                # Convert date to datetime if needed
+                if hasattr(cd, 'date'):  # It's already a datetime
+                    return cd.replace(tzinfo=None) if cd.tzinfo else cd
+                else:  # It's a date
+                    return datetime.combine(cd, datetime.min.time())
+            graphics.sort(key=get_sort_date)
+        elif sort_order == 'alphabetical':
+            # Sort by file name reverse alphabetically (Z to A)
+            graphics.sort(key=lambda g: g['file_name'], reverse=True)
         else:  # 'creation' or default
             # Already sorted by creation_date in query
             pass

@@ -222,40 +222,32 @@ class FTPManager:
                                 'full_path': os.path.join(path, name).replace('\\', '/')
                             }
                         
-                            # Get timestamps - prefer create time if available
-                            if 'create' in facts:
-                                # Creation time available
-                                create_time = datetime.strptime(facts['create'], "%Y%m%d%H%M%S")
-                                file_info['ctime'] = create_time.timestamp()
-                                file_info['created'] = create_time.isoformat()
-                                # Also use as mtime for compatibility
-                                file_info['mtime'] = file_info['ctime']
-                                file_info['modified'] = file_info['created']
-                            elif 'modify' in facts:
-                                # Modification time available
-                                mod_time = datetime.strptime(facts['modify'], "%Y%m%d%H%M%S")
-                                file_info['mtime'] = mod_time.timestamp()
-                                file_info['modified'] = mod_time.isoformat()
-                                # Use as creation time too
-                                file_info['ctime'] = file_info['mtime']
-                                file_info['created'] = file_info['modified']
-                            else:
-                                # No timestamp available
-                                file_info['mtime'] = time.time()
-                                file_info['modified'] = datetime.now().isoformat()
-                                file_info['ctime'] = file_info['mtime']
-                                file_info['created'] = file_info['modified']
-                            
-                            files.append(file_info)
-                    
-                    logger.info(f"MLSD processed {mlsd_count} entries, found {len(files)} files")
-                except Exception as e:
-                    logger.error(f"Error during MLSD listing: {str(e)}")
-                    use_mlsd = False  # Fall back to LIST
-                    files = []  # Clear any partial results
-            
-            # Use LIST command if MLSD failed or is not supported
-            if not use_mlsd:
+                        # Get timestamps - prefer create time if available
+                        if 'create' in facts:
+                            # Creation time available
+                            create_time = datetime.strptime(facts['create'], "%Y%m%d%H%M%S")
+                            file_info['ctime'] = create_time.timestamp()
+                            file_info['created'] = create_time.isoformat()
+                            # Also use as mtime for compatibility
+                            file_info['mtime'] = file_info['ctime']
+                            file_info['modified'] = file_info['created']
+                        elif 'modify' in facts:
+                            # Only modification time available
+                            modify_time = datetime.strptime(facts['modify'], "%Y%m%d%H%M%S")
+                            file_info['mtime'] = modify_time.timestamp()
+                            file_info['modified'] = modify_time.isoformat()
+                            # No creation time available
+                            file_info['ctime'] = file_info['mtime']
+                            file_info['created'] = file_info['modified']
+                        else:
+                            # No timestamp available
+                            file_info['mtime'] = time.time()
+                            file_info['modified'] = datetime.now().isoformat()
+                            file_info['ctime'] = file_info['mtime']
+                            file_info['created'] = file_info['modified']
+                        
+                        files.append(file_info)
+            else:
                 # Fall back to LIST command
                 file_list = []
                 self.ftp.retrlines('LIST', file_list.append)
@@ -315,10 +307,13 @@ class FTPManager:
                                 file_info['created'] = file_info['modified']
                             
                             files.append(file_info)
-                        
-            logger.debug(f"Found {len(files)} files in {path}")
-            if files:
-                logger.debug(f"Sample files: {[f['name'] for f in files[:3]]}")
+                    
+                    logger.info(f"MLSD processed {mlsd_count} entries, found {len(files)} files")
+                except Exception as e:
+                    logger.error(f"Error during MLSD listing: {str(e)}")
+                    use_mlsd = False  # Fall back to LIST
+                    
+            if not use_mlsd or len(files) == 0:
             
             return files
             

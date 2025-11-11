@@ -957,6 +957,9 @@
                         <button class="button secondary small" onclick="fillGraphicsEditSelectedDates()">
                             <i class="fas fa-calendar-alt"></i> Edit Dates
                         </button>
+                        <button class="button danger small" onclick="fillGraphicsDeleteSelected()">
+                            <i class="fas fa-trash"></i> Delete Selected
+                        </button>
                         <button class="button secondary small" onclick="fillGraphicsRefresh()">
                             <i class="fas fa-refresh"></i> Refresh
                         </button>
@@ -1877,10 +1880,10 @@
                 <div class="form-group">
                     <label for="videoSortOrder">Graphics Sort Order</label>
                     <select id="videoSortOrder" class="form-control" onchange="fillGraphicsUpdateVideoFilename()">
+                        <option value="alphabetical">Reverse Alphabetical</option>
                         <option value="newest">Newest First</option>
                         <option value="oldest">Oldest First</option>
                         <option value="random">Random</option>
-                        <option value="alphabetical">Alphabetical</option>
                     </select>
                     <small class="form-text text-muted">Order in which graphics will appear in the video</small>
                 </div>
