@@ -1,8 +1,41 @@
 import os
 import logging
 from datetime import datetime
+import logging.handlers
 
+# Set up module logger
 logger = logging.getLogger(__name__)
+
+# Create a separate file logger for detailed file scanning logs
+def setup_file_scanner_logger():
+    """Set up a dedicated file logger for file scanner with timestamp"""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f'logs/file_scanner_{timestamp}.log'
+    
+    # Create file handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_filename, 
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setLevel(logging.DEBUG)
+    
+    # Create formatter with timestamp
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Create a separate logger for file scanning details
+    file_scanner_logger = logging.getLogger('file_scanner_detailed')
+    file_scanner_logger.setLevel(logging.DEBUG)
+    file_scanner_logger.addHandler(file_handler)
+    
+    return file_scanner_logger
+
+# Initialize the file scanner logger
+file_logger = setup_file_scanner_logger()
 
 class FileScanner:
     def __init__(self, ftp_manager):
@@ -13,9 +46,18 @@ class FileScanner:
         if filters is None:
             filters = {}
         
+        # Log to both console and file
+        logger.info(f"Starting scan of: {path}")
+        file_logger.info("="*80)
+        file_logger.info(f"NEW SCAN STARTED - Path: {path}")
+        file_logger.info(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        file_logger.info(f"Filters: {filters}")
+        file_logger.info("="*80)
+        
         # Check if trying to scan Recordings directory
         if 'Recordings' in path or 'recordings' in path:
             logger.warning(f"Skipping scan of Recordings directory: {path}")
+            file_logger.warning(f"SKIPPED: Recordings directory detected: {path}")
             return []
         
         # Store the base path for relative path calculation
@@ -29,12 +71,20 @@ class FileScanner:
             # Get files from current directory
             current_files = self.ftp_manager.list_files(path)
             logger.info(f"Found {len(current_files)} files in root directory: {path}")
+            file_logger.info(f"\nScanning directory: {path}")
+            file_logger.info(f"Total files found: {len(current_files)}")
             
             for file_info in current_files:
+                file_name = file_info.get('name', 'unknown')
+                file_logger.debug(f"Checking file: {file_name} - Size: {file_info.get('size', 0)}")
+                
                 if self._should_include_file(file_info, filters):
                     # Add relative path information
                     file_info = self._add_relative_path(file_info, path, base_path)
                     files.append(file_info)
+                    file_logger.info(f"INCLUDED: {file_name} - Matches filters")
+                else:
+                    file_logger.debug(f"EXCLUDED: {file_name} - Does not match filters")
             
             # Recursively scan subdirectories if enabled
             if filters.get('include_subdirs', True):
@@ -51,6 +101,20 @@ class FileScanner:
                         logger.error(f"Error scanning subdirectory {subdir_path}: {str(e)}")
             
             logger.debug(f"Total files found in scan: {len(files)}")
+            
+            # Log summary to file
+            file_logger.info("\n" + "="*80)
+            file_logger.info("SCAN COMPLETED")
+            file_logger.info(f"Total files included: {len(files)}")
+            file_logger.info(f"Scan completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            if files:
+                file_logger.info("\nIncluded files:")
+                for f in files[:20]:  # Show first 20 files
+                    file_logger.info(f"  - {f.get('name', 'unknown')} ({f.get('size', 0)} bytes)")
+                if len(files) > 20:
+                    file_logger.info(f"  ... and {len(files) - 20} more files")
+            file_logger.info("="*80 + "\n")
+            
             return files
             
         except Exception as e:
@@ -140,7 +204,10 @@ class FileScanner:
             file_ext = os.path.splitext(filename)[1].lower().lstrip('.')
             if file_ext not in [ext.lower() for ext in extensions]:
                 logger.debug(f"Excluding {filename} - extension '{file_ext}' not in {extensions}")
+                file_logger.debug(f"  Extension filter: '{file_ext}' not in {extensions}")
                 return False
+            else:
+                file_logger.debug(f"  Extension filter: '{file_ext}' matched in {extensions}")
         
         # File size filters
         min_size = filters.get('min_size', 0)
@@ -148,12 +215,15 @@ class FileScanner:
         
         if file_info['size'] < min_size:
             logger.debug(f"Excluding {filename} - size {file_info['size']} < min {min_size}")
+            file_logger.debug(f"  Size filter: {file_info['size']} bytes < minimum {min_size} bytes")
             return False
         if file_info['size'] > max_size:
             logger.debug(f"Excluding {filename} - size {file_info['size']} > max {max_size}")
+            file_logger.debug(f"  Size filter: {file_info['size']} bytes > maximum {max_size} bytes")
             return False
         
         logger.debug(f"Including {filename} - passed all filters")
+        file_logger.debug(f"  All filters passed - File will be included")
         return True
     
     def _get_subdirectories(self, path):
