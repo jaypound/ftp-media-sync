@@ -531,7 +531,8 @@ class PostgreSQLScheduler:
             db_manager._put_connection(conn)
     
     def _has_theme_conflict(self, candidate_content: dict, last_scheduled_category: str, 
-                           last_scheduled_theme: str, current_category: str) -> bool:
+                           last_scheduled_theme: str, current_category: str,
+                           scheduled_items: list = None, candidate_is_pkg: bool = False) -> bool:
         """Check if candidate content has a theme conflict with the last scheduled item
         
         Args:
@@ -539,16 +540,37 @@ class PostgreSQLScheduler:
             last_scheduled_category: Category of the last scheduled item
             last_scheduled_theme: Theme of the last scheduled item
             current_category: Category we're trying to schedule
+            scheduled_items: List of recently scheduled items (for package checking)
+            candidate_is_pkg: True if the candidate content is a package
             
         Returns:
             True if there's a theme conflict, False otherwise
         """
-        # Theme conflict check for IDs and spots (regardless of content type)
+        candidate_theme = candidate_content.get('theme')
+        
+        # Special handling for packages (PKG) - must be separated by at least one long_form
+        if candidate_is_pkg and candidate_theme and scheduled_items:
+            # Look backwards through scheduled items to find the last package
+            for i in range(len(scheduled_items) - 1, -1, -1):
+                item = scheduled_items[i]
+                
+                # If we find a long_form content before finding a package with same theme, we're good
+                if item.get('duration_category') == 'long_form':
+                    break
+                
+                # If we find a package with the same theme before any long_form, that's a conflict
+                if (item.get('content_type') == 'PKG' and 
+                    item.get('theme') and 
+                    item.get('theme').lower() == candidate_theme.lower()):
+                    logger.debug(f"Package theme conflict: '{candidate_theme}' - "
+                               f"packages with same theme must be separated by long_form content")
+                    return True
+        
+        # Original theme conflict check for IDs and spots (regardless of content type)
         # These short-form content should never have the same theme back-to-back
         if (last_scheduled_category in ['id', 'spots'] and 
             current_category in ['id', 'spots']):
             
-            candidate_theme = candidate_content.get('theme')
             if (candidate_theme and last_scheduled_theme and
                 candidate_theme.lower() == last_scheduled_theme.lower()):
                 logger.debug(f"Theme conflict detected: '{candidate_theme}' - back-to-back {last_scheduled_category}/{current_category}")
@@ -1027,9 +1049,25 @@ class PostgreSQLScheduler:
                     )
                 
                 if not available_content:
-                    logger.warning(f"No available content for category: {duration_category} even without delays")
+                    remaining_hours = (self.target_duration_seconds - total_duration) / 3600
+                    logger.warning(f"No available content for category: {duration_category} even without delays. "
+                                 f"Remaining hours in day: {remaining_hours:.1f}")
+                    
+                    # Check if we're near midnight and trying to schedule longform content
+                    # Skip longform requirement if within last hour of the day
+                    if remaining_hours < 1.0 and duration_category == 'long_form':
+                        logger.info(f"Skipping long_form content near midnight (only {remaining_hours:.1f} hours left). Advancing rotation.")
+                        self._advance_rotation()
+                        consecutive_errors = 0  # Reset error counter since we're making progress
+                        continue
+                    
                     consecutive_errors += 1
                     total_errors += 1
+                    
+                    # IMPORTANT: Always advance rotation when no content is found
+                    # This prevents getting stuck on the same category
+                    self._advance_rotation()
+                    logger.info(f"Advanced rotation to next category after no content found for {duration_category}")
                     
                     # Track if we've cycled through all categories without finding content
                     if self.rotation_index == 0:  # We've completed a full rotation cycle
@@ -1037,37 +1075,47 @@ class PostgreSQLScheduler:
                         logger.warning(f"⚠️ Completed full rotation cycle #{consecutive_no_content_cycles} with no available content")
                         
                         if consecutive_no_content_cycles >= max_no_content_cycles:
-                            logger.error(f"❌ Infinite loop detected: {consecutive_no_content_cycles} full rotation cycles with no available content")
-                            # Delete the partially created schedule
-                            self.delete_schedule(schedule_id)
-                            return {
-                                'success': False,
-                                'message': f'Schedule creation failed: No content available after {consecutive_no_content_cycles} complete rotation cycles. '
-                                         f'All content is blocked by replay delays. Please add more content or reduce replay delay settings.',
-                                'error': 'infinite_loop_all_blocked',
-                                'stopped_at_hours': total_duration / 3600,
-                                'rotation_cycles_failed': consecutive_no_content_cycles
-                            }
+                            # Check if we're very close to the end of the day
+                            if remaining_hours < 0.5:  # Less than 30 minutes left
+                                logger.warning(f"Accepting gap of {remaining_hours:.1f} hours at end of day after {consecutive_no_content_cycles} cycles")
+                                break
+                            else:
+                                logger.error(f"❌ Infinite loop detected: {consecutive_no_content_cycles} full rotation cycles with no available content")
+                                # Delete the partially created schedule
+                                self.delete_schedule(schedule_id)
+                                return {
+                                    'success': False,
+                                    'message': f'Schedule creation failed: No content available after {consecutive_no_content_cycles} complete rotation cycles. '
+                                             f'All content is blocked by replay delays. Please add more content or reduce replay delay settings.',
+                                    'error': 'infinite_loop_all_blocked',
+                                    'stopped_at_hours': total_duration / 3600,
+                                    'rotation_cycles_failed': consecutive_no_content_cycles
+                                }
                     
                     # Check for infinite loop (no progress at all)
                     if total_duration == last_progress_duration:
                         no_progress_iterations += 1
                         if no_progress_iterations >= max_no_progress:
-                            logger.error(f"❌ Infinite loop detected: No progress for {max_no_progress} iterations at {total_duration/3600:.2f} hours")
-                            # Delete the partially created schedule
-                            self.delete_schedule(schedule_id)
-                            return {
-                                'success': False,
-                                'message': f'Schedule creation failed: Infinite loop detected at {total_duration/3600:.2f} hours. '
-                                         f'No content available to continue. Please add more content or adjust replay delays.',
-                                'error': 'infinite_loop',
-                                'stopped_at_hours': total_duration / 3600,
-                                'iterations_without_progress': no_progress_iterations
-                            }
+                            # Check if we're very close to the end of the day
+                            if remaining_hours < 0.5:  # Less than 30 minutes left
+                                logger.warning(f"Accepting gap of {remaining_hours:.1f} hours at end of day after {max_no_progress} iterations")
+                                break
+                            else:
+                                logger.error(f"❌ Infinite loop detected: No progress for {max_no_progress} iterations at {total_duration/3600:.2f} hours")
+                                # Delete the partially created schedule
+                                self.delete_schedule(schedule_id)
+                                return {
+                                    'success': False,
+                                    'message': f'Schedule creation failed: Infinite loop detected at {total_duration/3600:.2f} hours. '
+                                             f'No content available to continue. Please add more content or adjust replay delays.',
+                                    'error': 'infinite_loop',
+                                    'stopped_at_hours': total_duration / 3600,
+                                    'iterations_without_progress': no_progress_iterations
+                                }
                     
-                    # Check if we should abort
-                    if consecutive_errors >= max_errors:
-                        logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors")
+                    # Check if we should abort (only for significant gaps)
+                    if consecutive_errors >= max_errors and remaining_hours > 1.0:
+                        logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors with {remaining_hours:.1f} hours remaining")
                         # Delete the partially created schedule
                         self.delete_schedule(schedule_id)
                         return {
@@ -1142,6 +1190,14 @@ class PostgreSQLScheduler:
                             current_theme.lower() == last_scheduled_theme.lower()):
                             score -= 200  # Heavy penalty for same theme
                             logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
+                        
+                        # Package theme conflict check - packages with same theme must be separated by long_form
+                        candidate_is_pkg = candidate.get('content_type') == 'PKG'
+                        if self._has_theme_conflict(candidate, last_scheduled_category, 
+                                                   last_scheduled_theme, current_category,
+                                                   scheduled_items, candidate_is_pkg):
+                            score -= 400  # Very heavy penalty for package theme conflicts
+                            logger.debug(f"Package theme conflict penalty for '{current_theme}'")
                     
                         # Track best scoring content
                         if score > best_score:
@@ -1203,8 +1259,10 @@ class PostgreSQLScheduler:
                         alt_duration = float(alt_content['duration_seconds'])
                         if alt_duration <= remaining_seconds:
                             # Check for theme conflict before accepting this alternative
+                            alt_is_pkg = alt_content.get('content_type') == 'PKG'
                             if self._has_theme_conflict(alt_content, last_scheduled_category, 
-                                                       last_scheduled_theme, duration_category):
+                                                       last_scheduled_theme, duration_category,
+                                                       scheduled_items, alt_is_pkg):
                                 logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
                                 continue
                             
@@ -1237,7 +1295,11 @@ class PostgreSQLScheduler:
                     'instance_id': content['instance_id'],
                     'sequence_number': sequence_number,
                     'scheduled_start_time': scheduled_start,
-                    'scheduled_duration_seconds': content['duration_seconds']
+                    'scheduled_duration_seconds': content['duration_seconds'],
+                    # Add metadata for theme conflict checking
+                    'content_type': content.get('content_type'),
+                    'theme': content.get('theme'),
+                    'duration_category': content.get('duration_category')
                 }
                 
                 scheduled_items.append(item)
@@ -2476,10 +2538,26 @@ class PostgreSQLScheduler:
                     
                     if not available_content:
                         current_time_str = self._seconds_to_time(total_duration % (24 * 60 * 60))
+                        remaining_hours = (day_target_seconds - total_duration) / 3600
                         logger.warning(f"No available content for category: {duration_category} on {day_name} at {current_time_str} "
-                                     f"(hour {(total_duration % (24 * 60 * 60)) / 3600:.1f}) even without delays")
+                                     f"(hour {(total_duration % (24 * 60 * 60)) / 3600:.1f}) even without delays. "
+                                     f"Remaining hours in day: {remaining_hours:.1f}")
+                        
+                        # Check if we're near midnight and trying to schedule longform content
+                        # Skip longform requirement if within last hour of the day
+                        if remaining_hours < 1.0 and duration_category == 'long_form':
+                            logger.info(f"Skipping long_form content near midnight (only {remaining_hours:.1f} hours left). Advancing rotation.")
+                            self._advance_rotation()
+                            consecutive_errors = 0  # Reset error counter since we're making progress
+                            continue
+                        
                         consecutive_errors += 1
                         total_errors += 1
+                        
+                        # IMPORTANT: Always advance rotation when no content is found
+                        # This prevents getting stuck on the same category
+                        self._advance_rotation()
+                        logger.info(f"Advanced rotation to next category after no content found for {duration_category}")
                         
                         # Track if we've cycled through all categories without finding content
                         if self.rotation_index == 0:  # We've completed a full rotation cycle
@@ -2487,41 +2565,53 @@ class PostgreSQLScheduler:
                             logger.warning(f"⚠️ Completed full rotation cycle #{consecutive_no_content_cycles} with no available content on {day_name}")
                             
                             if consecutive_no_content_cycles >= max_no_content_cycles:
-                                logger.error(f"❌ Infinite loop detected: {consecutive_no_content_cycles} full rotation cycles with no available content")
-                                # Delete the partially created schedule
-                                self.delete_schedule(schedule_id)
-                                return {
-                                    'success': False,
-                                    'message': f'Schedule creation failed: No content available after {consecutive_no_content_cycles} complete rotation cycles. '
-                                             f'All content is blocked by replay delays. Please add more content or reduce replay delay settings.',
-                                    'error': 'infinite_loop_all_blocked',
-                                    'stopped_at_hours': total_duration / 3600,
-                                    'stopped_at_day': day_name,
-                                    'days_completed': days_completed,
-                                    'rotation_cycles_failed': consecutive_no_content_cycles
-                                }
+                                # Check if we're very close to the end of the day
+                                if remaining_hours < 0.5:  # Less than 30 minutes left
+                                    logger.warning(f"Accepting gap of {remaining_hours:.1f} hours at end of {day_name} after {consecutive_no_content_cycles} cycles")
+                                    total_duration = day_target_seconds
+                                    break
+                                else:
+                                    logger.error(f"❌ Infinite loop detected: {consecutive_no_content_cycles} full rotation cycles with no available content")
+                                    # Delete the partially created schedule
+                                    self.delete_schedule(schedule_id)
+                                    return {
+                                        'success': False,
+                                        'message': f'Schedule creation failed: No content available after {consecutive_no_content_cycles} complete rotation cycles. '
+                                                 f'All content is blocked by replay delays. Please add more content or reduce replay delay settings.',
+                                        'error': 'infinite_loop_all_blocked',
+                                        'stopped_at_hours': total_duration / 3600,
+                                        'stopped_at_day': day_name,
+                                        'days_completed': days_completed,
+                                        'rotation_cycles_failed': consecutive_no_content_cycles
+                                    }
                         
                         # Check for infinite loop (no progress at all)
                         if total_duration == last_progress_duration:
                             no_progress_iterations += 1
                             if no_progress_iterations >= max_no_progress:
-                                logger.error(f"❌ Infinite loop detected: No progress for {max_no_progress} iterations at {total_duration/3600:.2f} hours on {day_name}")
-                                # Delete the partially created schedule
-                                self.delete_schedule(schedule_id)
-                                return {
-                                    'success': False,
-                                    'message': f'Schedule creation failed: Infinite loop detected at {total_duration/3600:.2f} hours on {day_name}. '
-                                             f'No content available to continue. Please add more content or adjust replay delays.',
-                                    'error': 'infinite_loop',
-                                    'stopped_at_hours': total_duration / 3600,
-                                    'stopped_at_day': day_name,
-                                    'days_completed': days_completed,
-                                    'iterations_without_progress': no_progress_iterations
-                                }
+                                # Check if we're very close to the end of the day
+                                if remaining_hours < 0.5:  # Less than 30 minutes left
+                                    logger.warning(f"Accepting gap of {remaining_hours:.1f} hours at end of {day_name} after {max_no_progress} iterations")
+                                    total_duration = day_target_seconds
+                                    break
+                                else:
+                                    logger.error(f"❌ Infinite loop detected: No progress for {max_no_progress} iterations at {total_duration/3600:.2f} hours on {day_name}")
+                                    # Delete the partially created schedule
+                                    self.delete_schedule(schedule_id)
+                                    return {
+                                        'success': False,
+                                        'message': f'Schedule creation failed: Infinite loop detected at {total_duration/3600:.2f} hours on {day_name}. '
+                                                 f'No content available to continue. Please add more content or adjust replay delays.',
+                                        'error': 'infinite_loop',
+                                        'stopped_at_hours': total_duration / 3600,
+                                        'stopped_at_day': day_name,
+                                        'days_completed': days_completed,
+                                        'iterations_without_progress': no_progress_iterations
+                                    }
                         
-                        # Check if we should abort
-                        if consecutive_errors >= max_errors:
-                            logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors")
+                        # Check if we should abort (only for significant gaps)
+                        if consecutive_errors >= max_errors and remaining_hours > 1.0:
+                            logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors with {remaining_hours:.1f} hours remaining")
                             # Delete the partially created schedule
                             self.delete_schedule(schedule_id)
                             return {
@@ -2657,6 +2747,14 @@ class PostgreSQLScheduler:
                                 score -= 200  # Heavy penalty for same theme
                                 logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
                             
+                            # Package theme conflict check - packages with same theme must be separated by long_form
+                            candidate_is_pkg = candidate.get('content_type') == 'PKG'
+                            if self._has_theme_conflict(candidate, last_scheduled_category, 
+                                                       last_scheduled_theme, current_category,
+                                                       scheduled_items, candidate_is_pkg):
+                                score -= 400  # Very heavy penalty for package theme conflicts
+                                logger.debug(f"Package theme conflict penalty for '{current_theme}'")
+                            
                             # Track best scoring content
                             if score > best_score:
                                 best_score = score
@@ -2714,8 +2812,10 @@ class PostgreSQLScheduler:
                             alt_duration = float(alt_content['duration_seconds'])
                             if alt_duration <= remaining_seconds:
                                 # Check for theme conflict before accepting this alternative
+                                alt_is_pkg = alt_content.get('content_type') == 'PKG'
                                 if self._has_theme_conflict(alt_content, last_scheduled_category, 
-                                                           last_scheduled_theme, duration_category):
+                                                           last_scheduled_theme, duration_category,
+                                                           scheduled_items, alt_is_pkg):
                                     logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
                                     continue
                                 
@@ -2775,7 +2875,11 @@ class PostgreSQLScheduler:
                         'instance_id': content['instance_id'],
                         'sequence_number': sequence_number,
                         'scheduled_start_time': scheduled_start,
-                        'scheduled_duration_seconds': content_duration  # Use the exact duration we used for calculations
+                        'scheduled_duration_seconds': content_duration,  # Use the exact duration we used for calculations
+                        # Add metadata for theme conflict checking
+                        'content_type': content.get('content_type'),
+                        'theme': content.get('theme'),
+                        'duration_category': content.get('duration_category')
                     }
                     
                     scheduled_items.append(item)
@@ -3073,14 +3177,30 @@ class PostgreSQLScheduler:
                     
                     if not available_content:
                         current_time_str = self._seconds_to_time(total_duration % (24 * 60 * 60))
+                        remaining_hours = (day_target_seconds - total_duration) / 3600
                         logger.warning(f"No available content for category: {duration_category} on {day_name} at {current_time_str} "
-                                     f"(hour {(total_duration % (24 * 60 * 60)) / 3600:.1f}) even without delays")
+                                     f"(hour {(total_duration % (24 * 60 * 60)) / 3600:.1f}) even without delays. "
+                                     f"Remaining hours in day: {remaining_hours:.1f}")
+                        
+                        # Check if we're near midnight and trying to schedule longform content
+                        # Skip longform requirement if within last hour of the day
+                        if remaining_hours < 1.0 and duration_category == 'long_form':
+                            logger.info(f"Skipping long_form content near midnight (only {remaining_hours:.1f} hours left). Advancing rotation.")
+                            self._advance_rotation()
+                            consecutive_errors = 0  # Reset error counter since we're making progress
+                            continue
+                        
                         consecutive_errors += 1
                         total_errors += 1
                         
-                        # Check if we should abort
-                        if consecutive_errors >= max_errors:
-                            logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors")
+                        # IMPORTANT: Always advance rotation when no content is found
+                        # This prevents getting stuck on the same category
+                        self._advance_rotation()
+                        logger.info(f"Advanced rotation to next category after no content found for {duration_category}")
+                        
+                        # Check if we should abort (only for significant gaps)
+                        if consecutive_errors >= max_errors and remaining_hours > 1.0:
+                            logger.error(f"Aborting schedule creation: {consecutive_errors} consecutive errors with {remaining_hours:.1f} hours remaining")
                             # Delete the partially created schedule
                             self.delete_schedule(schedule_id)
                             return {
@@ -3088,6 +3208,13 @@ class PostgreSQLScheduler:
                                 'message': f'Schedule creation failed: No available content after {total_errors} attempts. Check content availability.',
                                 'error_count': total_errors
                             }
+                            
+                        # If we're near the end of the day and have many consecutive errors, accept the gap
+                        if consecutive_errors >= 10 and remaining_hours < 0.5:
+                            logger.warning(f"Accepting gap of {remaining_hours:.1f} hours at end of {day_name} after {consecutive_errors} consecutive errors")
+                            total_duration = day_target_seconds
+                            break
+                            
                         continue
                     
                     # Select the best content, avoiding same theme back-to-back for PSAs, spots, and IDs
@@ -3140,8 +3267,10 @@ class PostgreSQLScheduler:
                             alt_duration = float(alt_content['duration_seconds'])
                             if alt_duration <= remaining_seconds:
                                 # Check for theme conflict before accepting this alternative
+                                alt_is_pkg = alt_content.get('content_type') == 'PKG'
                                 if self._has_theme_conflict(alt_content, last_scheduled_category, 
-                                                           last_scheduled_theme, duration_category):
+                                                           last_scheduled_theme, duration_category,
+                                                           scheduled_items, alt_is_pkg):
                                     logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
                                     continue
                                 
@@ -3169,7 +3298,11 @@ class PostgreSQLScheduler:
                         'instance_id': content['instance_id'],
                         'sequence_number': sequence_number,
                         'scheduled_start_time': scheduled_start,
-                        'scheduled_duration_seconds': content_duration
+                        'scheduled_duration_seconds': content_duration,
+                        # Add metadata for theme conflict checking
+                        'content_type': content.get('content_type'),
+                        'theme': content.get('theme'),
+                        'duration_category': content.get('duration_category')
                     }
                     
                     scheduled_items.append(item)

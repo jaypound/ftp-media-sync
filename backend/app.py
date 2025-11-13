@@ -3109,6 +3109,57 @@ def update_content_type():
             'message': str(e)
         })
 
+@app.route('/api/assets/<content_id>/theme', methods=['PUT'])
+def update_asset_theme(content_id):
+    """Update theme for an asset"""
+    try:
+        data = request.json
+        new_theme = data.get('theme', '').strip()
+        
+        logger.info(f"Updating theme for asset ID {content_id} to '{new_theme}'")
+        
+        # Update theme in assets table
+        conn = db_manager._get_connection()
+        try:
+            cursor = conn.cursor()
+            
+            # Update the theme
+            cursor.execute("""
+                UPDATE assets 
+                SET theme = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (new_theme if new_theme else None, content_id))
+            
+            conn.commit()
+            cursor.close()
+            
+            logger.info("Theme updated successfully")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Theme updated successfully'
+            })
+            
+        except Exception as e:
+            logger.error(f"Database update failed: {str(e)}")
+            if conn:
+                conn.rollback()
+            return jsonify({
+                'success': False,
+                'message': f'Database update failed: {str(e)}'
+            })
+        finally:
+            if conn:
+                db_manager._put_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"Update theme failed: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
 @app.route('/api/content/<content_id>', methods=['DELETE'])
 def delete_content_entry(content_id):
     """Delete content from database (does not delete the actual file)"""

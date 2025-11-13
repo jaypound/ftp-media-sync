@@ -5831,6 +5831,9 @@ function displayAvailableContent() {
             <span class="sort-field" data-field="engagement" onclick="sortContent('engagement')">
                 Score ${getSortIcon('engagement')}
             </span>
+            <span class="sort-field" data-field="theme" onclick="sortContent('theme')">
+                Theme ${getSortIcon('theme')}
+            </span>
             <span class="sort-field" data-field="expiration" onclick="sortContent('expiration')">
                 Expiration ${getSortIcon('expiration')}
             </span>
@@ -5901,6 +5904,7 @@ function displayAvailableContent() {
                 <span class="content-duration">${durationTimecode}</span>
                 <span class="content-category">${durationCategory ? durationCategory.toUpperCase() : 'UNKNOWN'}</span>
                 <span class="content-score">${engagementScore}%</span>
+                <span class="content-theme" title="${content.theme || 'No theme'}">${content.theme ? content.theme.substring(0, 20) + (content.theme.length > 20 ? '...' : '') : '-'}</span>
                 <span class="content-expiration ${expirationClass}">${expirationDisplay}</span>
                 <div class="content-featured" style="text-align: center;">
                     <input type="checkbox" 
@@ -9803,10 +9807,16 @@ function viewContentDetails(contentId) {
                         <strong>Shelf Life:</strong>
                         <span>${getShelfLifeInfo(content)}</span>
                         
-                        ${content.theme ? `
                         <strong>Theme:</strong>
-                        <span style="grid-column: 2;">${content.theme}</span>
-                        ` : ''}
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="text" id="detailsTheme" class="form-control" 
+                                   value="${content.theme || ''}" 
+                                   placeholder="Enter theme (e.g., community engagement)"
+                                   style="margin: 0; background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);">
+                            <button class="button small primary" onclick="updateThemeFromDetails('${contentId}')" title="Update theme">
+                                <i class="fas fa-save"></i> Update
+                            </button>
+                        </div>
                         
                         ${content.topics && content.topics.length > 0 ? `
                         <strong>Topics:</strong>
@@ -9871,6 +9881,50 @@ async function updateContentTypeFromDetails(contentId) {
 function addToTemplateFromDetails(contentId) {
     addToTemplate(contentId);
     closeContentDetailsModal();
+}
+
+// Update theme from details modal
+async function updateThemeFromDetails(contentId) {
+    const newTheme = document.getElementById('detailsTheme').value.trim();
+    
+    // Find the content item
+    const content = availableContent.find(c => {
+        const itemId = c._id || c.id || c.guid;
+        return itemId == contentId || itemId === contentId || String(itemId) === String(contentId);
+    });
+    
+    if (!content) {
+        window.showNotification('Content not found', 'error');
+        return;
+    }
+    
+    try {
+        // Call API to update theme
+        const response = await window.API.put(`/assets/${contentId}/theme`, {
+            theme: newTheme
+        });
+        
+        if (response.success) {
+            window.showNotification('Theme updated successfully', 'success');
+            
+            // Update the content object
+            content.theme = newTheme;
+            
+            // If available content is displayed, refresh it
+            if (window.displayAvailableContent) {
+                window.displayAvailableContent();
+            }
+            
+            // Close and reopen the modal to refresh the display
+            closeContentDetailsModal();
+            viewContentDetails(contentId);
+        } else {
+            window.showNotification(response.message || 'Failed to update theme', 'error');
+        }
+    } catch (error) {
+        console.error('Error updating theme:', error);
+        window.showNotification('Error updating theme', 'error');
+    }
 }
 
 // Initialize scheduling when page loads
@@ -14694,6 +14748,9 @@ window.sortContent = sortContent;
 window.getSortIcon = getSortIcon;
 window.viewContentDetails = viewContentDetails;
 window.addToTemplate = addToTemplate;
+window.closeContentDetailsModal = closeContentDetailsModal;
+window.updateContentTypeFromDetails = updateContentTypeFromDetails;
+window.updateThemeFromDetails = updateThemeFromDetails;
 window.getContentTypeLabel = getContentTypeLabel;
 window.formatDurationTimecode = formatDurationTimecode;
 window.getDurationCategory = getDurationCategory;
