@@ -14675,10 +14675,10 @@ def scan_default_graphics():
                     logger.debug(f"Updated existing graphic: {file_name}")
                 else:
                     # Add new graphic with default dates
-                    # Default to 30 days from now for end_date
-                    end_date = (datetime.now() + timedelta(days=30)).date()
+                    # Set end_date to 2030-01-01 for long-term use
+                    end_date = datetime(2030, 1, 1).date()
                     
-                    logger.info(f"Adding new graphic: {file_name} (size: {file_size}, modified: {file_modified})")
+                    logger.info(f"Adding new graphic: {file_name} (size: {file_size}, modified: {file_modified}, expires: {end_date})")
                     
                     cursor.execute("""
                         INSERT INTO default_graphics 
