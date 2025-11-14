@@ -1,6 +1,201 @@
 /* Fill Graphics Module CSS */
 /* All classes prefixed with 'fill-graphics-' to avoid conflicts */
 
+/* Auto Generation Settings */
+.auto-generation-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.auto-generation-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.auto-generation-card .card-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 30px;
+}
+
+.auto-generation-card .card-header h3::after {
+    content: '\f078';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+    position: absolute;
+    right: 0;
+    transition: transform 0.3s ease;
+}
+
+.auto-generation-card.collapsed .card-header h3::after {
+    transform: rotate(-90deg);
+}
+
+.auto-generation-card .card-body {
+    padding: 20px;
+}
+
+.auto-generation-card.collapsed .card-body {
+    display: none;
+}
+
+.auto-generation-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.setting-label {
+    flex: 1;
+}
+
+.setting-label strong {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 5px;
+}
+
+.setting-label small {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.setting-control {
+    margin-left: 20px;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-tertiary);
+    transition: .4s;
+    border-radius: 28px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--primary);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(22px);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.status-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 15px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+}
+
+.status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-label {
+    font-weight: 500;
+    color: var(--text-secondary);
+    min-width: 120px;
+}
+
+.status-value {
+    color: var(--text-primary);
+}
+
+.status-indicator {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.status-indicator.active {
+    background: var(--success);
+    color: white;
+}
+
+.status-indicator.inactive {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.status-indicator.generating {
+    background: var(--warning);
+    color: white;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-indicator.error {
+    background: var(--danger);
+    color: white;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+.auto-gen-actions {
+    display: flex;
+    gap: 10px;
+}
+
 /* Fill Graphics Panel */
 .fill-graphics-panel {
     padding: 1.5rem;

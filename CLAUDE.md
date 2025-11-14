@@ -5,7 +5,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Related Documentation
 - [Content Rotation System](./CONTENT_ROTATION.md) - Detailed guide for configuring and troubleshooting the content rotation system
 
-## Current Work: Enhanced Featured Content System (2025-10-30)
+## Current Work: Automatic Video Generation During Meetings (2025-11-14)
+
+### Overview
+Implementing automatic fill graphics video generation that triggers 2 minutes after scheduled meetings start.
+
+### Status Summary
+**FULLY COMPLETED AND OPERATIONAL** ✅:
+1. ✅ Database tables created (auto_generation_config, meeting_video_generations)
+2. ✅ Backend host verification working (only Mac Studio triggers generation)
+3. ✅ Scheduled job running every minute to check meetings
+4. ✅ UI controls for enable/disable with clear ON/OFF state
+5. ✅ Weekdays 8 AM - 6 PM restriction implemented
+6. ✅ 2-minute delay after meeting start (updated from 5 minutes)
+7. ✅ Actual FFmpeg video generation code implemented (not placeholder)
+8. ✅ FTP upload to both source and target servers
+9. ✅ Export status tracking (success/failure per server)
+10. ✅ Default selections implemented:
+    - Region 1: All active graphics from database
+    - Region 2: "ATL26 SQUEEZEBACK SKYLINE WITH SOCIAL HANDLES.png"
+    - Region 3: All WAV files from target server
+11. ✅ Correct delivery path: `/mnt/main/Videos`
+12. ✅ New file naming: `YYMMDDHHMI_FILL_<sort_order>_<duration>.mp4`
+13. ✅ Enhanced upload logging: `backend/logs/autogen_upload_*.log`
+
+### Confirmed Working
+- Test meeting "AUTOGEN TEST" at 10:07 AM successfully generated video at 10:11 AM
+- Video file `fill_graphics_AUTOGEN_TEST_20251114_101100.mp4` was created
+- File was delivered to `/Videos` on both servers (now corrected to `/mnt/main/Videos`)
+- 31 graphics included, 155 seconds duration
+- Export status showed success for both source and target servers
+
+### Final Configurations
+- Delay: 2 minutes after meeting start
+- File naming: `YYMMDDHHMI_FILL_<sort_order>_<duration>.mp4`
+- Export path: `/mnt/main/Videos`
+- Sort order rotation: creation → newest → oldest → alphabetical → random
+- Graphics database: Extended expiration dates to 2030-01-01 for long-term graphics
+
+### Key Files
+- `backend/scheduler_jobs.py` - Contains check_meetings_for_video_generation()
+- `backend/app.py` - Contains generate_default_graphics_video_internal() 
+- `backend/migrations/add_auto_video_generation_tables.sql` - Database schema
+- `frontend/fill_graphics/fill_graphics.js` - UI controls
+- `backend/host_verification.py` - Backend host checking
+- `backend/logs/autogen_upload_*.log` - Upload logs
+- `backend/logs/ffmpeg_auto_gen_*.log` - FFmpeg generation logs
+
+## Previous Work: Enhanced Featured Content System (2025-10-30)
 
 ### Overview
 Implementing an improved featured content system with:

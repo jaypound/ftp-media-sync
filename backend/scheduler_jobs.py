@@ -6,6 +6,8 @@ import os
 import logging
 import socket
 import json
+import random
+import re
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -17,6 +19,7 @@ from config_manager import ConfigManager
 from ftp_manager import FTPManager
 from castus_metadata import CastusMetadataHandler
 from email_notifier import EmailNotifier
+from host_verification import is_backend_host, get_host_info
 
 # Setup dedicated logger for scheduler with file output
 logger = logging.getLogger(__name__)
@@ -102,9 +105,21 @@ class SchedulerJobs:
             max_instances=1  # Only one instance can run at a time
         )
         
+        # Schedule the meeting video generation check every minute
+        self.scheduler.add_job(
+            func=self.check_meetings_for_video_generation,
+            trigger=CronTrigger(minute='*'),  # Every minute
+            id='meeting_video_generation',
+            name='Check Meetings for Video Generation',
+            misfire_grace_time=30,  # 30 seconds grace period
+            max_instances=1  # Only one instance can run at a time
+        )
+        
         self.scheduler.start()
         logger.info("Scheduler started with automatic Castus sync at 9am, 12pm, 3pm, 6pm")
-        logger.info(f"Next run time: {self.scheduler.get_job('castus_sync_all').next_run_time}")
+        logger.info("Meeting video generation check runs every minute")
+        logger.info(f"Next Castus sync: {self.scheduler.get_job('castus_sync_all').next_run_time}")
+        logger.info(f"Next video check: {self.scheduler.get_job('meeting_video_generation').next_run_time}")
         
         # List all jobs
         jobs = self.scheduler.get_jobs()
@@ -460,3 +475,243 @@ class SchedulerJobs:
                 pass
                 
         return None
+    
+    def check_meetings_for_video_generation(self):
+        """Check for meetings that need video generation"""
+        # First check if we're the backend host
+        if not is_backend_host():
+            logger.debug("Not backend host, skipping video generation check")
+            return
+        
+        # Check if auto generation is enabled
+        config = self.get_auto_generation_config()
+        if not config or not config.get('enabled', False):
+            logger.debug("Auto video generation is disabled")
+            return
+        
+        # Check time constraints
+        now = datetime.now()
+        if not self.is_valid_generation_time(now, config):
+            logger.debug(f"Outside valid generation window (weekdays {config['start_hour']}-{config['end_hour']})")
+            return
+        
+        # Find meetings that started X minutes ago (default 2)
+        delay_minutes = config.get('delay_minutes', 2)
+        meetings = self.find_meetings_for_generation(delay_minutes)
+        
+        if meetings:
+            logger.info(f"Found {len(meetings)} meeting(s) that need video generation")
+        
+        for meeting in meetings:
+            try:
+                logger.info(f"Generating video for meeting: {meeting['meeting_name']}")
+                self.generate_video_for_meeting(meeting, config)
+            except Exception as e:
+                logger.error(f"Failed to generate video for meeting {meeting['id']}: {str(e)}", exc_info=True)
+    
+    def get_auto_generation_config(self):
+        """Get auto generation configuration from database"""
+        conn = self.db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT * FROM auto_generation_config LIMIT 1")
+                return cursor.fetchone()
+        except Exception as e:
+            logger.error(f"Error getting auto generation config: {e}")
+            return None
+        finally:
+            self.db_manager._put_connection(conn)
+    
+    def is_valid_generation_time(self, dt, config):
+        """Check if current time is within allowed generation window"""
+        # Check weekday (0=Monday, 4=Friday)
+        if config['weekdays_only'] and dt.weekday() > 4:
+            return False
+        
+        # Check hour range
+        current_hour = dt.hour
+        if current_hour < config['start_hour'] or current_hour >= config['end_hour']:
+            return False
+        
+        return True
+    
+    def find_meetings_for_generation(self, delay_minutes):
+        """Find meetings that started X minutes ago and need video generation"""
+        conn = self.db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Calculate target time (X minutes ago)
+                target_time = datetime.now() - timedelta(minutes=delay_minutes)
+                target_start = target_time - timedelta(minutes=1)  # 1 minute window
+                target_end = target_time + timedelta(minutes=1)
+                
+                # Find meetings that:
+                # 1. Are scheduled for today
+                # 2. Started within our target window
+                # 3. Haven't had a video generated today
+                cursor.execute("""
+                    SELECT m.* 
+                    FROM meetings m
+                    WHERE m.meeting_date = CURRENT_DATE
+                    AND m.start_time BETWEEN %s::time AND %s::time
+                    AND NOT EXISTS (
+                        SELECT 1 FROM meeting_video_generations mvg
+                        WHERE mvg.meeting_id = m.id
+                        AND DATE(mvg.generation_timestamp) = CURRENT_DATE
+                        AND mvg.status IN ('generating', 'completed')
+                    )
+                """, (target_start.time(), target_end.time()))
+                
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error finding meetings for generation: {e}")
+            return []
+        finally:
+            self.db_manager._put_connection(conn)
+    
+    def generate_video_for_meeting(self, meeting, config):
+        """Generate fill graphics video for a meeting"""
+        conn = self.db_manager._get_connection()
+        generation_id = None
+        
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Create generation record
+                cursor.execute("""
+                    INSERT INTO meeting_video_generations 
+                    (meeting_id, status, generated_by_host, sort_order)
+                    VALUES (%s, 'generating', %s, %s)
+                    RETURNING id
+                """, (meeting['id'], socket.gethostname(), 'pending'))
+                generation_id = cursor.fetchone()['id']
+                conn.commit()
+                
+                # Get active graphics count
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM default_graphics
+                    WHERE status = 'active' 
+                    AND start_date <= CURRENT_DATE 
+                    AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+                """)
+                graphic_count = cursor.fetchone()['count']
+                
+                if graphic_count == 0:
+                    raise Exception("No active graphics available")
+                
+                # Calculate duration
+                duration = max(
+                    config['min_duration_seconds'], 
+                    graphic_count * config['seconds_per_graphic']
+                )
+                
+                # Get next sort order
+                sort_order = self.get_next_sort_order()
+                
+                # Update generation record with sort order and duration
+                cursor.execute("""
+                    UPDATE meeting_video_generations
+                    SET sort_order = %s, duration_seconds = %s, graphics_count = %s
+                    WHERE id = %s
+                """, (sort_order, duration, graphic_count, generation_id))
+                
+                # Generate filename using YYMMDDHHMI_FILL_<sort_order>_<duration_seconds>.mp4
+                timestamp = datetime.now().strftime('%y%m%d%H%M')  # YYMMDDHHMI format
+                file_name = f'{timestamp}_FILL_{sort_order}_{duration}.mp4'
+                
+                # Import and call the video generation function
+                from app import generate_default_graphics_video_internal
+                
+                result = generate_default_graphics_video_internal({
+                    'file_name': file_name,
+                    'export_path': '/mnt/main/Videos',  # Correct path on FTP servers
+                    'sort_order': sort_order,
+                    'max_length': duration,
+                    'export_to_source': True,
+                    'export_to_target': True,  # Export to both servers
+                    'auto_generated': True,
+                    'meeting_id': meeting['id'],
+                    # Default selections for auto generation
+                    'region2_file': 'ATL26 SQUEEZEBACK SKYLINE WITH SOCIAL HANDLES.png',
+                    'region3_files': 'all_wav'  # Special flag to select all WAV files
+                })
+                
+                # Update generation record with success
+                cursor.execute("""
+                    UPDATE meeting_video_generations
+                    SET status = 'completed', video_id = %s
+                    WHERE id = %s
+                """, (result.get('video_id'), generation_id))
+                conn.commit()
+                
+                logger.info(f"Successfully generated video for meeting {meeting['meeting_name']}: {file_name}")
+                
+        except Exception as e:
+            logger.error(f"Failed to generate video for meeting {meeting['id']}: {str(e)}")
+            if generation_id and conn:
+                try:
+                    with conn.cursor() as cursor:
+                        cursor.execute("""
+                            UPDATE meeting_video_generations
+                            SET status = 'failed', error_message = %s
+                            WHERE id = %s
+                        """, (str(e), generation_id))
+                        conn.commit()
+                except:
+                    pass
+            raise
+        finally:
+            self.db_manager._put_connection(conn)
+    
+    def get_next_sort_order(self):
+        """Get the next sort order, different from the last video"""
+        SORT_ORDERS = ['creation', 'newest', 'oldest', 'alphabetical', 'random']
+        
+        conn = self.db_manager._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Get the most recent video's sort order
+                cursor.execute("""
+                    SELECT generation_params
+                    FROM generated_default_videos
+                    ORDER BY generation_date DESC
+                    LIMIT 1
+                """)
+                
+                last_video = cursor.fetchone()
+                if not last_video:
+                    return 'creation'
+                
+                try:
+                    params = json.loads(last_video['generation_params'] or '{}')
+                    last_sort = params.get('sort_order', 'creation')
+                    
+                    # If last was random, pick any other
+                    if last_sort == 'random':
+                        return random.choice([s for s in SORT_ORDERS if s != 'random'])
+                    
+                    # Otherwise, get next in rotation
+                    if last_sort in SORT_ORDERS:
+                        current_index = SORT_ORDERS.index(last_sort)
+                        next_index = (current_index + 1) % len(SORT_ORDERS)
+                        return SORT_ORDERS[next_index]
+                    else:
+                        return 'creation'
+                        
+                except (json.JSONDecodeError, ValueError):
+                    return 'creation'
+                    
+        except Exception as e:
+            logger.error(f"Error getting next sort order: {e}")
+            return 'creation'
+        finally:
+            self.db_manager._put_connection(conn)
+    
+    def sanitize_filename(self, name):
+        """Sanitize filename by removing invalid characters"""
+        # Remove or replace invalid filename characters
+        name = re.sub(r'[<>:"/\\|?*]', '_', name)
+        # Replace multiple spaces/underscores with single underscore
+        name = re.sub(r'[_\s]+', '_', name)
+        # Limit length
+        return name[:50].strip('_')

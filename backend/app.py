@@ -15248,6 +15248,469 @@ def generate_default_graphics_video():
             'message': str(e)
         })
 
+def generate_default_graphics_video_internal(params):
+    """Internal function to generate default graphics video (for scheduled jobs)"""
+    try:
+        # Get parameters
+        file_name = params.get('file_name')
+        export_path = params.get('export_path', '/mnt/main/ATL26 On-Air Content/Videos')
+        export_to_source = params.get('export_to_source', True)
+        export_to_target = params.get('export_to_target', False)
+        video_format = params.get('video_format', 'mp4')
+        max_length = params.get('max_length', 300)
+        sort_order = params.get('sort_order', 'creation')
+        auto_generated = params.get('auto_generated', False)
+        meeting_id = params.get('meeting_id')
+        region2_file = params.get('region2_file')
+        region3_files = params.get('region3_files')
+        
+        # Get active graphics from database
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Handle region3_files special case for auto generation
+        if auto_generated and region3_files == 'all_wav':
+            # Get all WAV files from target server for music
+            # This would be implemented by scanning the music folder on target server
+            # For now, we'll use a predefined list or pattern
+            region3_files = []  # This will be populated by actual file scanning
+            logger.info("Auto generation: will select all WAV files from target server")
+        
+        # Log auto generation selections
+        if auto_generated:
+            logger.info(f"Auto generation video settings:")
+            logger.info(f"  Region 1: All active graphics from database")
+            logger.info(f"  Region 2: {region2_file}")
+            logger.info(f"  Region 3: {'All WAV files' if region3_files == 'all_wav' else region3_files}")
+        
+        # For auto-generated videos, use all active graphics
+        cursor.execute("""
+            SELECT id, file_name, file_path, duration_seconds, sort_order, creation_date
+            FROM default_graphics
+            WHERE status = 'active' 
+            AND start_date <= CURRENT_DATE 
+            AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+            ORDER BY COALESCE(sort_order, 999999), creation_date DESC
+        """)
+        
+        graphics = cursor.fetchall()
+        
+        if not graphics:
+            raise Exception('No active graphics found')
+        
+        # Apply sort order
+        if sort_order == 'random':
+            import random
+            random.shuffle(graphics)
+        elif sort_order == 'newest':
+            def get_sort_date(g):
+                if not g['creation_date']:
+                    return datetime(1900, 1, 1)
+                cd = g['creation_date']
+                if hasattr(cd, 'date'):
+                    return cd.replace(tzinfo=None) if cd.tzinfo else cd
+                else:
+                    return datetime.combine(cd, datetime.min.time())
+            graphics.sort(key=get_sort_date, reverse=True)
+        elif sort_order == 'oldest':
+            def get_sort_date(g):
+                if not g['creation_date']:
+                    return datetime(1900, 1, 1)
+                cd = g['creation_date']
+                if hasattr(cd, 'date'):
+                    return cd.replace(tzinfo=None) if cd.tzinfo else cd
+                else:
+                    return datetime.combine(cd, datetime.min.time())
+            graphics.sort(key=get_sort_date)
+        elif sort_order == 'alphabetical':
+            graphics.sort(key=lambda g: g['file_name'], reverse=True)
+        
+        # Create video record
+        cursor.execute("""
+            INSERT INTO generated_default_videos 
+            (file_name, file_path, export_server, graphics_count, video_format, 
+             region2_file, music_files, generation_params, auto_generated, meeting_id, generation_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'generating')
+            RETURNING id
+        """, (
+            file_name,
+            os.path.join(export_path, file_name),
+            'source' if export_to_source else 'target',
+            len(graphics),
+            video_format,
+            region2_file,
+            json.dumps(region3_files) if region3_files else None,
+            json.dumps({
+                'max_length': max_length,
+                'sort_order': sort_order
+            }),
+            auto_generated,
+            meeting_id
+        ))
+        video_id = cursor.fetchone()['id']
+        conn.commit()
+        
+        try:
+            # ACTUAL VIDEO GENERATION
+            import tempfile
+            import subprocess
+            import shutil
+            from PIL import Image
+            
+            # Create temp directory for video generation
+            temp_dir = tempfile.mkdtemp(prefix='auto_video_gen_')
+            logger.info(f"Created temp directory: {temp_dir}")
+            
+            # Track included graphics
+            included_graphics = []
+            total_duration = 0.0
+            position = 0
+            
+            try:
+                # Get server configurations
+                config = config_manager.get_all_config()
+                servers = config.get('servers', {})
+                
+                # 1. Download Region 1 graphics (all active graphics)
+                logger.info("Downloading Region 1 graphics...")
+                region1_temp_files = []
+                server_config = servers.get('target', {})  # Graphics are on target server
+                ftp = FTPManager(server_config)
+                
+                if ftp.connect():
+                    for graphic in graphics:
+                        if total_duration >= max_length:
+                            break
+                            
+                        try:
+                            # Download graphic file
+                            remote_path = f"/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION/{graphic['file_name']}"
+                            local_path = os.path.join(temp_dir, f"r1_{graphic['file_name']}")
+                            
+                            if ftp.download_file(remote_path, local_path):
+                                region1_temp_files.append(local_path)
+                                duration = float(graphic['duration_seconds'])
+                                
+                                # Track usage
+                                cursor.execute("""
+                                    INSERT INTO default_graphics_usage (graphic_id, video_id, position, duration_seconds)
+                                    VALUES (%s, %s, %s, %s)
+                                """, (graphic['id'], video_id, position, duration))
+                                
+                                included_graphics.append({
+                                    'id': graphic['id'],
+                                    'file_name': graphic['file_name'],
+                                    'duration': duration,
+                                    'position': position
+                                })
+                                
+                                total_duration += duration
+                                position += 1
+                                logger.info(f"Downloaded graphic {position}: {graphic['file_name']}")
+                        except Exception as e:
+                            logger.error(f"Failed to download graphic {graphic['file_name']}: {e}")
+                    
+                    ftp.disconnect()
+                else:
+                    raise Exception("Failed to connect to target server for graphics")
+                
+                if not region1_temp_files:
+                    raise Exception("No graphics could be downloaded")
+                
+                # 2. Download Region 2 file (static overlay)
+                region2_temp_file = None
+                if region2_file:
+                    logger.info(f"Downloading Region 2 overlay: {region2_file}")
+                    ftp = FTPManager(server_config)
+                    if ftp.connect():
+                        remote_path = f"/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION/{region2_file}"
+                        local_path = os.path.join(temp_dir, f"r2_{region2_file}")
+                        if ftp.download_file(remote_path, local_path):
+                            region2_temp_file = local_path
+                            logger.info(f"Downloaded region2 file: {region2_file}")
+                        ftp.disconnect()
+                
+                # 3. Download Region 3 files (music)
+                region3_temp_files = []
+                if auto_generated and region3_files == 'all_wav':
+                    logger.info("Downloading all WAV files for music...")
+                    ftp = FTPManager(server_config)
+                    if ftp.connect():
+                        music_path = "/mnt/main/Mastered Audio/FTP"
+                        try:
+                            wav_files = ftp.list_files(music_path)
+                            # Filter for WAV files
+                            wav_files = [f for f in wav_files if f['name'].lower().endswith('.wav')]
+                            # Limit to reasonable number
+                            wav_files = wav_files[:10]  # Take first 10 WAV files
+                            
+                            for wav_file in wav_files:
+                                remote_path = f"{music_path}/{wav_file['name']}"
+                                local_path = os.path.join(temp_dir, f"r3_{wav_file['name']}")
+                                if ftp.download_file(remote_path, local_path):
+                                    region3_temp_files.append(local_path)
+                                    logger.info(f"Downloaded music file: {wav_file['name']}")
+                        except Exception as e:
+                            logger.warning(f"Failed to download music files: {e}")
+                        ftp.disconnect()
+                
+                # 4. Generate video using FFmpeg
+                output_video = os.path.join(temp_dir, file_name)
+                logger.info(f"Generating video: {file_name}")
+                
+                ffmpeg_cmd = generate_ffmpeg_command(
+                    region1_temp_files,
+                    region2_temp_file,
+                    region3_temp_files,
+                    output_video,
+                    video_format,
+                    max_length
+                )
+                
+                if not ffmpeg_cmd:
+                    raise Exception("Failed to generate FFmpeg command")
+                
+                logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd[:10])}...")
+                
+                # Log FFmpeg command
+                logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+                os.makedirs(logs_dir, exist_ok=True)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                log_filename = f"ffmpeg_auto_gen_{timestamp}.log"
+                log_filepath = os.path.join(logs_dir, log_filename)
+                
+                with open(log_filepath, 'w') as log_file:
+                    log_file.write(f"# FFmpeg Auto Video Generation Log\n")
+                    log_file.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    log_file.write(f"# File: {file_name}\n")
+                    log_file.write(f"# Command:\n")
+                    log_file.write(' '.join(ffmpeg_cmd))
+                    log_file.write("\n\n# Output:\n")
+                
+                # Run FFmpeg
+                process = subprocess.Popen(
+                    ffmpeg_cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True
+                )
+                
+                # Log output
+                with open(log_filepath, 'a') as log_file:
+                    for line in process.stdout:
+                        log_file.write(line)
+                
+                process.wait()
+                
+                if process.returncode != 0:
+                    raise Exception(f"FFmpeg failed with return code {process.returncode}")
+                
+                if not os.path.exists(output_video):
+                    raise Exception("Video file was not created")
+                
+                logger.info(f"Video generated successfully: {os.path.getsize(output_video)} bytes")
+                
+                # 5. Upload to FTP servers
+                # Create upload log
+                upload_log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+                os.makedirs(upload_log_dir, exist_ok=True)
+                upload_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                upload_log_filename = f"autogen_upload_{upload_timestamp}.log"
+                upload_log_path = os.path.join(upload_log_dir, upload_log_filename)
+                
+                with open(upload_log_path, 'w') as upload_log:
+                    upload_log.write(f"# Autogen Upload Log\n")
+                    upload_log.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    upload_log.write(f"# Video: {file_name}\n")
+                    upload_log.write(f"# Local file: {output_video}\n")
+                    upload_log.write(f"# File size: {os.path.getsize(output_video)} bytes\n")
+                    upload_log.write(f"# Export path: {export_path}\n")
+                    upload_log.write(f"# Export to source: {export_to_source}\n")
+                    upload_log.write(f"# Export to target: {export_to_target}\n")
+                    upload_log.write("\n")
+                
+                success_count = 0
+                if export_to_source:
+                    logger.info("Uploading to source server...")
+                    with open(upload_log_path, 'a') as upload_log:
+                        upload_log.write(f"\n=== SOURCE SERVER UPLOAD ===\n")
+                        upload_log.write(f"Time: {datetime.now().strftime('%H:%M:%S')}\n")
+                    
+                    source_config = servers.get('source', {})
+                    with open(upload_log_path, 'a') as upload_log:
+                        upload_log.write(f"Server: {source_config.get('host', 'N/A')}\n")
+                        upload_log.write(f"Username: {source_config.get('username', 'N/A')}\n")
+                    
+                    ftp = FTPManager(source_config)
+                    if ftp.connect():
+                        try:
+                            remote_path = os.path.join(export_path, file_name)
+                            with open(upload_log_path, 'a') as upload_log:
+                                upload_log.write(f"Remote path: {remote_path}\n")
+                                upload_log.write(f"Uploading file...\n")
+                            
+                            upload_result = ftp.upload_file(output_video, remote_path)
+                            
+                            with open(upload_log_path, 'a') as upload_log:
+                                upload_log.write(f"Upload result: {upload_result}\n")
+                                if upload_result:
+                                    upload_log.write(f"✓ Upload successful\n")
+                                else:
+                                    upload_log.write(f"✗ Upload failed (returned False)\n")
+                            
+                            if upload_result:
+                                logger.info(f"Uploaded to source: {remote_path}")
+                                cursor.execute("""
+                                    UPDATE generated_default_videos 
+                                    SET source_export_status = 'success',
+                                        source_export_timestamp = NOW()
+                                    WHERE id = %s
+                                """, (video_id,))
+                                success_count += 1
+                            else:
+                                cursor.execute("""
+                                    UPDATE generated_default_videos 
+                                    SET source_export_status = 'failed',
+                                        source_export_error = 'Upload returned False'
+                                    WHERE id = %s
+                                """, (video_id,))
+                        except Exception as e:
+                            logger.error(f"Failed to upload to source: {e}")
+                            with open(upload_log_path, 'a') as upload_log:
+                                upload_log.write(f"✗ Upload exception: {str(e)}\n")
+                                upload_log.write(f"Exception type: {type(e).__name__}\n")
+                            cursor.execute("""
+                                UPDATE generated_default_videos 
+                                SET source_export_status = 'failed',
+                                    source_export_error = %s
+                                WHERE id = %s
+                            """, (str(e), video_id))
+                        ftp.disconnect()
+                    else:
+                        with open(upload_log_path, 'a') as upload_log:
+                            upload_log.write(f"✗ Failed to connect to source server\n")
+                
+                if export_to_target:
+                    logger.info("Uploading to target server...")
+                    with open(upload_log_path, 'a') as upload_log:
+                        upload_log.write(f"\n=== TARGET SERVER UPLOAD ===\n")
+                        upload_log.write(f"Time: {datetime.now().strftime('%H:%M:%S')}\n")
+                    
+                    target_config = servers.get('target', {})
+                    with open(upload_log_path, 'a') as upload_log:
+                        upload_log.write(f"Server: {target_config.get('host', 'N/A')}\n")
+                        upload_log.write(f"Username: {target_config.get('username', 'N/A')}\n")
+                    
+                    ftp = FTPManager(target_config)
+                    if ftp.connect():
+                        try:
+                            remote_path = os.path.join(export_path, file_name)
+                            with open(upload_log_path, 'a') as upload_log:
+                                upload_log.write(f"Remote path: {remote_path}\n")
+                                upload_log.write(f"Uploading file...\n")
+                            
+                            upload_result = ftp.upload_file(output_video, remote_path)
+                            
+                            with open(upload_log_path, 'a') as upload_log:
+                                upload_log.write(f"Upload result: {upload_result}\n")
+                                if upload_result:
+                                    upload_log.write(f"✓ Upload successful\n")
+                                else:
+                                    upload_log.write(f"✗ Upload failed (returned False)\n")
+                            
+                            if upload_result:
+                                logger.info(f"Uploaded to target: {remote_path}")
+                                cursor.execute("""
+                                    UPDATE generated_default_videos 
+                                    SET target_export_status = 'success',
+                                        target_export_timestamp = NOW()
+                                    WHERE id = %s
+                                """, (video_id,))
+                                success_count += 1
+                            else:
+                                cursor.execute("""
+                                    UPDATE generated_default_videos 
+                                    SET target_export_status = 'failed',
+                                        target_export_error = 'Upload returned False'
+                                    WHERE id = %s
+                                """, (video_id,))
+                        except Exception as e:
+                            logger.error(f"Failed to upload to target: {e}")
+                            with open(upload_log_path, 'a') as upload_log:
+                                upload_log.write(f"✗ Upload exception: {str(e)}\n")
+                                upload_log.write(f"Exception type: {type(e).__name__}\n")
+                            cursor.execute("""
+                                UPDATE generated_default_videos 
+                                SET target_export_status = 'failed',
+                                    target_export_error = %s
+                                WHERE id = %s
+                            """, (str(e), video_id))
+                        ftp.disconnect()
+                    else:
+                        with open(upload_log_path, 'a') as upload_log:
+                            upload_log.write(f"✗ Failed to connect to target server\n")
+                
+                with open(upload_log_path, 'a') as upload_log:
+                    upload_log.write(f"\n=== UPLOAD SUMMARY ===\n")
+                    upload_log.write(f"Success count: {success_count}\n")
+                    upload_log.write(f"Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                
+                logger.info(f"Upload log saved to: {upload_log_path}")
+                
+                if success_count == 0:
+                    raise Exception("Failed to upload video to any server")
+                
+                # Update video record
+                cursor.execute("""
+                    UPDATE generated_default_videos 
+                    SET total_duration = %s, 
+                        graphics_included = %s,
+                        generation_status = 'completed',
+                        export_server = CASE 
+                            WHEN source_export_status = 'success' AND target_export_status = 'success' THEN 'both'
+                            WHEN source_export_status = 'success' THEN 'source'
+                            WHEN target_export_status = 'success' THEN 'target'
+                            ELSE 'none'
+                        END
+                    WHERE id = %s
+                """, (total_duration, json.dumps(included_graphics), video_id))
+                
+                conn.commit()
+                logger.info(f"Auto video generation completed successfully for {file_name}")
+                
+            finally:
+                # Clean up temp directory
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+                    logger.info("Cleaned up temp directory")
+            
+            cursor.close()
+            db_manager._put_connection(conn)
+            
+            return {
+                'success': True,
+                'video_id': video_id,
+                'file_name': file_name,
+                'duration': total_duration,
+                'graphics_count': len(included_graphics)
+            }
+            
+        except Exception as e:
+            # Update status on error
+            cursor.execute("""
+                UPDATE generated_default_videos 
+                SET generation_status = 'failed'
+                WHERE id = %s
+            """, (video_id,))
+            conn.commit()
+            raise e
+            
+    except Exception as e:
+        logger.error(f"Error in generate_default_graphics_video_internal: {str(e)}")
+        if 'conn' in locals():
+            db_manager._put_connection(conn)
+        raise e
+
 @app.route('/api/default-graphics/history', methods=['GET'])
 def get_default_graphics_history():
     """Get history of generated videos"""
@@ -15292,6 +15755,246 @@ def get_default_graphics_history():
         
     except Exception as e:
         logger.error(f"Error getting graphics history: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/auto-generation/config', methods=['GET', 'PUT'])
+def auto_generation_config():
+    """Get or update auto generation configuration"""
+    try:
+        if request.method == 'GET':
+            conn = db_manager._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("SELECT * FROM auto_generation_config LIMIT 1")
+            config = cursor.fetchone()
+            
+            cursor.close()
+            db_manager._put_connection(conn)
+            
+            return jsonify({
+                'success': True,
+                'config': config if config else {
+                    'enabled': False,
+                    'start_hour': 8,
+                    'end_hour': 18,
+                    'weekdays_only': True,
+                    'delay_minutes': 5,
+                    'min_duration_seconds': 360,
+                    'seconds_per_graphic': 10
+                }
+            })
+            
+        else:  # PUT
+            data = request.json
+            conn = db_manager._get_connection()
+            cursor = conn.cursor()
+            
+            # Update configuration
+            cursor.execute("""
+                UPDATE auto_generation_config
+                SET enabled = %s,
+                    start_hour = %s,
+                    end_hour = %s,
+                    weekdays_only = %s,
+                    delay_minutes = %s,
+                    min_duration_seconds = %s,
+                    seconds_per_graphic = %s,
+                    updated_at = NOW(),
+                    updated_by = %s
+                WHERE id = (SELECT id FROM auto_generation_config LIMIT 1)
+            """, (
+                data.get('enabled', False),
+                data.get('start_hour', 8),
+                data.get('end_hour', 18),
+                data.get('weekdays_only', True),
+                data.get('delay_minutes', 5),
+                data.get('min_duration_seconds', 360),
+                data.get('seconds_per_graphic', 10),
+                data.get('updated_by', 'web_ui')
+            ))
+            
+            if cursor.rowcount == 0:
+                # Insert if doesn't exist
+                cursor.execute("""
+                    INSERT INTO auto_generation_config 
+                    (enabled, start_hour, end_hour, weekdays_only, delay_minutes, 
+                     min_duration_seconds, seconds_per_graphic, updated_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    data.get('enabled', False),
+                    data.get('start_hour', 8),
+                    data.get('end_hour', 18),
+                    data.get('weekdays_only', True),
+                    data.get('delay_minutes', 5),
+                    data.get('min_duration_seconds', 360),
+                    data.get('seconds_per_graphic', 10),
+                    data.get('updated_by', 'web_ui')
+                ))
+            
+            conn.commit()
+            cursor.close()
+            db_manager._put_connection(conn)
+            
+            logger.info(f"Auto generation config updated: enabled={data.get('enabled')}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Configuration updated successfully'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error with auto generation config: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/auto-generation/status', methods=['GET'])
+def auto_generation_status():
+    """Get current auto generation status"""
+    try:
+        from host_verification import get_host_info
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get config
+        cursor.execute("SELECT enabled FROM auto_generation_config LIMIT 1")
+        config = cursor.fetchone()
+        enabled = config['enabled'] if config else False
+        
+        # Get host info
+        host_info = get_host_info()
+        
+        # Check if current time is valid
+        now = datetime.now()
+        weekday_valid = now.weekday() <= 4  # Monday-Friday
+        hour_valid = 8 <= now.hour < 18
+        time_valid = weekday_valid and hour_valid
+        
+        # Get last generation
+        cursor.execute("""
+            SELECT m.meeting_name, mvg.generation_timestamp, mvg.status
+            FROM meeting_video_generations mvg
+            JOIN meetings m ON mvg.meeting_id = m.id
+            WHERE mvg.status IN ('completed', 'failed')
+            ORDER BY mvg.generation_timestamp DESC
+            LIMIT 1
+        """)
+        last_gen = cursor.fetchone()
+        
+        # Get current/upcoming meeting
+        cursor.execute("""
+            SELECT meeting_name, start_time
+            FROM meetings
+            WHERE meeting_date = CURRENT_DATE
+            AND start_time >= CURRENT_TIME - INTERVAL '10 minutes'
+            ORDER BY start_time
+            LIMIT 1
+        """)
+        next_meeting = cursor.fetchone()
+        
+        cursor.close()
+        db_manager._put_connection(conn)
+        
+        return jsonify({
+            'success': True,
+            'status': {
+                'enabled': enabled,
+                'is_backend_host': host_info.get('is_backend', False),
+                'hostname': host_info.get('current_hostname'),
+                'current_time_valid': time_valid,
+                'weekday_valid': weekday_valid,
+                'hour_valid': hour_valid,
+                'current_time': now.strftime('%Y-%m-%d %H:%M:%S'),
+                'last_generation': {
+                    'meeting': last_gen['meeting_name'] if last_gen else None,
+                    'time': last_gen['generation_timestamp'].isoformat() if last_gen else None,
+                    'status': last_gen['status'] if last_gen else None
+                } if last_gen else None,
+                'next_meeting': {
+                    'name': next_meeting['meeting_name'],
+                    'time': next_meeting['start_time'].strftime('%H:%M')
+                } if next_meeting else None
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting auto generation status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/auto-generation/history', methods=['GET'])
+def auto_generation_history():
+    """Get history of auto-generated videos"""
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get total count
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM meeting_video_generations mvg
+            JOIN meetings m ON mvg.meeting_id = m.id
+        """)
+        total_count = cursor.fetchone()['count']
+        
+        # Get history
+        cursor.execute("""
+            SELECT 
+                mvg.id,
+                m.meeting_name,
+                m.meeting_date,
+                m.start_time,
+                mvg.generation_timestamp,
+                mvg.status,
+                mvg.sort_order,
+                mvg.duration_seconds,
+                mvg.graphics_count,
+                mvg.error_message,
+                mvg.generated_by_host,
+                gv.file_name as video_file_name,
+                gv.export_server,
+                gv.source_export_status,
+                gv.target_export_status,
+                gv.file_path
+            FROM meeting_video_generations mvg
+            JOIN meetings m ON mvg.meeting_id = m.id
+            LEFT JOIN generated_default_videos gv ON mvg.video_id = gv.id
+            ORDER BY mvg.generation_timestamp DESC
+            LIMIT %s OFFSET %s
+        """, (limit, offset))
+        
+        history = cursor.fetchall()
+        
+        cursor.close()
+        db_manager._put_connection(conn)
+        
+        # Format dates for JSON
+        for item in history:
+            if item['meeting_date']:
+                item['meeting_date'] = item['meeting_date'].isoformat()
+            if item['start_time']:
+                item['start_time'] = item['start_time'].strftime('%H:%M:%S')
+            if item['generation_timestamp']:
+                item['generation_timestamp'] = item['generation_timestamp'].isoformat()
+        
+        return jsonify({
+            'success': True,
+            'total': total_count,
+            'history': history
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting auto generation history: {str(e)}")
         return jsonify({
             'success': False,
             'message': str(e)

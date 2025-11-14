@@ -1,0 +1,5 @@
+markdown2==2.4.10
+weasyprint==60.1
+pandoc==2.3
+fpdf2==2.7.5
+reportlab==4.0.4

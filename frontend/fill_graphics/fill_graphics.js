@@ -1127,3 +1127,277 @@ window.showGenerateProjectModal = fillGraphicsShowGenerateProjectModal;
 window.generateProjectFile = fillGraphicsGenerateProjectFile;
 window.closeGenerateProjectModal = fillGraphicsCloseGenerateProjectModal;
 window.updateGenerateButton = fillGraphicsUpdateGenerateButton;
+
+// Auto Generation Functions
+async function autoGenerationLoadStatus() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/auto-generation/status');
+        const result = await response.json();
+        
+        if (result.success) {
+            const status = result.status;
+            
+            // Update status display
+            const statusEl = document.getElementById('autoGenerationStatus');
+            const hostEl = document.getElementById('autoGenerationHost');
+            const lastGenEl = document.getElementById('autoGenerationLastGen');
+            
+            // Determine overall status
+            let statusText = 'Inactive';
+            let statusClass = 'inactive';
+            
+            if (!status.is_backend_host) {
+                statusText = 'Not Backend Host';
+                statusClass = 'error';
+            } else if (!status.enabled) {
+                statusText = 'Disabled';
+                statusClass = 'inactive';
+            } else if (!status.current_time_valid) {
+                statusText = 'Outside Active Hours';
+                statusClass = 'inactive';
+            } else {
+                statusText = 'Active';
+                statusClass = 'active';
+            }
+            
+            statusEl.textContent = statusText;
+            statusEl.className = `status-indicator ${statusClass}`;
+            
+            // Update host info
+            hostEl.textContent = `${status.hostname}${status.is_backend_host ? ' (Backend)' : ''}`;
+            
+            // Update last generation
+            if (status.last_generation && status.last_generation.meeting) {
+                const genTime = new Date(status.last_generation.time);
+                const timeStr = genTime.toLocaleString();
+                lastGenEl.textContent = `${status.last_generation.meeting} - ${timeStr}`;
+            } else {
+                lastGenEl.textContent = 'Never';
+            }
+            
+            // Load config for checkbox
+            const configResponse = await fetch('http://127.0.0.1:5000/api/auto-generation/config');
+            const configResult = await configResponse.json();
+            
+            if (configResult.success) {
+                const checkbox = document.getElementById('autoGenerationEnabled');
+                checkbox.checked = configResult.config.enabled;
+                checkbox.disabled = !status.is_backend_host;
+                
+                // Update toggle text
+                const toggleText = document.getElementById('autoGenerationToggleText');
+                if (toggleText) {
+                    toggleText.textContent = configResult.config.enabled ? 'ON' : 'OFF';
+                    toggleText.style.color = configResult.config.enabled ? '#4CAF50' : '#666';
+                }
+                
+                if (!status.is_backend_host) {
+                    checkbox.parentElement.title = 'Only available on backend host';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading auto generation status:', error);
+        showNotification('Error loading auto generation status', 'error');
+    }
+}
+
+async function autoGenerationToggle() {
+    try {
+        const checkbox = document.getElementById('autoGenerationEnabled');
+        const enabled = checkbox.checked;
+        
+        const response = await fetch('http://127.0.0.1:5000/api/auto-generation/config', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                enabled: enabled
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification(`Auto generation ${enabled ? 'enabled' : 'disabled'}`, 'success');
+            // Update toggle text
+            const toggleText = document.getElementById('autoGenerationToggleText');
+            if (toggleText) {
+                toggleText.textContent = enabled ? 'ON' : 'OFF';
+                toggleText.style.color = enabled ? '#4CAF50' : '#666';
+            }
+            autoGenerationRefreshStatus();
+        } else {
+            showNotification('Failed to update auto generation setting', 'error');
+            // Revert checkbox
+            checkbox.checked = !enabled;
+        }
+    } catch (error) {
+        console.error('Error toggling auto generation:', error);
+        showNotification('Error updating auto generation setting', 'error');
+        // Revert checkbox
+        const checkbox = document.getElementById('autoGenerationEnabled');
+        checkbox.checked = !checkbox.checked;
+    }
+}
+
+function autoGenerationRefreshStatus() {
+    autoGenerationLoadStatus();
+}
+
+async function autoGenerationShowHistory() {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/auto-generation/history');
+        const result = await response.json();
+        
+        if (result.success) {
+            // Create modal content
+            let historyHtml = `
+                <div class="modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+                    <div class="modal-content" style="max-width: 900px; background-color: var(--card-background, #fff); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <div class="modal-header" style="padding: 20px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center;">
+                            <h2 style="margin: 0;">Auto Generation History</h2>
+                            <button class="modal-close" onclick="this.closest('.modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+                        </div>
+                        <div class="modal-body" style="max-height: 600px; overflow-y: auto; padding: 20px;">
+                            <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="background-color: #f5f5f5;">
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Meeting</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Date</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Time</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Generated</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Status</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Export</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Sort Order</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Duration</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Graphics</th>
+                                        <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">Video File</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+            `;
+            
+            if (!result.history || result.history.length === 0) {
+                historyHtml += '<tr><td colspan="10" style="text-align: center;">No auto-generated videos yet</td></tr>';
+            } else {
+                result.history.forEach(item => {
+                    const meetingDate = new Date(item.meeting_date);
+                    const genTime = new Date(item.generation_timestamp);
+                    const statusClass = item.status === 'completed' ? 'success' : 
+                                      item.status === 'failed' ? 'danger' : 'warning';
+                    
+                    historyHtml += `
+                        <tr>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.meeting_name}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${meetingDate.toLocaleDateString()}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.start_time}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${genTime.toLocaleString()}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;"><span class="badge badge-${statusClass}" style="padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: 600; background-color: ${statusClass === 'success' ? '#d4edda' : statusClass === 'danger' ? '#f8d7da' : '#fff3cd'}; color: ${statusClass === 'success' ? '#155724' : statusClass === 'danger' ? '#721c24' : '#856404'};">${item.status}</span></td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${formatExportStatus(item)}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.sort_order || '-'}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.duration_seconds ? formatDuration(item.duration_seconds) : '-'}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.graphics_count || '-'}</td>
+                            <td style="padding: 8px; border-bottom: 1px solid #eee;" ${item.file_path ? `title="${item.file_path}"` : ''}>${item.video_file_name || '-'}</td>
+                        </tr>
+                    `;
+                    
+                    if (item.error_message) {
+                        historyHtml += `
+                            <tr>
+                                <td colspan="10" class="error-message">
+                                    <small>Error: ${item.error_message}</small>
+                                </td>
+                            </tr>
+                        `;
+                    }
+                });
+            }
+            
+            historyHtml += `
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="modal-footer" style="padding: 20px; border-top: 1px solid #ddd; text-align: right;">
+                            <button class="button secondary" onclick="this.closest('.modal').remove()">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove any existing modal first
+            const existingModal = document.querySelector('.modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            document.body.insertAdjacentHTML('beforeend', historyHtml);
+        } else {
+            console.error('Failed to load history:', result.error || 'Unknown error');
+            showNotification('Failed to load generation history', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading auto generation history:', error);
+        showNotification('Error loading history', 'error');
+    }
+}
+
+function formatDuration(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatExportStatus(item) {
+    let status = '';
+    
+    // Check source export
+    if (item.source_export_status === 'success') {
+        status += '<span style="color: #28a745; font-weight: 600;">✓ Source</span>';
+    } else if (item.source_export_status === 'failed') {
+        status += '<span style="color: #dc3545; font-weight: 600;">✗ Source</span>';
+    } else if (item.source_export_status === 'pending') {
+        status += '<span style="color: #ffc107; font-weight: 600;">⏳ Source</span>';
+    }
+    
+    // Add separator if both statuses exist
+    if (item.source_export_status !== 'skipped' && item.target_export_status !== 'skipped') {
+        status += '<br>';
+    }
+    
+    // Check target export
+    if (item.target_export_status === 'success') {
+        status += '<span style="color: #28a745; font-weight: 600;">✓ Target</span>';
+    } else if (item.target_export_status === 'failed') {
+        status += '<span style="color: #dc3545; font-weight: 600;">✗ Target</span>';
+    } else if (item.target_export_status === 'pending') {
+        status += '<span style="color: #ffc107; font-weight: 600;">⏳ Target</span>';
+    }
+    
+    // If no exports, show none
+    if (!status) {
+        status = '<span style="color: #6c757d;">None</span>';
+    }
+    
+    return status;
+}
+
+// Export auto generation functions
+window.autoGenerationToggle = autoGenerationToggle;
+window.autoGenerationRefreshStatus = autoGenerationRefreshStatus;
+window.autoGenerationShowHistory = autoGenerationShowHistory;
+
+// Load status when module initializes
+if (document.querySelector('.auto-generation-card')) {
+    autoGenerationLoadStatus();
+    
+    // Make the auto generation card collapsible
+    const autoGenHeader = document.querySelector('.auto-generation-card .card-header h3');
+    if (autoGenHeader) {
+        autoGenHeader.addEventListener('click', function() {
+            const card = this.closest('.auto-generation-card');
+            card.classList.toggle('collapsed');
+        });
+    }
+}
