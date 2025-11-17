@@ -58,7 +58,7 @@ def test_auto_video_generation():
         'region2_server': 'target',
         # Region 3 - music (would need actual file list)
         'region3_files': [],  # Empty for now
-        'region3_path': '/mnt/main/Mastered Audio/FTP',
+        'region3_path': '/mnt/main/Music',
         'region3_server': 'target'
     }
     

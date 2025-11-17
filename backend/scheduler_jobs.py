@@ -648,20 +648,29 @@ class SchedulerJobs:
                 
         except Exception as e:
             logger.error(f"Failed to generate video for meeting {meeting['id']}: {str(e)}")
-            if generation_id and conn:
+            if generation_id:
                 try:
-                    with conn.cursor() as cursor:
-                        cursor.execute("""
-                            UPDATE meeting_video_generations
-                            SET status = 'failed', error_message = %s
-                            WHERE id = %s
-                        """, (str(e), generation_id))
-                        conn.commit()
-                except:
-                    pass
+                    # Get a new connection for the update since the original might be corrupted
+                    update_conn = self.db_manager._get_connection()
+                    try:
+                        with update_conn.cursor() as cursor:
+                            cursor.execute("""
+                                UPDATE meeting_video_generations
+                                SET status = 'failed', error_message = %s
+                                WHERE id = %s
+                            """, (str(e), generation_id))
+                            update_conn.commit()
+                    finally:
+                        self.db_manager._put_connection(update_conn)
+                except Exception as update_error:
+                    logger.error(f"Failed to update generation status: {update_error}")
             raise
         finally:
-            self.db_manager._put_connection(conn)
+            try:
+                self.db_manager._put_connection(conn)
+            except Exception as pool_error:
+                logger.error(f"Error returning connection to pool: {pool_error}")
+                # Connection might already be closed or invalid, ignore the error
     
     def get_next_sort_order(self):
         """Get the next sort order, different from the last video"""

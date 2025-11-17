@@ -15271,9 +15271,7 @@ def generate_default_graphics_video_internal(params):
         # Handle region3_files special case for auto generation
         if auto_generated and region3_files == 'all_wav':
             # Get all WAV files from target server for music
-            # This would be implemented by scanning the music folder on target server
-            # For now, we'll use a predefined list or pattern
-            region3_files = []  # This will be populated by actual file scanning
+            # Keep region3_files as 'all_wav' - it will be handled during download
             logger.info("Auto generation: will select all WAV files from target server")
         
         # Log auto generation selections
@@ -15423,7 +15421,7 @@ def generate_default_graphics_video_internal(params):
                     logger.info(f"Downloading Region 2 overlay: {region2_file}")
                     ftp = FTPManager(server_config)
                     if ftp.connect():
-                        remote_path = f"/mnt/main/ATL26 On-Air Content/DEFAULT ROTATION/{region2_file}"
+                        remote_path = f"/mnt/main/Graphics/{region2_file}"
                         local_path = os.path.join(temp_dir, f"r2_{region2_file}")
                         if ftp.download_file(remote_path, local_path):
                             region2_temp_file = local_path
@@ -15436,7 +15434,7 @@ def generate_default_graphics_video_internal(params):
                     logger.info("Downloading all WAV files for music...")
                     ftp = FTPManager(server_config)
                     if ftp.connect():
-                        music_path = "/mnt/main/Mastered Audio/FTP"
+                        music_path = "/mnt/main/Music"
                         try:
                             wav_files = ftp.list_files(music_path)
                             # Filter for WAV files
