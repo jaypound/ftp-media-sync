@@ -14130,20 +14130,11 @@ async function autoStartAutomation() {
         }
         
         // Sort files by creation time (prefer ctime if available, fall back to mtime)
-        // TEMPORARILY: Select oldest file instead of newest
-        // const newestFile = result.files.sort((a, b) => {
-        //     const aTime = a.ctime || a.mtime || 0;
-        //     const bTime = b.ctime || b.mtime || 0;
-        //     return bTime - aTime;  // Descending order (newest first)
-        // })[0];
-        
-        // Select oldest file by sorting in ascending order
-        const oldestFile = result.files.sort((a, b) => {
+        const newestFile = result.files.sort((a, b) => {
             const aTime = a.ctime || a.mtime || 0;
             const bTime = b.ctime || b.mtime || 0;
-            return aTime - bTime;  // Ascending order (oldest first)
+            return bTime - aTime;  // Descending order (newest first)
         })[0];
-        const newestFile = oldestFile;  // Keep variable name for compatibility
         const selectedFile = newestFile.path;
         const programmingDelay = 300; // Default 300 seconds (5 minutes)
         
