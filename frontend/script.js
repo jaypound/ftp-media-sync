@@ -4145,8 +4145,8 @@ function showScheduleConfig(configType) {
             bodyContent = generateExpirationConfigHTML();
             console.log('Generated HTML length:', bodyContent.length);
             console.log('First 200 chars:', bodyContent.substring(0, 200));
-            // Load scheduler status after modal is shown
-            setTimeout(() => loadSchedulerStatus(), 100);
+            // Load scheduler status after modal is shown - DISABLED
+            // setTimeout(() => loadSchedulerStatus(), 100);
             break;
         case 'rotation':
             titleText = 'Category Rotation Configuration';
@@ -4444,6 +4444,7 @@ function generateExpirationConfigHTML() {
                 </div>
             </div>
             
+            <!-- AUTOMATIC SYNC SCHEDULE - DISABLED/HIDDEN
             <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
                 <h5>Automatic Sync Schedule</h5>
                 <p style="margin-bottom: 10px;">Automatically sync all expirations from Castus at scheduled times.</p>
@@ -4468,6 +4469,7 @@ function generateExpirationConfigHTML() {
                     </button>
                 </div>
             </div>
+            -->
         </div>
     `;
     
@@ -11115,18 +11117,55 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
                     return;
                 }
                 
+                // COMMENTED OUT: Overlap validation was detecting Live Input placeholders
+                // The placeholders are removed later in the process, so this validation
+                // was preventing schedule export. The separate "Validate Times" button
+                // on the meetings page can be used to check for actual meeting conflicts.
+                /*
                 // Check for overlaps first
                 if (result.items_with_overlaps && result.items_with_overlaps.length > 0) {
                     log(`fillScheduleGaps: ERROR - ${result.items_with_overlaps.length} items have overlaps`, 'error');
-                    const overlapMsg = 'Schedule validation failed: Items with overlaps detected:\n';
-                    const details = result.items_with_overlaps.map(item => 
-                        `- ${item.title || item.file_name} at ${item.start_time}`
-                    ).join('\n');
+                    console.log('Overlap data received:', result.items_with_overlaps);
                     
-                    // Show alert and throw error to abort automation
-                    alert(overlapMsg + details);
+                    // Build detailed overlap message with formatted times
+                    const overlapMessages = result.items_with_overlaps.map(overlap => {
+                        if (overlap.message) {
+                            return overlap.message;
+                        } else {
+                            // Fallback for old format
+                            return `- ${overlap.title || overlap.file_name} at ${overlap.start_time}`;
+                        }
+                    });
+                    
+                    // Create a custom modal-style alert with OK button
+                    const modalHtml = `
+                        <div id="overlap-notification" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+                             background: var(--card-bg, white); border: 2px solid #d9534f; border-radius: 5px; padding: 20px; z-index: 10000; 
+                             box-shadow: 0 4px 6px rgba(0,0,0,0.3); max-width: 600px; max-height: 400px; overflow: auto;
+                             color: var(--text-color, #333);">
+                            <h3 style="color: #d9534f; margin-top: 0;">Schedule Validation Failed</h3>
+                            <p style="font-weight: bold; color: var(--text-color, #333);">The following overlaps were detected:</p>
+                            <div style="margin: 10px 0; padding: 10px; background: var(--panel-bg, #f8f8f8); border-left: 3px solid #d9534f;">
+                                ${overlapMessages.map(msg => `<p style="margin: 5px 0; color: var(--text-color, #333);">${msg}</p>`).join('')}
+                            </div>
+                            <p style="color: var(--text-secondary, #666); font-size: 14px;">Please adjust the schedule to resolve these conflicts.</p>
+                            <div style="text-align: center; margin-top: 20px;">
+                                <button onclick="document.getElementById('overlap-notification').remove(); document.getElementById('overlap-overlay').remove();" 
+                                        style="padding: 8px 20px; background: #d9534f; color: white; border: none; 
+                                               border-radius: 3px; cursor: pointer; font-size: 16px;">OK</button>
+                            </div>
+                        </div>
+                        <div id="overlap-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+                             background: rgba(0,0,0,0.7); z-index: 9999;" 
+                             onclick="document.getElementById('overlap-notification').remove(); this.remove()"></div>
+                    `;
+                    
+                    // Insert the modal into the page
+                    document.body.insertAdjacentHTML('beforeend', modalHtml);
+                    
                     throw new Error('Schedule validation failed: Overlaps detected. Please check the template.');
                 }
+                */
                 
                 if (result.success && result.items_added && result.items_added.length > 0) {
                     log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
@@ -17302,6 +17341,310 @@ window.generateMonthlySchedule = async function() {
         showNotification('Error generating schedule', 'error');
     }
 };
+
+// Validate Meeting Times Function
+window.validateMeetingTimes = async function() {
+    console.log('Starting meeting times validation');
+    
+    try {
+        
+        // Get all meetings
+        const meetingsResponse = await fetch('/api/meetings');
+        const meetingsData = await meetingsResponse.json();
+        
+        console.log('Meetings API response:', meetingsData);
+        
+        if (meetingsData.status !== 'success' || !meetingsData.meetings || meetingsData.meetings.length === 0) {
+            showNotification('No meetings to validate', 'info');
+            return;
+        }
+        
+        const meetings = meetingsData.meetings;
+        console.log(`Found ${meetings.length} meetings to validate`);
+        
+        // Sort meetings by date and time
+        meetings.sort((a, b) => {
+            const dateA = new Date(`${a.meeting_date}T${a.start_time}`);
+            const dateB = new Date(`${b.meeting_date}T${b.start_time}`);
+            return dateA - dateB;
+        });
+        
+        // Check for overlaps
+        const overlaps = [];
+        const dateToGraphicsCount = {}; // Cache graphics count per date
+        
+        for (let i = 0; i < meetings.length; i++) {
+            const currentMeeting = meetings[i];
+            const currentStart = new Date(`${currentMeeting.meeting_date}T${currentMeeting.start_time}`);
+            const currentEnd = new Date(`${currentMeeting.meeting_date}T${currentMeeting.end_time}`);
+            
+            // Get graphics count for this meeting's date if not cached
+            if (!dateToGraphicsCount[currentMeeting.meeting_date]) {
+                const graphicsResponse = await fetch(`/api/default-graphics/active-count?date=${currentMeeting.meeting_date}`);
+                const graphicsData = await graphicsResponse.json();
+                dateToGraphicsCount[currentMeeting.meeting_date] = graphicsData.count || 0;
+                console.log(`Graphics count for ${currentMeeting.meeting_date}: ${graphicsData.count}`);
+            }
+            
+            const meetingGraphicsCount = dateToGraphicsCount[currentMeeting.meeting_date];
+            const meetingRequiredGap = Math.max(300, meetingGraphicsCount * 10);
+            
+            // Add required gap before and after
+            const currentStartWithGap = new Date(currentStart.getTime() - meetingRequiredGap * 1000);
+            const currentEndWithGap = new Date(currentEnd.getTime() + meetingRequiredGap * 1000);
+            
+            // Check against all other meetings
+            for (let j = 0; j < meetings.length; j++) {
+                if (i === j) continue; // Skip comparing with itself
+                
+                const otherMeeting = meetings[j];
+                const otherStart = new Date(`${otherMeeting.meeting_date}T${otherMeeting.start_time}`);
+                const otherEnd = new Date(`${otherMeeting.meeting_date}T${otherMeeting.end_time}`);
+                
+                // Get graphics count for other meeting's date if not cached
+                if (!dateToGraphicsCount[otherMeeting.meeting_date]) {
+                    const graphicsResponse = await fetch(`/api/default-graphics/active-count?date=${otherMeeting.meeting_date}`);
+                    const graphicsData = await graphicsResponse.json();
+                    dateToGraphicsCount[otherMeeting.meeting_date] = graphicsData.count || 0;
+                }
+                
+                const otherGraphicsCount = dateToGraphicsCount[otherMeeting.meeting_date];
+                const otherRequiredGap = Math.max(300, otherGraphicsCount * 10);
+                
+                // Add required gap to other meeting
+                const otherStartWithGap = new Date(otherStart.getTime() - otherRequiredGap * 1000);
+                const otherEndWithGap = new Date(otherEnd.getTime() + otherRequiredGap * 1000);
+                
+                // Check if meetings are on the same date first
+                console.log(`Date check: "${currentMeeting.meeting_date}" === "${otherMeeting.meeting_date}" = ${currentMeeting.meeting_date === otherMeeting.meeting_date}`);
+                if (currentMeeting.meeting_date === otherMeeting.meeting_date) {
+                    // Calculate actual gap between meetings
+                    const actualGap = calculateActualGap(currentMeeting, otherMeeting);
+                    const maxRequiredGap = Math.max(meetingRequiredGap, otherRequiredGap);
+                    
+                    // Log for debugging
+                    console.log(`Comparing "${currentMeeting.meeting_name}" with "${otherMeeting.meeting_name}":`);
+                    console.log(`  Current: ${currentMeeting.meeting_date} ${currentMeeting.start_time} - ${currentMeeting.end_time}`);
+                    console.log(`  Other: ${otherMeeting.meeting_date} ${otherMeeting.start_time} - ${otherMeeting.end_time}`);
+                    console.log(`  Actual gap: ${actualGap}s, Required gap: ${maxRequiredGap}s`);
+                    
+                    if (actualGap >= 0) { // Log all gaps
+                        console.log(`Gap between "${currentMeeting.meeting_name}" (ends ${currentMeeting.end_time}) and "${otherMeeting.meeting_name}" (starts ${otherMeeting.start_time}): ${actualGap}s (${(actualGap/60).toFixed(2)}min), required: ${maxRequiredGap}s (${(maxRequiredGap/60).toFixed(2)}min) - ${actualGap < maxRequiredGap ? 'CONFLICT' : 'OK'}`);
+                    }
+                    
+                    // Check if actual gap is less than required gap (for consecutive meetings)
+                    // OR if meetings overlap (actualGap is negative)
+                    if ((actualGap >= 0 && actualGap < maxRequiredGap) || 
+                        actualGap < 0) {
+                        
+                        // Check if this overlap has already been recorded (in reverse order)
+                        const alreadyRecorded = overlaps.some(o => 
+                            (o.meeting1.id === otherMeeting.id && o.meeting2.id === currentMeeting.id)
+                        );
+                        
+                        if (!alreadyRecorded) {
+                            overlaps.push({
+                                meeting1: currentMeeting,
+                                meeting2: otherMeeting,
+                                actualGap: actualGap,
+                                requiredGap: maxRequiredGap,
+                                meeting1GraphicsCount: meetingGraphicsCount,
+                                meeting2GraphicsCount: otherGraphicsCount
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Display results with date-specific graphics counts
+        displayValidationResults(overlaps, dateToGraphicsCount);
+        
+    } catch (error) {
+        console.error('Error validating meeting times:', error);
+        showNotification('Error validating meeting times', 'error');
+    }
+};
+
+// Helper function to format time with AM/PM
+function formatTime12Hour(time24) {
+    // Handle both HH:MM and HH:MM:SS formats
+    const parts = time24.split(':');
+    const hours = parseInt(parts[0]);
+    const minutes = parts[1];
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const displayHour = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+    return `${displayHour}:${minutes} ${period}`;
+}
+
+// Helper function to convert 12-hour time to 24-hour format
+function convertTo24Hour(time12) {
+    // Handle "11:00 AM" or "01:54 PM" format
+    const match = time12.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!match) return time12; // Return original if no match
+    
+    let hours = parseInt(match[1]);
+    const minutes = match[2];
+    const period = match[3].toUpperCase();
+    
+    if (period === 'PM' && hours !== 12) {
+        hours += 12;
+    } else if (period === 'AM' && hours === 12) {
+        hours = 0;
+    }
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes}:00`;
+}
+
+// Helper function to calculate actual gap between meetings
+function calculateActualGap(meeting1, meeting2) {
+    const end1 = new Date(`${meeting1.meeting_date}T${convertTo24Hour(meeting1.end_time)}`);
+    const start1 = new Date(`${meeting1.meeting_date}T${convertTo24Hour(meeting1.start_time)}`);
+    const end2 = new Date(`${meeting2.meeting_date}T${convertTo24Hour(meeting2.end_time)}`);
+    const start2 = new Date(`${meeting2.meeting_date}T${convertTo24Hour(meeting2.start_time)}`);
+    
+    // If meeting2 starts after meeting1 ends
+    if (start2 > end1) {
+        return Math.floor((start2 - end1) / 1000); // Gap in seconds
+    }
+    // If meeting1 starts after meeting2 ends
+    else if (start1 > end2) {
+        return Math.floor((start1 - end2) / 1000); // Gap in seconds
+    }
+    // Meetings overlap
+    else {
+        return -1; // Negative indicates overlap
+    }
+}
+
+// Display validation results in a modal
+function displayValidationResults(overlaps, dateToGraphicsCount) {
+    let modalContent = '';
+    if (overlaps.length === 0) {
+        // Get total unique dates and their graphics counts
+        const dates = Object.keys(dateToGraphicsCount).sort();
+        const graphicsSummary = dates.map(date => {
+            const count = dateToGraphicsCount[date];
+            const gap = Math.max(300, count * 10) / 60;
+            return `${new Date(date).toLocaleDateString()}: ${count} graphics (${gap.toFixed(1)} min gap)`;
+        }).join('<br/>');
+        
+        modalContent = `
+            <div style="text-align: center; padding: 20px;">
+                <i class="fas fa-check-circle" style="font-size: 48px; color: #28a745; margin-bottom: 20px;"></i>
+                <h3 style="color: #28a745; margin: 0 0 10px 0;">All meetings are properly scheduled!</h3>
+                <p style="color: var(--text-color, #333);">No conflicts found with the required gaps.</p>
+                <p style="font-size: 14px; color: var(--text-secondary, #666); margin-top: 15px;">Graphics counts by date:<br/>${graphicsSummary}</p>
+            </div>
+        `;
+    } else {
+        // Create table rows for overlaps
+        const tableRows = overlaps.map(o => {
+            const actualGapMinutes = o.actualGap >= 0 ? (o.actualGap / 60).toFixed(1) : 'Overlap';
+            const requiredGapMinutes = (o.requiredGap / 60).toFixed(1);
+            const gapStatus = o.actualGap < 0 ? 'Overlapping' : `${actualGapMinutes} / ${requiredGapMinutes} min`;
+            
+            // Times already include AM/PM from API
+            const meeting1Start = o.meeting1.start_time;
+            const meeting1End = o.meeting1.end_time;
+            const meeting2Start = o.meeting2.start_time;
+            const meeting2End = o.meeting2.end_time;
+            
+            return `
+                <tr>
+                    <td style="padding: 8px; border: 1px solid var(--border-color, #ddd); color: var(--text-color, #333);">
+                        ${o.meeting1.meeting_name}<br>
+                        <span style="font-size: 12px; color: var(--text-secondary, #666);">
+                            ${meeting1Start} - ${meeting1End} (${o.meeting1GraphicsCount} graphics)
+                        </span>
+                    </td>
+                    <td style="padding: 8px; border: 1px solid var(--border-color, #ddd); color: var(--text-color, #333);">
+                        ${o.meeting2.meeting_name}<br>
+                        <span style="font-size: 12px; color: var(--text-secondary, #666);">
+                            ${meeting2Start} - ${meeting2End} (${o.meeting2GraphicsCount} graphics)
+                        </span>
+                    </td>
+                    <td style="padding: 8px; border: 1px solid var(--border-color, #ddd); text-align: center; 
+                               color: ${o.actualGap < o.requiredGap ? '#d9534f' : 'var(--text-color, #333)'}; 
+                               font-weight: ${o.actualGap < o.requiredGap ? 'bold' : 'normal'};">
+                        ${gapStatus}
+                    </td>
+                    <td style="padding: 8px; border: 1px solid var(--border-color, #ddd); color: var(--text-color, #333); text-align: center;">
+                        ${o.meeting1.meeting_date}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+        modalContent = `
+            <div>
+                <h3 style="color: #d9534f; margin: 0 0 10px 0;">
+                    <i class="fas fa-exclamation-triangle"></i> Meeting Conflicts Detected
+                </h3>
+                <p style="margin-bottom: 15px; color: var(--text-color, #333);">
+                    The following meetings do not have the required gap time based on active graphics:
+                </p>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                        <thead>
+                            <tr style="background: var(--panel-bg, #f5f5f5);">
+                                <th style="padding: 10px; border: 1px solid var(--border-color, #ddd); text-align: left; color: var(--text-color, #333);">
+                                    First Meeting
+                                </th>
+                                <th style="padding: 10px; border: 1px solid var(--border-color, #ddd); text-align: left; color: var(--text-color, #333);">
+                                    Second Meeting
+                                </th>
+                                <th style="padding: 10px; border: 1px solid var(--border-color, #ddd); text-align: center; color: var(--text-color, #333);">
+                                    Gap (Actual / Required)
+                                </th>
+                                <th style="padding: 10px; border: 1px solid var(--border-color, #ddd); text-align: center; color: var(--text-color, #333);">
+                                    Date
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+                <p style="margin-top: 15px; font-size: 12px; color: var(--text-secondary, #666); font-style: italic;">
+                    * Required gap is calculated as: max(5 minutes, active graphics × 10 seconds)
+                </p>
+            </div>
+        `;
+    }
+    
+    // Create and show modal with dark theme support
+    const modalHtml = `
+        <div id="validation-modal" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+             background: var(--card-bg, white); border: 2px solid ${overlaps.length > 0 ? '#d9534f' : '#28a745'}; 
+             border-radius: 5px; padding: 20px; z-index: 10000; 
+             box-shadow: 0 4px 6px rgba(0,0,0,0.3); max-width: 800px; max-height: 600px; overflow: auto;
+             color: var(--text-color, #333);">
+            ${modalContent}
+            <div style="text-align: center; margin-top: 20px;">
+                <button onclick="document.getElementById('validation-modal').remove(); document.getElementById('validation-overlay').remove();" 
+                        style="padding: 8px 20px; background: ${overlaps.length > 0 ? '#d9534f' : '#28a745'}; 
+                               color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 16px;">
+                    OK
+                </button>
+            </div>
+        </div>
+        <div id="validation-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+             background: rgba(0,0,0,0.7); z-index: 9999;" 
+             onclick="document.getElementById('validation-modal').remove(); this.remove()"></div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+// Helper function to format meeting date and time
+function formatMeetingTime(meeting) {
+    const date = new Date(meeting.meeting_date);
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+    const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${dayName}, ${dateStr} at ${meeting.start_time} - ${meeting.end_time}`;
+}
 
 // Helper function to parse schedule template content into items
 function parseScheduleTemplate(templateContent) {

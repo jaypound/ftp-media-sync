@@ -9120,7 +9120,13 @@ def fill_template_gaps():
         all_items = []
         
         # Add original items with their times
+        # IMPORTANT: Skip Live Input items as they are placeholders that will be removed
         for orig in original_items:
+            # Check if this is a Live Input placeholder
+            if 'Live Input' in orig.get('title', '') or orig.get('is_live_input', False):
+                logger.info(f"Skipping Live Input placeholder from verification: '{orig['title']}'")
+                continue
+                
             all_items.append({
                 'start': orig['start'],
                 'end': orig['end'],
@@ -9172,14 +9178,56 @@ def fill_template_gaps():
                         orig_item = item1 if item1['is_original'] else item2
                         new_item = item2 if item1['is_original'] else item1
                         
-                        overlap_info = f"Original '{orig_item['title']}' ({orig_item['start']/3600:.1f}h-{orig_item['end']/3600:.1f}h) " + \
-                                     f"overlaps with new '{new_item['title']}' ({new_item['start']/3600:.1f}h-{new_item['end']/3600:.1f}h)"
+                        # Convert seconds to readable time format based on schedule type
+                        def format_time(seconds):
+                            hours = int(seconds // 3600)
+                            minutes = int((seconds % 3600) // 60)
+                            return f"{hours:02d}:{minutes:02d}"
+                        
+                        # For weekly schedules, we need to determine the day
+                        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                        
+                        # Calculate which day based on the time (assuming weekly schedule starts at Monday 00:00)
+                        orig_day = int(orig_item['start'] // 86400)  # 86400 seconds in a day
+                        new_day = int(new_item['start'] // 86400)
+                        
+                        # Format times with day names if it appears to be a weekly schedule (spans multiple days)
+                        is_weekly = orig_item['end'] > 86400 or new_item['end'] > 86400
+                        
+                        if is_weekly and orig_day < 7:
+                            orig_start_str = f"{day_names[orig_day]} {format_time(orig_item['start'] % 86400)}"
+                            orig_end_str = f"{day_names[int(orig_item['end'] // 86400) % 7]} {format_time(orig_item['end'] % 86400)}"
+                        else:
+                            orig_start_str = format_time(orig_item['start'])
+                            orig_end_str = format_time(orig_item['end'])
+                            
+                        if is_weekly and new_day < 7:
+                            new_start_str = f"{day_names[new_day]} {format_time(new_item['start'] % 86400)}"
+                            new_end_str = f"{day_names[int(new_item['end'] // 86400) % 7]} {format_time(new_item['end'] % 86400)}"
+                        else:
+                            new_start_str = format_time(new_item['start'])
+                            new_end_str = format_time(new_item['end'])
+                        
+                        overlap_info = {
+                            'original_title': orig_item['title'],
+                            'original_start': orig_start_str,
+                            'original_end': orig_end_str,
+                            'new_title': new_item['title'],
+                            'new_start': new_start_str,
+                            'new_end': new_end_str,
+                            'message': f"Meeting '{orig_item['title']}' ({orig_start_str} - {orig_end_str}) overlaps with '{new_item['title']}' ({new_start_str} - {new_end_str})"
+                        }
                         overlaps_found.append(overlap_info)
-                        logger.error(f"VERIFICATION FAILED: {overlap_info}")
+                        logger.error(f"VERIFICATION FAILED: {overlap_info['message']}")
         
         # Check if all original items are still present
+        # Skip Live Input items as they are placeholders that should be removed
         originals_preserved = True
         for orig in original_items:
+            # Skip Live Input placeholders - they're meant to be removed
+            if 'Live Input' in orig.get('title', '') or orig.get('is_live_input', False):
+                continue
+                
             found = False
             for item in all_items:
                 if item['is_original'] and abs(item['start'] - orig['start']) < 1 and abs(item['end'] - orig['end']) < 1:
@@ -9195,7 +9243,7 @@ def fill_template_gaps():
             return jsonify({
                 'success': False,
                 'message': f'Final verification failed: {len(overlaps_found)} overlaps detected with original items',
-                'verification_errors': overlaps_found,
+                'items_with_overlaps': overlaps_found,
                 'items_added': items_added,
                 'total_added': len(items_added)
             })
@@ -11203,6 +11251,48 @@ def get_meetings_by_month():
         logger.error(f"Error getting meetings by month: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+def get_active_graphics_count(check_date=None):
+    """Get the count of active graphics from the database
+    
+    Args:
+        check_date: Optional date to check (for future meetings). If None, uses current date.
+    """
+    try:
+        conn = db_manager._get_connection()
+        cursor = conn.cursor()
+        
+        # Use provided date or current date
+        if check_date:
+            check_date_str = check_date if isinstance(check_date, str) else check_date.strftime('%Y-%m-%d')
+            # Include both active and pending graphics that will be active on the check date
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM default_graphics
+                WHERE (status = 'active' OR status = 'pending')
+                AND start_date <= %s
+                AND (end_date IS NULL OR end_date >= %s)
+            """, (check_date_str, check_date_str))
+        else:
+            # For current date, include active and pending that are already live
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM default_graphics
+                WHERE (status = 'active' OR status = 'pending')
+                AND start_date <= CURRENT_DATE 
+                AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+            """)
+        
+        result = cursor.fetchone()
+        count = result['count'] if isinstance(result, dict) else result[0]
+        
+        db_manager._put_connection(conn)
+        return count
+    except Exception as e:
+        logger.error(f"Error getting active graphics count: {str(e)}")
+        if 'conn' in locals():
+            db_manager._put_connection(conn)
+        return 0
+
 @app.route('/api/generate-daily-schedule-template', methods=['POST'])
 def generate_daily_schedule_template():
     """Generate a daily schedule template from selected meetings"""
@@ -11237,6 +11327,17 @@ def generate_daily_schedule_template():
         # Import datetime and uuid at the top if not already imported
         from datetime import datetime, timedelta
         import uuid
+        
+        # Get active graphics count to calculate gap duration
+        active_graphics_count = get_active_graphics_count()
+        # Calculate gap duration: minimum 5 minutes (300 seconds) or 10 seconds per graphic
+        gap_duration_seconds = max(300, active_graphics_count * 10)
+        # Video duration is gap + 60 seconds
+        video_duration_seconds = gap_duration_seconds + 60
+        
+        logger.info(f"Active graphics count: {active_graphics_count}")
+        logger.info(f"Gap duration: {gap_duration_seconds} seconds ({gap_duration_seconds/60:.1f} minutes)")
+        logger.info(f"Video duration: {video_duration_seconds} seconds ({video_duration_seconds/60:.1f} minutes)")
         
         # Add meetings to template
         for meeting in meetings:
@@ -11274,26 +11375,25 @@ def generate_daily_schedule_template():
             
             # Skip placeholder video for meetings less than 10 minutes
             if meeting_duration_minutes < 10:
-                logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (duration {meeting_duration_minutes:.1f} minutes < 10 minutes)")
+                logger.info(f"  Skipping {gap_duration_seconds/60:.1f}-minute video for meeting starting at {start_time} (duration {meeting_duration_minutes:.1f} minutes < 10 minutes)")
             else:
-                # Calculate 5-minute video placement
-                # Video is 5 minutes, ends exactly at meeting start time
-                video_duration_seconds = 5 * 60  # 5 minutes
+                # Calculate video placement based on active graphics count
+                # Video ends exactly at meeting start time
                 
                 # Calculate video start time
                 video_end_dt = meeting_start_dt  # End exactly at meeting start
-                video_start_dt = video_end_dt - timedelta(seconds=video_duration_seconds)
+                video_start_dt = video_end_dt - timedelta(seconds=gap_duration_seconds)
                 
                 # Check if video would start before midnight (handle early morning meetings)
                 if video_start_dt.hour == 23 and meeting_start_dt.hour < 12:
                     # Video would cross midnight boundary, skip it
-                    logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (would cross midnight)")
+                    logger.info(f"  Skipping {gap_duration_seconds/60:.1f}-minute video for meeting starting at {start_time} (would cross midnight)")
                 else:
                     # Format times for schedule
                     video_start_time_lower = video_start_dt.strftime('%I:%M:%S %p').lower()
                     video_end_time_lower = video_end_dt.strftime('%I:%M:%S %p').lower()
                     
-                    # Add 5-minute video before the meeting
+                    # Add video before the meeting (using gap duration)
                     video_guid = '{' + str(uuid.uuid4()) + '}'
                     template_lines.extend([
                         '{',
@@ -11326,6 +11426,34 @@ def generate_daily_schedule_template():
                 f'\tend={end_time_lower}',
                 '}'
             ])
+            
+            # Add video AFTER the meeting (same duration as before meeting)
+            # Skip for short meetings or late night meetings
+            if meeting_duration_minutes >= 10:
+                # Calculate video placement after meeting
+                video_start_dt = meeting_end_dt  # Start exactly at meeting end
+                video_end_dt = video_start_dt + timedelta(seconds=gap_duration_seconds)
+                
+                # Check if video would end after midnight (handle late night meetings)
+                if video_start_dt.hour < 23 or (video_start_dt.hour == 23 and video_end_dt.hour == 23):
+                    # Format times for schedule
+                    video_start_time_lower = video_start_dt.strftime('%I:%M:%S %p').lower()
+                    video_end_time_lower = video_end_dt.strftime('%I:%M:%S %p').lower()
+                    
+                    # Add video after the meeting
+                    video_guid = '{' + str(uuid.uuid4()) + '}'
+                    template_lines.extend([
+                        '{',
+                        f'\titem=/mnt/main/Videos/251107_RANDOM.mp4',
+                        '\tloop=0',
+                        f'\tguid={video_guid}',
+                        f'\tstart={video_start_time_lower}',
+                        f'\tend={video_end_time_lower}',
+                        '}'
+                    ])
+                    logger.info(f"  Added {gap_duration_seconds/60:.1f}-minute video after meeting ending at {end_time}")
+                else:
+                    logger.info(f"  Skipping video after meeting ending at {end_time} (would cross midnight)")
         
         template_content = '\n'.join(template_lines) + '\n'
         
@@ -11372,6 +11500,17 @@ def generate_weekly_schedule_template():
         from datetime import datetime, timedelta
         import uuid
         
+        # Get active graphics count to calculate gap duration
+        active_graphics_count = get_active_graphics_count()
+        # Calculate gap duration: minimum 5 minutes (300 seconds) or 10 seconds per graphic
+        gap_duration_seconds = max(300, active_graphics_count * 10)
+        # Video duration is gap + 60 seconds
+        video_duration_seconds = gap_duration_seconds + 60
+        
+        logger.info(f"Active graphics count: {active_graphics_count}")
+        logger.info(f"Gap duration: {gap_duration_seconds} seconds ({gap_duration_seconds/60:.1f} minutes)")
+        logger.info(f"Video duration: {video_duration_seconds} seconds ({video_duration_seconds/60:.1f} minutes)")
+        
         # Add meetings to template
         for meeting in meetings:
             room = meeting.get('room', '')
@@ -11417,26 +11556,25 @@ def generate_weekly_schedule_template():
             
             # Skip placeholder video for meetings less than 10 minutes
             if meeting_duration_minutes < 10:
-                logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (duration {meeting_duration_minutes:.1f} minutes < 10 minutes)")
+                logger.info(f"  Skipping {gap_duration_seconds/60:.1f}-minute video for meeting starting at {start_time} (duration {meeting_duration_minutes:.1f} minutes < 10 minutes)")
             else:
-                # Calculate 5-minute video placement
-                # Video is 5 minutes, ends exactly at meeting start time
-                video_duration_seconds = 5 * 60  # 5 minutes
+                # Calculate video placement based on active graphics count
+                # Video ends exactly at meeting start time
                 
                 # Calculate video start time
                 video_end_dt = meeting_start_dt  # End exactly at meeting start
-                video_start_dt = video_end_dt - timedelta(seconds=video_duration_seconds)
+                video_start_dt = video_end_dt - timedelta(seconds=gap_duration_seconds)
                 
                 # Check if video would start before midnight (handle early morning meetings)
                 if video_start_dt.hour == 23 and meeting_start_dt.hour < 12:
                     # Video would cross midnight boundary, skip it
-                    logger.info(f"  Skipping 5-minute video for meeting starting at {start_time} (would cross midnight)")
+                    logger.info(f"  Skipping {gap_duration_seconds/60:.1f}-minute video for meeting starting at {start_time} (would cross midnight)")
                 else:
                     # Format times for schedule
                     video_start_time_lower = video_start_dt.strftime('%I:%M:%S %p').lower()
                     video_end_time_lower = video_end_dt.strftime('%I:%M:%S %p').lower()
                     
-                    # Add 5-minute video before the meeting
+                    # Add video before the meeting (using gap duration)
                     video_guid = '{' + str(uuid.uuid4()) + '}'
                     template_lines.extend([
                         '{',
@@ -11471,6 +11609,34 @@ def generate_weekly_schedule_template():
                 f'\tend={day_name} {end_time_lower}',
                 '}'
             ])
+            
+            # Add video AFTER the meeting (same duration as before meeting)
+            # Skip for short meetings or late night meetings
+            if meeting_duration_minutes >= 10:
+                # Calculate video placement after meeting
+                video_start_dt = meeting_end_dt  # Start exactly at meeting end
+                video_end_dt = video_start_dt + timedelta(seconds=gap_duration_seconds)
+                
+                # Check if video would end after midnight (handle late night meetings)
+                if video_start_dt.hour < 23 or (video_start_dt.hour == 23 and video_end_dt.hour == 23):
+                    # Format times for schedule
+                    video_start_time_lower = video_start_dt.strftime('%I:%M:%S %p').lower()
+                    video_end_time_lower = video_end_dt.strftime('%I:%M:%S %p').lower()
+                    
+                    # Add video after the meeting
+                    video_guid = '{' + str(uuid.uuid4()) + '}'
+                    template_lines.extend([
+                        '{',
+                        f'\titem=/mnt/main/Videos/251107_RANDOM.mp4',
+                        '\tloop=0',
+                        f'\tguid={video_guid}',
+                        f'\tstart={day_name} {video_start_time_lower}',
+                        f'\tend={day_name} {video_end_time_lower}',
+                        '}'
+                    ])
+                    logger.info(f"  Added {gap_duration_seconds/60:.1f}-minute video after meeting ending at {end_time}")
+                else:
+                    logger.info(f"  Skipping video after meeting ending at {end_time} (would cross midnight)")
         
         template_content = '\n'.join(template_lines) + '\n'
         
@@ -14820,6 +14986,27 @@ def get_default_graphics():
             'message': str(e)
         })
 
+@app.route('/api/default-graphics/active-count', methods=['GET'])
+def get_active_graphics_count_api():
+    """Get the count of currently active graphics, optionally for a specific date"""
+    try:
+        # Check if a date parameter was provided
+        check_date = request.args.get('date')
+        count = get_active_graphics_count(check_date)
+        
+        return jsonify({
+            'success': True,
+            'count': count,
+            'date': check_date or 'current'
+        })
+    except Exception as e:
+        logger.error(f"Error getting active graphics count: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'count': 0
+        })
+
 @app.route('/api/default-graphics/<int:graphic_id>', methods=['PUT'])
 def update_default_graphic(graphic_id):
     """Update a default graphic's metadata"""
@@ -15779,7 +15966,7 @@ def auto_generation_config():
                     'start_hour': 8,
                     'end_hour': 18,
                     'weekdays_only': True,
-                    'delay_minutes': 5,
+                    'delay_minutes': 2,
                     'min_duration_seconds': 360,
                     'seconds_per_graphic': 10
                 }
@@ -15808,7 +15995,7 @@ def auto_generation_config():
                 data.get('start_hour', 8),
                 data.get('end_hour', 18),
                 data.get('weekdays_only', True),
-                data.get('delay_minutes', 5),
+                data.get('delay_minutes', 2),
                 data.get('min_duration_seconds', 360),
                 data.get('seconds_per_graphic', 10),
                 data.get('updated_by', 'web_ui')
@@ -15826,7 +16013,7 @@ def auto_generation_config():
                     data.get('start_hour', 8),
                     data.get('end_hour', 18),
                     data.get('weekdays_only', True),
-                    data.get('delay_minutes', 5),
+                    data.get('delay_minutes', 2),
                     data.get('min_duration_seconds', 360),
                     data.get('seconds_per_graphic', 10),
                     data.get('updated_by', 'web_ui')
@@ -16007,10 +16194,11 @@ if __name__ == '__main__':
     # Flask's reloader creates multiple processes, so we check if this is the main one
     import os
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        scheduler_config = config_manager.get_scheduling_settings()
-        if scheduler_config.get('auto_sync_enabled', False):
-            scheduler_jobs = SchedulerJobs(db_manager, config_manager)
-            scheduler_jobs.start()
-            print("Automatic sync scheduler started")
+        # Always start the scheduler for meeting video generation
+        # The individual jobs check their own enabled status
+        scheduler_jobs = SchedulerJobs(db_manager, config_manager)
+        scheduler_jobs.start()
+        print("Scheduler started - includes:")
+        print("  - Meeting video generation check (every minute)")
     
     app.run(debug=True, host='127.0.0.1', port=5000)

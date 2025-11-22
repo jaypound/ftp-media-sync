@@ -86,24 +86,19 @@ class SchedulerJobs:
     
     def start(self):
         """Start the scheduler with configured jobs"""
-        # Check if scheduler is enabled in config
-        scheduler_config = self.config_manager.get_scheduling_settings()
-        self.enabled = scheduler_config.get('auto_sync_enabled', False)
+        # Scheduler now always starts - individual jobs check their own enabled status
         
-        if not self.enabled:
-            logger.info("Automatic sync scheduler is disabled in configuration")
-            return
-            
-        # Schedule the Castus sync job at 9am, 12pm, 3pm, 6pm
-        self.scheduler.add_job(
-            func=self.sync_all_expirations_from_castus,
-            trigger=CronTrigger(hour='9,12,15,18', minute=0),
-            # trigger=CronTrigger(minute='*'),  # TEST MODE: every minute
-            id='castus_sync_all',
-            name='Copy All Expirations from Castus',
-            misfire_grace_time=300,  # 5 minutes grace period
-            max_instances=1  # Only one instance can run at a time
-        )
+        # CASTUS SYNC JOB REMOVED - No longer scheduling automatic expiration sync
+        # # Schedule the Castus sync job at 9am, 12pm, 3pm, 6pm
+        # self.scheduler.add_job(
+        #     func=self.sync_all_expirations_from_castus,
+        #     trigger=CronTrigger(hour='9,12,15,18', minute=0),
+        #     # trigger=CronTrigger(minute='*'),  # TEST MODE: every minute
+        #     id='castus_sync_all',
+        #     name='Copy All Expirations from Castus',
+        #     misfire_grace_time=300,  # 5 minutes grace period
+        #     max_instances=1  # Only one instance can run at a time
+        # )
         
         # Schedule the meeting video generation check every minute
         self.scheduler.add_job(
@@ -116,9 +111,8 @@ class SchedulerJobs:
         )
         
         self.scheduler.start()
-        logger.info("Scheduler started with automatic Castus sync at 9am, 12pm, 3pm, 6pm")
+        logger.info("Scheduler started")
         logger.info("Meeting video generation check runs every minute")
-        logger.info(f"Next Castus sync: {self.scheduler.get_job('castus_sync_all').next_run_time}")
         logger.info(f"Next video check: {self.scheduler.get_job('meeting_video_generation').next_run_time}")
         
         # List all jobs
@@ -599,11 +593,13 @@ class SchedulerJobs:
                 if graphic_count == 0:
                     raise Exception("No active graphics available")
                 
-                # Calculate duration
-                duration = max(
-                    config['min_duration_seconds'], 
-                    graphic_count * config['seconds_per_graphic']
-                )
+                # Calculate duration based on active graphics
+                # Gap duration: minimum 5 minutes (300 seconds) or 10 seconds per graphic
+                gap_duration = max(300, graphic_count * 10)
+                # Video duration is gap + 60 seconds
+                duration = gap_duration + 60
+                
+                logger.info(f"Auto generation: {graphic_count} graphics, gap={gap_duration}s, video={duration}s")
                 
                 # Get next sort order
                 sort_order = self.get_next_sort_order()
@@ -616,6 +612,7 @@ class SchedulerJobs:
                 """, (sort_order, duration, graphic_count, generation_id))
                 
                 # Generate filename using YYMMDDHHMI_FILL_<sort_order>_<duration_seconds>.mp4
+                # sort_order will always be 'alphabetical' now that rotation is disabled
                 timestamp = datetime.now().strftime('%y%m%d%H%M')  # YYMMDDHHMI format
                 file_name = f'{timestamp}_FILL_{sort_order}_{duration}.mp4'
                 
@@ -673,48 +670,52 @@ class SchedulerJobs:
                 # Connection might already be closed or invalid, ignore the error
     
     def get_next_sort_order(self):
-        """Get the next sort order, different from the last video"""
-        SORT_ORDERS = ['creation', 'newest', 'oldest', 'alphabetical', 'random']
+        """Get the next sort order - DISABLED ROTATION, always returns alphabetical"""
+        # ROTATION DISABLED - Always use alphabetical (reverse) sort order
+        return 'alphabetical'
         
-        conn = self.db_manager._get_connection()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Get the most recent video's sort order
-                cursor.execute("""
-                    SELECT generation_params
-                    FROM generated_default_videos
-                    ORDER BY generation_date DESC
-                    LIMIT 1
-                """)
-                
-                last_video = cursor.fetchone()
-                if not last_video:
-                    return 'creation'
-                
-                try:
-                    params = json.loads(last_video['generation_params'] or '{}')
-                    last_sort = params.get('sort_order', 'creation')
-                    
-                    # If last was random, pick any other
-                    if last_sort == 'random':
-                        return random.choice([s for s in SORT_ORDERS if s != 'random'])
-                    
-                    # Otherwise, get next in rotation
-                    if last_sort in SORT_ORDERS:
-                        current_index = SORT_ORDERS.index(last_sort)
-                        next_index = (current_index + 1) % len(SORT_ORDERS)
-                        return SORT_ORDERS[next_index]
-                    else:
-                        return 'creation'
-                        
-                except (json.JSONDecodeError, ValueError):
-                    return 'creation'
-                    
-        except Exception as e:
-            logger.error(f"Error getting next sort order: {e}")
-            return 'creation'
-        finally:
-            self.db_manager._put_connection(conn)
+        # COMMENTED OUT - Original rotation logic
+        # SORT_ORDERS = ['alphabetical', 'newest', 'oldest', 'creation', 'random']
+        # 
+        # conn = self.db_manager._get_connection()
+        # try:
+        #     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+        #         # Get the most recent video's sort order
+        #         cursor.execute("""
+        #             SELECT generation_params
+        #             FROM generated_default_videos
+        #             ORDER BY generation_date DESC
+        #             LIMIT 1
+        #         """)
+        #         
+        #         last_video = cursor.fetchone()
+        #         if not last_video:
+        #             return 'alphabetical'
+        #         
+        #         try:
+        #             params = json.loads(last_video['generation_params'] or '{}')
+        #             last_sort = params.get('sort_order', 'alphabetical')
+        #             
+        #             # If last was random, pick any other
+        #             if last_sort == 'random':
+        #                 return random.choice([s for s in SORT_ORDERS if s != 'random'])
+        #             
+        #             # Otherwise, get next in rotation
+        #             if last_sort in SORT_ORDERS:
+        #                 current_index = SORT_ORDERS.index(last_sort)
+        #                 next_index = (current_index + 1) % len(SORT_ORDERS)
+        #                 return SORT_ORDERS[next_index]
+        #             else:
+        #                 return 'alphabetical'
+        #                 
+        #         except (json.JSONDecodeError, ValueError):
+        #             return 'alphabetical'
+        #             
+        # except Exception as e:
+        #     logger.error(f"Error getting next sort order: {e}")
+        #     return 'alphabetical'
+        # finally:
+        #     self.db_manager._put_connection(conn)
     
     def sanitize_filename(self, name):
         """Sanitize filename by removing invalid characters"""
