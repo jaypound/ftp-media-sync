@@ -335,6 +335,53 @@ app_start_time = time.time()
 # Initialize database connection
 db_manager.connect()
 
+def validate_date_string(date_str):
+    """Validate a date string and return parsed date or None if invalid"""
+    if not date_str:
+        return None
+    
+    try:
+        # Parse the date string
+        if isinstance(date_str, str):
+            # Try to parse the date
+            parsed_date = datetime.strptime(date_str, '%Y-%m-%d') if len(date_str) == 10 else datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        else:
+            parsed_date = date_str
+        
+        # Check if year is reasonable (between 1900 and 2100)
+        if parsed_date.year < 1900 or parsed_date.year > 2100:
+            raise ValueError(f"Year {parsed_date.year} is out of valid range (1900-2100)")
+        
+        return parsed_date
+    except Exception as e:
+        logger.error(f"Invalid date string '{date_str}': {str(e)}")
+        raise ValueError(f"Invalid date format: {str(e)}")
+
+def sanitize_meeting_name(name):
+    """Sanitize meeting name by removing special characters and cleaning up formatting"""
+    if not name:
+        return ""
+    
+    import re
+    
+    # Strip leading/trailing whitespace
+    name = name.strip()
+    
+    # Replace forward slashes with spaces
+    name = name.replace('/', ' ')
+    
+    # Remove any multiple consecutive spaces
+    name = re.sub(r'\s+', ' ', name)
+    
+    # Remove all special characters except hyphens, underscores, and spaces
+    # Allow alphanumeric, spaces, hyphens, and underscores
+    name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', name)
+    
+    # Strip again in case we created leading/trailing spaces
+    name = name.strip()
+    
+    return name
+
 def should_block_content_for_theme(content, recent_items, current_position, schedule_type):
     """
     Check if content should be blocked due to theme conflicts with recent items.
@@ -1178,8 +1225,22 @@ def copy_expirations_from_castus():
                                 try:
                                     # Get Castus metadata
                                     handler = CastusMetadataHandler(ftp)
-                                    expiry_date = handler.get_content_window_close(file_path)
-                                    go_live_date = handler.get_content_window_open(file_path)
+                                    raw_expiry = handler.get_content_window_close(file_path)
+                                    raw_go_live = handler.get_content_window_open(file_path)
+                                    
+                                    # Validate dates from Castus
+                                    try:
+                                        expiry_date = validate_date_string(raw_expiry) if raw_expiry else None
+                                    except ValueError as e:
+                                        logger.error(f"Invalid expiry date from Castus for {asset['file_name']}: {raw_expiry} - {e}")
+                                        expiry_date = None
+                                    
+                                    try:
+                                        go_live_date = validate_date_string(raw_go_live) if raw_go_live else None
+                                    except ValueError as e:
+                                        logger.error(f"Invalid go live date from Castus for {asset['file_name']}: {raw_go_live} - {e}")
+                                        go_live_date = None
+                                    
                                     logger.info(f"Copying Castus metadata for {asset['file_name']}: go_live={go_live_date}, expiry={expiry_date}")
                                     
                                 finally:
@@ -1712,8 +1773,19 @@ def sync_single_content_metadata():
         try:
             # Get Castus metadata
             handler = CastusMetadataHandler(ftp)
-            expiry_date = handler.get_content_window_close(file_path)
-            go_live_date = handler.get_content_window_open(file_path)
+            raw_expiry = handler.get_content_window_close(file_path)
+            raw_go_live = handler.get_content_window_open(file_path)
+            
+            # Validate dates
+            try:
+                expiry_date = validate_date_string(raw_expiry) if raw_expiry else None
+            except ValueError as e:
+                return jsonify({'success': False, 'message': f'Invalid expiry date from Castus: {e}'})
+            
+            try:
+                go_live_date = validate_date_string(raw_go_live) if raw_go_live else None
+            except ValueError as e:
+                return jsonify({'success': False, 'message': f'Invalid go live date from Castus: {e}'})
             
             # Update database
             conn = db_manager._get_connection()
@@ -10984,8 +11056,13 @@ def create_meeting():
         # Debug logging to track end_time handling
         logger.info(f"Creating meeting with: start_time={data.get('start_time')}, end_time={end_time}, duration_hours={duration_hours}")
         
+        # Sanitize meeting name
+        meeting_name = sanitize_meeting_name(data.get('meeting_name', ''))
+        if not meeting_name:
+            return jsonify({'status': 'error', 'message': 'Meeting name is required and cannot be empty after validation'}), 400
+        
         meeting_id = db_manager.create_meeting(
-            meeting_name=data.get('meeting_name'),
+            meeting_name=meeting_name,
             meeting_date=data.get('meeting_date'),
             start_time=data.get('start_time'),
             end_time=end_time,
@@ -11070,9 +11147,16 @@ def update_meeting(meeting_id):
             # Fallback to duration_hours if end_time not provided
             duration_hours = float(data.get('duration_hours', 2.0))
         
+        # Sanitize meeting name if provided
+        meeting_name = data.get('meeting_name')
+        if meeting_name is not None:
+            meeting_name = sanitize_meeting_name(meeting_name)
+            if not meeting_name:
+                return jsonify({'status': 'error', 'message': 'Meeting name cannot be empty after validation'}), 400
+        
         updated = db_manager.update_meeting(
             meeting_id=meeting_id,
-            meeting_name=data.get('meeting_name'),
+            meeting_name=meeting_name,
             meeting_date=data.get('meeting_date'),
             start_time=data.get('start_time'),
             end_time=end_time,
@@ -12837,17 +12921,28 @@ def update_content_expiration():
         
         logger.info(f"Updating expiration date for asset {asset_id} to {expiry_date}")
         
+        # Validate the date before saving
+        validated_date = None
+        if expiry_date:
+            try:
+                validated_date = validate_date_string(expiry_date)
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'message': str(e)
+                }), 400
+        
         conn = db_manager._get_connection()
         try:
             with conn.cursor() as cur:
-                if expiry_date:
+                if validated_date:
                     # Update or insert the expiration date
                     cur.execute("""
                         INSERT INTO scheduling_metadata (asset_id, content_expiry_date)
                         VALUES (%s, %s)
                         ON CONFLICT (asset_id) 
                         DO UPDATE SET content_expiry_date = EXCLUDED.content_expiry_date
-                    """, (asset_id, expiry_date))
+                    """, (asset_id, validated_date))
                 else:
                     # Clear the expiration date (set to NULL)
                     cur.execute("""
@@ -12895,17 +12990,28 @@ def update_content_go_live():
         
         logger.info(f"Updating go live date for asset {asset_id} to {go_live_date}")
         
+        # Validate the date before saving
+        validated_date = None
+        if go_live_date:
+            try:
+                validated_date = validate_date_string(go_live_date)
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'message': str(e)
+                }), 400
+        
         conn = db_manager._get_connection()
         try:
             with conn.cursor() as cur:
-                if go_live_date:
+                if validated_date:
                     # Update or insert the go live date
                     cur.execute("""
                         INSERT INTO scheduling_metadata (asset_id, go_live_date)
                         VALUES (%s, %s)
                         ON CONFLICT (asset_id) 
                         DO UPDATE SET go_live_date = EXCLUDED.go_live_date
-                    """, (asset_id, go_live_date))
+                    """, (asset_id, validated_date))
                 else:
                     # Clear the go live date (set to NULL)
                     cur.execute("""

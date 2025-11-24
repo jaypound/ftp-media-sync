@@ -216,7 +216,11 @@ class FileAnalyzer:
                     # Scheduling metadata fields
                     "scheduling": {
                         "available_for_scheduling": True,
-                        "content_expiry_date": self.calculate_expiry_date(duration_category, ai_result.get('shelf_life_score', 'medium') if ai_result else 'medium'),
+                        "content_expiry_date": self.calculate_expiry_date(
+                            duration_category, 
+                            ai_result.get('shelf_life_score', 'medium') if ai_result else 'medium',
+                            filename_metadata.get('content_type', '')
+                        ),
                         "last_scheduled_date": None,
                         "total_airings": 0,
                         "created_for_scheduling": datetime.utcnow(),
@@ -482,29 +486,37 @@ class FileAnalyzer:
         else:
             return 'long_form'
     
-    def calculate_expiry_date(self, duration_category: str, shelf_life_score: str) -> datetime:
-        """Calculate content expiry date based on category and AI shelf life score"""
+    def calculate_expiry_date(self, duration_category: str, shelf_life_score: str, content_type: str = None) -> datetime:
+        """Calculate content expiry date based on content type, category and AI shelf life score"""
         from datetime import timedelta
         
-        # Base expiration periods (in days)
-        base_expiry = {
-            'id': 30,
-            'spots': 60,
-            'short_form': 90,
-            'long_form': 180
-        }
+        # Default expiration is 21 days for all content except PSAs
+        default_expiry_days = 21
         
-        # Shelf life multipliers
-        shelf_life_multipliers = {
-            'short': 0.5,    # Content becomes stale quickly
-            'medium': 1.0,   # Normal expiration
-            'long': 2.0      # Evergreen content
-        }
+        # PSAs get special treatment based on duration category and shelf life
+        if content_type and content_type.upper() == 'PSA':
+            # Base expiration periods for PSAs (in days)
+            base_expiry = {
+                'id': 30,
+                'spots': 60,
+                'short_form': 90,
+                'long_form': 180
+            }
+            
+            # Shelf life multipliers for PSAs
+            shelf_life_multipliers = {
+                'short': 0.5,    # Content becomes stale quickly
+                'medium': 1.0,   # Normal expiration
+                'long': 2.0      # Evergreen content
+            }
+            
+            base_days = base_expiry.get(duration_category, 90)
+            multiplier = shelf_life_multipliers.get(shelf_life_score, 1.0)
+            expiry_days = int(base_days * multiplier)
+        else:
+            # All non-PSA content gets 21 days
+            expiry_days = default_expiry_days
         
-        base_days = base_expiry.get(duration_category, 90)
-        multiplier = shelf_life_multipliers.get(shelf_life_score, 1.0)
-        
-        expiry_days = int(base_days * multiplier)
         return datetime.utcnow() + timedelta(days=expiry_days)
     
     def calculate_priority_score(self, engagement_score: float, duration_category: str) -> float:
