@@ -14439,11 +14439,37 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
             const validateResult = await validateResponse.json();
             
             if (!validateResult.success || (validateResult.missing_files && validateResult.missing_files.length > 0)) {
-                const missingCount = validateResult.missing_files ? validateResult.missing_files.length : 0;
+                const missingFiles = validateResult.missing_files || [];
+                const missingCount = missingFiles.length;
                 log(`Validation failed: ${missingCount} missing files`, 'error');
-                const errorMsg = `Cannot export schedule: ${missingCount} files are missing on the FTP servers.\n\nPlease verify all content exists before exporting.`;
-                alert(errorMsg);
-                throw new Error('Template validation failed: Missing files detected');
+                
+                // Build detailed error message showing which files are missing
+                let detailedMsg = `Cannot export schedule: ${missingCount} file${missingCount === 1 ? ' is' : 's are'} missing on the FTP servers.\n\n`;
+                
+                if (missingFiles.length > 0) {
+                    detailedMsg += `Missing files:\n`;
+                    // Show up to 10 missing files
+                    const displayFiles = missingFiles.slice(0, 10);
+                    displayFiles.forEach(file => {
+                        detailedMsg += `• ${file.title || 'Unknown'}: ${file.file_path}\n`;
+                    });
+                    if (missingFiles.length > 10) {
+                        detailedMsg += `• ... and ${missingFiles.length - 10} more files\n`;
+                    }
+                }
+                
+                detailedMsg += `\nWould you like to proceed anyway? (Missing content will be skipped)`;
+                
+                // Ask user if they want to proceed anyway
+                if (!confirm(detailedMsg)) {
+                    throw new Error('Template validation failed: Missing files detected');
+                }
+                
+                // User chose to proceed - filter out missing files
+                log(`User chose to proceed despite ${missingCount} missing files`, 'warning');
+                const missingAssetIds = new Set(missingFiles.map(f => f.asset_id));
+                updatedTemplate.items = updatedTemplate.items.filter(item => !missingAssetIds.has(item.asset_id));
+                log(`Removed ${missingCount} missing items from template`, 'info');
             }
         } catch (validateError) {
             log(`Template validation error: ${validateError.message}`, 'error');
