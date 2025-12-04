@@ -532,7 +532,8 @@ class PostgreSQLScheduler:
     
     def _has_theme_conflict(self, candidate_content: dict, last_scheduled_category: str, 
                            last_scheduled_theme: str, current_category: str,
-                           scheduled_items: list = None, candidate_is_pkg: bool = False) -> bool:
+                           scheduled_items: list = None, candidate_is_pkg: bool = False,
+                           remaining_hours: float = None) -> bool:
         """Check if candidate content has a theme conflict with the last scheduled item
         
         Args:
@@ -542,39 +543,44 @@ class PostgreSQLScheduler:
             current_category: Category we're trying to schedule
             scheduled_items: List of recently scheduled items (for package checking)
             candidate_is_pkg: True if the candidate content is a package
+            remaining_hours: Hours remaining until end of day/schedule
             
         Returns:
             True if there's a theme conflict, False otherwise
         """
         candidate_theme = candidate_content.get('theme')
         
-        # Special handling for packages (PKG) - must be separated by at least one long_form
-        if candidate_is_pkg and candidate_theme and scheduled_items:
-            # Look backwards through scheduled items to find the last package
+        # Special handling for all short-form content (id, spots, short_form) - must be separated by at least one long_form
+        # This includes content types like PKG, MAF, PSA, BMP, etc. when they fall into short duration categories
+        candidate_category = candidate_content.get('duration_category', current_category)
+        
+        if (candidate_category in ['id', 'spots', 'short_form'] and 
+            candidate_theme and scheduled_items):
+            
+            # If we're within 2 hours of end-of-day, relax theme conflict requirements
+            # This prevents infinite loops when trying to fill end-of-day gaps
+            if remaining_hours is not None and remaining_hours < 2.0:
+                logger.debug(f"Relaxing theme conflict check near end-of-day ({remaining_hours:.1f}h remaining)")
+                return False
+            
+            # Look backwards through scheduled items to find content with same theme
             for i in range(len(scheduled_items) - 1, -1, -1):
                 item = scheduled_items[i]
                 
-                # If we find a long_form content before finding a package with same theme, we're good
+                # If we find a long_form content before finding same-theme short content, we're good
                 if item.get('duration_category') == 'long_form':
                     break
                 
-                # If we find a package with the same theme before any long_form, that's a conflict
-                if (item.get('content_type') == 'PKG' and 
+                # If we find short-form content with the same theme before any long_form, that's a conflict
+                if (item.get('duration_category') in ['id', 'spots', 'short_form'] and 
                     item.get('theme') and 
                     item.get('theme').lower() == candidate_theme.lower()):
-                    logger.debug(f"Package theme conflict: '{candidate_theme}' - "
-                               f"packages with same theme must be separated by long_form content")
+                    content_type = candidate_content.get('content_type', 'unknown')
+                    item_type = item.get('content_type', 'unknown')
+                    logger.debug(f"Short-form theme conflict: '{candidate_theme}' - "
+                               f"{content_type} ({candidate_category}) conflicts with {item_type} ({item.get('duration_category')}) - "
+                               f"short-form content with same theme must be separated by long_form content")
                     return True
-        
-        # Original theme conflict check for IDs and spots (regardless of content type)
-        # These short-form content should never have the same theme back-to-back
-        if (last_scheduled_category in ['id', 'spots'] and 
-            current_category in ['id', 'spots']):
-            
-            if (candidate_theme and last_scheduled_theme and
-                candidate_theme.lower() == last_scheduled_theme.lower()):
-                logger.debug(f"Theme conflict detected: '{candidate_theme}' - back-to-back {last_scheduled_category}/{current_category}")
-                return True
         
         return False
     
@@ -1182,22 +1188,14 @@ class PostgreSQLScheduler:
                             if asset_id not in recent_plays:
                                 score += 50
                     
-                        # Theme conflict penalty for IDs and spots (regardless of content type)
-                        # These short-form content should never have the same theme back-to-back
-                        if (last_scheduled_category in ['id', 'spots'] and 
-                            current_category in ['id', 'spots'] and
-                            current_theme and last_scheduled_theme and
-                            current_theme.lower() == last_scheduled_theme.lower()):
-                            score -= 200  # Heavy penalty for same theme
-                            logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
-                        
-                        # Package theme conflict check - packages with same theme must be separated by long_form
-                        candidate_is_pkg = candidate.get('content_type') == 'PKG'
+                        # Theme conflict check for all short-form content
+                        # Short-form content with same theme must be separated by long_form
                         if self._has_theme_conflict(candidate, last_scheduled_category, 
                                                    last_scheduled_theme, current_category,
-                                                   scheduled_items, candidate_is_pkg):
-                            score -= 400  # Very heavy penalty for package theme conflicts
-                            logger.debug(f"Package theme conflict penalty for '{current_theme}'")
+                                                   scheduled_items, remaining_hours=remaining_hours):
+                            score -= 400  # Heavy penalty for theme conflicts
+                            content_type = candidate.get('content_type', 'unknown')
+                            logger.debug(f"Theme conflict penalty for {content_type} with theme '{current_theme}'")
                     
                         # Track best scoring content
                         if score > best_score:
@@ -1259,10 +1257,9 @@ class PostgreSQLScheduler:
                         alt_duration = float(alt_content['duration_seconds'])
                         if alt_duration <= remaining_seconds:
                             # Check for theme conflict before accepting this alternative
-                            alt_is_pkg = alt_content.get('content_type') == 'PKG'
                             if self._has_theme_conflict(alt_content, last_scheduled_category, 
                                                        last_scheduled_theme, duration_category,
-                                                       scheduled_items, alt_is_pkg):
+                                                       scheduled_items, remaining_hours=remaining_hours):
                                 logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
                                 continue
                             
@@ -2544,8 +2541,8 @@ class PostgreSQLScheduler:
                                      f"Remaining hours in day: {remaining_hours:.1f}")
                         
                         # Check if we're near midnight and trying to schedule longform content
-                        # Skip longform requirement if within last hour of the day
-                        if remaining_hours < 1.0 and duration_category == 'long_form':
+                        # Skip longform requirement if within last 2 hours of the day
+                        if remaining_hours < 2.0 and duration_category == 'long_form':
                             logger.info(f"Skipping long_form content near midnight (only {remaining_hours:.1f} hours left). Advancing rotation.")
                             self._advance_rotation()
                             consecutive_errors = 0  # Reset error counter since we're making progress
@@ -2738,22 +2735,14 @@ class PostgreSQLScheduler:
                                         if plays_today >= 2:
                                             score -= 50 * (plays_today - 1)  # Heavier penalty for IDs
                             
-                            # Theme conflict penalty for IDs and spots (regardless of content type)
-                            # These short-form content should never have the same theme back-to-back
-                            if (last_scheduled_category in ['id', 'spots'] and 
-                                current_category in ['id', 'spots'] and
-                                current_theme and last_scheduled_theme and
-                                current_theme.lower() == last_scheduled_theme.lower()):
-                                score -= 200  # Heavy penalty for same theme
-                                logger.debug(f"Theme conflict penalty for '{current_theme}' - back-to-back {last_scheduled_category}/{current_category}")
-                            
-                            # Package theme conflict check - packages with same theme must be separated by long_form
-                            candidate_is_pkg = candidate.get('content_type') == 'PKG'
+                            # Theme conflict check for all short-form content
+                            # Short-form content with same theme must be separated by long_form
                             if self._has_theme_conflict(candidate, last_scheduled_category, 
                                                        last_scheduled_theme, current_category,
-                                                       scheduled_items, candidate_is_pkg):
-                                score -= 400  # Very heavy penalty for package theme conflicts
-                                logger.debug(f"Package theme conflict penalty for '{current_theme}'")
+                                                       scheduled_items):
+                                score -= 400  # Heavy penalty for theme conflicts
+                                content_type = candidate.get('content_type', 'unknown')
+                                logger.debug(f"Theme conflict penalty for {content_type} with theme '{current_theme}'")
                             
                             # Track best scoring content
                             if score > best_score:
@@ -2812,10 +2801,9 @@ class PostgreSQLScheduler:
                             alt_duration = float(alt_content['duration_seconds'])
                             if alt_duration <= remaining_seconds:
                                 # Check for theme conflict before accepting this alternative
-                                alt_is_pkg = alt_content.get('content_type') == 'PKG'
                                 if self._has_theme_conflict(alt_content, last_scheduled_category, 
                                                            last_scheduled_theme, duration_category,
-                                                           scheduled_items, alt_is_pkg):
+                                                           scheduled_items, remaining_hours=remaining_hours):
                                     logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
                                     continue
                                 
@@ -3183,8 +3171,8 @@ class PostgreSQLScheduler:
                                      f"Remaining hours in day: {remaining_hours:.1f}")
                         
                         # Check if we're near midnight and trying to schedule longform content
-                        # Skip longform requirement if within last hour of the day
-                        if remaining_hours < 1.0 and duration_category == 'long_form':
+                        # Skip longform requirement if within last 2 hours of the day
+                        if remaining_hours < 2.0 and duration_category == 'long_form':
                             logger.info(f"Skipping long_form content near midnight (only {remaining_hours:.1f} hours left). Advancing rotation.")
                             self._advance_rotation()
                             consecutive_errors = 0  # Reset error counter since we're making progress
@@ -3267,10 +3255,9 @@ class PostgreSQLScheduler:
                             alt_duration = float(alt_content['duration_seconds'])
                             if alt_duration <= remaining_seconds:
                                 # Check for theme conflict before accepting this alternative
-                                alt_is_pkg = alt_content.get('content_type') == 'PKG'
                                 if self._has_theme_conflict(alt_content, last_scheduled_category, 
                                                            last_scheduled_theme, duration_category,
-                                                           scheduled_items, alt_is_pkg):
+                                                           scheduled_items, remaining_hours=remaining_hours):
                                     logger.debug(f"Skipping alternative content due to theme conflict: {alt_content.get('theme')}")
                                     continue
                                 

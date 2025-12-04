@@ -335,10 +335,17 @@ app_start_time = time.time()
 # Initialize database connection
 db_manager.connect()
 
-def should_block_content_for_theme(content, recent_items, current_position, schedule_type):
+def should_block_content_for_theme(content, recent_items, current_position, schedule_type, remaining_seconds=None):
     """
     Check if content should be blocked due to theme conflicts with recent items.
     Only applies to spots content.
+    
+    Args:
+        content: The content being considered
+        recent_items: List of recently scheduled items
+        current_position: Current position in seconds
+        schedule_type: Type of schedule ('daily' or 'weekly')
+        remaining_seconds: Seconds remaining until end of day/schedule
     
     Returns tuple: (should_block, reason)
     """
@@ -348,6 +355,13 @@ def should_block_content_for_theme(content, recent_items, current_position, sche
         # Only check spots, ID, and short_form content (not long_form)
         content_category = content.get('duration_category', '')
         if content_category not in ['spots', 'id', 'short_form']:
+            return False, None
+            
+        # If we're within 2 hours of end-of-day, relax theme conflict requirements
+        # This prevents infinite loops when trying to fill end-of-day gaps
+        if remaining_seconds is not None and remaining_seconds < 7200:  # 2 hours = 7200 seconds
+            remaining_hours = remaining_seconds / 3600
+            theme_logger.info(f"Relaxing theme conflict check near end-of-day ({remaining_hours:.1f}h remaining)")
             return False, None
             
         theme_logger.info("\n" + "="*80)
@@ -360,12 +374,19 @@ def should_block_content_for_theme(content, recent_items, current_position, sche
         content_tags = content.get('tags', {})
         content_topics = content_tags.get('topics', []) if isinstance(content_tags, dict) else []
         
-        # Try to extract theme from title if no topics
+        # Try to extract theme from database field, tags, and title
         content_themes = set()
+        
+        # First check the 'theme' field from database
+        db_theme = content.get('theme')
+        if db_theme:
+            content_themes.add(db_theme.lower().strip())
+        
+        # Add topics from tags
         if content_topics:
             content_themes.update([topic.lower() for topic in content_topics])
         
-        # Extract theme keywords from title
+        # Extract theme keywords from title as fallback
         theme_keywords = extract_theme_from_title(content_title)
         if theme_keywords:
             content_themes.update(theme_keywords)
@@ -380,15 +401,25 @@ def should_block_content_for_theme(content, recent_items, current_position, sche
             return False, None
         
         # Check recent items for theme conflicts
-        # Look back 1-2 items (about 30-60 minutes for typical content)
-        items_to_check = 2
-        recent_themes = []
+        # For short-form content (spots, id, short_form), we need to ensure
+        # same-theme content is separated by at least one long_form item
         
-        for i, item in enumerate(reversed(recent_items[-items_to_check:])):
+        # Look backwards through recent items to find content with same theme
+        theme_logger.info(f"Checking theme conflicts for short-form content")
+        
+        # Search backwards through recent items
+        for i, item in enumerate(reversed(recent_items)):
+            item_category = item.get('duration_category', '')
             item_title = item.get('title', item.get('content_title', ''))
             
-            # Skip meetings from theme checking
-            # Check for: SDI, Live Input, MTG content type, or _MTG_ in filename
+            theme_logger.info(f"  Checking item -{i+1}: '{item_title}' (category: {item_category})")
+            
+            # If we find a long_form content before finding same-theme short content, we're good
+            if item_category == 'long_form':
+                theme_logger.info(f"  Found long_form content at position -{i+1}, theme separation satisfied")
+                break
+            
+            # Skip meetings from theme checking  
             item_content_type = item.get('content_type', '')
             item_file_name = item.get('file_name', '')
             
@@ -398,37 +429,34 @@ def should_block_content_for_theme(content, recent_items, current_position, sche
                          '_MTG_' in item_file_name)
             
             if is_meeting:
-                theme_logger.info(f"  Skipping meeting from theme check: '{item_title}' (type={item_content_type})")
+                theme_logger.info(f"  Skipping meeting from theme check: '{item_title}'")
+                continue
+                
+            # Only check theme conflicts for short-form content
+            if item_category not in ['spots', 'id', 'short_form']:
                 continue
             
-            item_themes = extract_theme_from_title(item_title)
+            # Get themes from database field first, then from title
+            item_themes = set()
             
-            if item_themes:
-                recent_themes.append({
-                    'title': item_title,
-                    'themes': item_themes,
-                    'position': i + 1  # 1 = most recent
-                })
-        
-        theme_logger.info(f"Recent items checked: {len(recent_themes)}")
-        for recent in recent_themes:
-            theme_logger.info(f"  Position -{recent['position']}: '{recent['title']}' themes: {list(recent['themes'])}")
-        
-        # Check for theme conflicts
-        for recent in recent_themes:
+            # Check the 'theme' field from database
+            db_theme = item.get('theme')
+            if db_theme:
+                item_themes.add(db_theme.lower().strip())
+            
+            # Also extract from title as fallback
+            title_themes = extract_theme_from_title(item_title)
+            if title_themes:
+                item_themes.update(title_themes)
+            
             # Check if any themes match
-            matching_themes = content_themes.intersection(recent['themes'])
-            if matching_themes:
-                if recent['position'] == 1:  # Immediately previous item
-                    reason = f"Theme conflict: '{content_title}' has themes {list(matching_themes)} matching previous item '{recent['title']}'"
+            if item_themes:
+                matching_themes = content_themes.intersection(item_themes)
+                if matching_themes:
+                    # Found short-form content with same theme before any long_form - that's a conflict
+                    reason = f"Short-form theme conflict: '{content_title}' has theme '{list(matching_themes)[0]}' matching recent {item_category} item '{item_title}' - must be separated by long_form content"
                     theme_logger.info(f"Decision: REJECTED - {reason}")
                     return True, reason
-                elif recent['position'] == 2:  # Two items back
-                    # Less strict - only block if strong theme match
-                    if len(matching_themes) >= 2 or any(is_strong_theme(theme) for theme in matching_themes):
-                        reason = f"Theme conflict: '{content_title}' has strong themes {list(matching_themes)} matching recent item '{recent['title']}'"
-                        theme_logger.info(f"Decision: REJECTED - {reason}")
-                        return True, reason
         
         theme_logger.info(f"Decision: ACCEPTED - No theme conflicts found")
         return False, None
@@ -7998,6 +8026,7 @@ def fill_template_gaps():
             # Track iterations to prevent infinite loops
             gap_iterations = 0
             max_gap_iterations = 1000  # Failsafe to prevent infinite loops
+            theme_conflict_attempts = 0  # Track theme-specific failures
             
             while current_position < gap_end and gap_iterations < max_gap_iterations:
                 # Check for cancellation
@@ -8854,12 +8883,15 @@ def fill_template_gaps():
                     
                     # Check theme conflicts for spots, ID, and short_form content (not long_form)
                     if selected.get('duration_category') in ['spots', 'id', 'short_form']:
+                        # Calculate remaining seconds until end of day/gap
+                        remaining_seconds_in_gap = gap_end - current_position
                         should_block, block_reason = should_block_content_for_theme(
-                            selected, items_added, current_position, schedule_type
+                            selected, items_added, current_position, schedule_type, remaining_seconds_in_gap
                         )
                         if should_block:
-                            logger.info(f"Theme conflict detected: {block_reason}")
-                            gap_logger.info(f"  THEME CONFLICT: {block_reason}")
+                            theme_conflict_attempts += 1
+                            logger.info(f"Theme conflict detected (attempt {theme_conflict_attempts}): {block_reason}")
+                            gap_logger.info(f"  THEME CONFLICT (attempt {theme_conflict_attempts}): {block_reason}")
                             
                             # Try to find alternative content
                             blocked_content = selected
@@ -8876,7 +8908,7 @@ def fill_template_gaps():
                                 if alt_duration <= remaining and alt_duration > 0:
                                     # Check theme conflict for alternative
                                     alt_should_block, alt_block_reason = should_block_content_for_theme(
-                                        alt_content, items_added, current_position, schedule_type
+                                        alt_content, items_added, current_position, schedule_type, remaining_seconds_in_gap
                                     )
                                     if not alt_should_block:
                                         selected = alt_content
@@ -8887,11 +8919,21 @@ def fill_template_gaps():
                                         break
                             
                             if not found_alternative:
-                                # No suitable alternative found, skip this position
-                                logger.info("No theme-acceptable alternative found, advancing rotation")
-                                gap_logger.info("  NO ALTERNATIVE FOUND - skipping position")
-                                scheduler._advance_rotation()
-                                continue
+                                # No suitable alternative found
+                                consecutive_errors += 1
+                                logger.info(f"No theme-acceptable alternative found, advancing rotation (consecutive_errors={consecutive_errors}, theme_conflicts={theme_conflict_attempts})")
+                                gap_logger.info(f"  NO ALTERNATIVE FOUND - skipping position (attempts={consecutive_errors}, theme_conflicts={theme_conflict_attempts})")
+                                
+                                # If we've tried many times due to theme conflicts, override
+                                if theme_conflict_attempts >= 10:
+                                    logger.warning(f"Theme conflict override: After {theme_conflict_attempts} theme conflicts, using content despite theme conflict")
+                                    gap_logger.warning(f"  OVERRIDE: Using '{blocked_content.get('content_title', blocked_content.get('file_name'))}' despite theme conflict")
+                                    selected = blocked_content
+                                    duration = blocked_content.get('duration_seconds', blocked_content.get('file_duration', 0))
+                                    theme_conflict_attempts = 0  # Reset after override
+                                else:
+                                    scheduler._advance_rotation()
+                                    continue
                     
                     selected_title = selected.get('content_title', selected.get('file_name'))
                     gap_logger.info(f"  PLACING CONTENT: '{selected_title}'")
