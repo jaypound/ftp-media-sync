@@ -10485,10 +10485,15 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
             currentTemplate = window.currentTemplate;
         }
         
-        if (!currentTemplate.items || currentTemplate.items.length === 0) {
-            log('fillScheduleGaps: Template has no items', 'warning');
-            alert('Please load a template with items first');
-            return;
+        // Initialize items array if it doesn't exist
+        if (!currentTemplate.items) {
+            currentTemplate.items = [];
+        }
+        
+        // For empty templates, we'll treat the entire schedule as gaps
+        if (currentTemplate.items.length === 0) {
+            log('fillScheduleGaps: Empty template detected - entire schedule will be filled', 'info');
+            console.log('Working with EMPTY template:', currentTemplate);
         }
         
         // Debug: Log current template items at the very start
@@ -10590,10 +10595,10 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
         if (true) {
             log(`fillScheduleGaps: Filling ${gapHours}h ${gapMinutes}m of schedule gaps`, 'info');
             
-            // Get schedule date - skip prompt if template is from meetings import
+            // Get schedule date - use existing date if available
             let scheduleDate = currentTemplate.schedule_date;
-            if (!scheduleDate || !currentTemplate.from_meetings) {
-                // Only prompt if template wasn't created from meetings or has no date
+            if (!scheduleDate) {
+                // Only prompt if no schedule date exists at all
                 const defaultDate = new Date();
                 if (currentTemplate.type === 'weekly') {
                     // For weekly schedules, default to next Sunday
@@ -10684,6 +10689,11 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
                 gaps.forEach((gap, idx) => {
                     console.log(`  Gap ${idx + 1}: ${(gap.startSeconds/3600).toFixed(2)}h - ${(gap.endSeconds/3600).toFixed(2)}h (${((gap.endSeconds - gap.startSeconds)/3600).toFixed(2)}h)`);
                 });
+                
+                // For empty templates, we should have one big gap
+                if (cleanTemplate.items.length === 0 && gaps.length === 1) {
+                    console.log('Empty template confirmed - single gap covering entire schedule');
+                }
                 
                 // Debug: Check if there are any gap items that should split these gaps
                 const gapItems = cleanTemplate.items.filter(item => {
@@ -11167,15 +11177,22 @@ async function fillScheduleGaps(postMeetingDelay = 0) {
                 }
                 */
                 
-                if (result.success && result.items_added && result.items_added.length > 0) {
-                    log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
-                    
-                    // Log the state before adding items
-                    console.log('Before adding new items:', cleanTemplate.items.length, 'fixed items');
-                    
-                    // Preserve all original items (including gap items) and add new items
-                    // Note: cleanTemplate already includes gap items since they have valid start_times
-                    currentTemplate.items = [...cleanTemplate.items, ...result.items_added];
+                if (result.success) {
+                    if (result.items_added && result.items_added.length > 0) {
+                        log(`fillScheduleGaps: Backend added ${result.items_added.length} items using rotation logic`, 'success');
+                        
+                        // Log the state before adding items
+                        console.log('Before adding new items:', cleanTemplate.items.length, 'fixed items');
+                        
+                        // Preserve all original items (including gap items) and add new items
+                        // Note: cleanTemplate already includes gap items since they have valid start_times
+                        currentTemplate.items = [...cleanTemplate.items, ...result.items_added];
+                    } else {
+                        log('fillScheduleGaps: Backend returned success but no items were added', 'warning');
+                        console.log('Result from backend:', result);
+                        alert('No items were added. This might happen if there is no available content or all content was filtered out.');
+                        return;
+                    }
                     
                     console.log('After adding new items:', currentTemplate.items.length, 'items');
                     
@@ -14147,6 +14164,61 @@ function showReturnToAutomationModal() {
     autoStartAutomation();
 }
 
+// Helper function to prompt for schedule date
+async function promptForScheduleDate(defaultDate) {
+    const dateStr = prompt(
+        "Please enter the air date for this weekly schedule (YYYY-MM-DD):\n\n" +
+        "This should be the Sunday date for the week you're scheduling.\n" + 
+        "For example:\n" +
+        "- For current week starting today: " + defaultDate + "\n" +
+        "- For next week: " + getNextSunday(defaultDate),
+        defaultDate
+    );
+    
+    if (!dateStr) {
+        return null; // User cancelled
+    }
+    
+    // Validate the date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(dateStr)) {
+        alert("Invalid date format. Please use YYYY-MM-DD format.");
+        return promptForScheduleDate(defaultDate); // Recursive call
+    }
+    
+    // Verify it's a valid date
+    const date = new Date(dateStr + 'T12:00:00');
+    if (isNaN(date.getTime())) {
+        alert("Invalid date. Please enter a valid date.");
+        return promptForScheduleDate(defaultDate); // Recursive call
+    }
+    
+    // Ensure it's a Sunday
+    if (date.getDay() !== 0) {
+        const sunday = new Date(date);
+        sunday.setDate(date.getDate() - date.getDay());
+        const sundayStr = sunday.toISOString().split('T')[0];
+        const confirmed = confirm(
+            `The date you entered (${dateStr}) is not a Sunday.\n\n` +
+            `Would you like to use the Sunday of that week (${sundayStr}) instead?`
+        );
+        if (confirmed) {
+            return sundayStr;
+        } else {
+            return promptForScheduleDate(defaultDate); // Let user try again
+        }
+    }
+    
+    return dateStr;
+}
+
+// Helper to get next Sunday date string
+function getNextSunday(currentSundayStr) {
+    const date = new Date(currentSundayStr + 'T12:00:00');
+    date.setDate(date.getDate() + 7);
+    return date.toISOString().split('T')[0];
+}
+
 // Automatically start automation with newest video file
 async function autoStartAutomation() {
     try {
@@ -14177,11 +14249,36 @@ async function autoStartAutomation() {
         const selectedFile = newestFile.path;
         const programmingDelay = 300; // Default 300 seconds (5 minutes)
         
-        // Get the current template
-        const currentTemplate = window.currentTemplate;
+        // Get the current template or create an empty one
+        let currentTemplate = window.currentTemplate;
         if (!currentTemplate || !currentTemplate.items) {
-            alert('No weekly template loaded. Please import weekly meetings first.');
-            return;
+            // Create an empty weekly template - prompt for date
+            const today = new Date();
+            const sunday = new Date(today);
+            sunday.setDate(today.getDate() - today.getDay()); // Get this week's Sunday
+            const defaultSundayStr = sunday.toISOString().split('T')[0];
+            
+            // Prompt user for the schedule date
+            const scheduleDate = await promptForScheduleDate(defaultSundayStr);
+            if (!scheduleDate) {
+                log('User cancelled schedule date selection', 'warning');
+                return; // User cancelled
+            }
+            
+            currentTemplate = {
+                type: 'weekly',
+                filename: `empty_weekly_${scheduleDate}.sch`,
+                items: [],
+                raw_content: '',
+                schedule_date: scheduleDate,
+                defaults: {
+                    minimum_spacing: 2,
+                    duration_rotation: ['id', 'spots', 'short_form', 'long_form']
+                }
+            };
+            
+            window.currentTemplate = currentTemplate;
+            log('Created empty weekly template for automation', 'info');
         }
         
         // Log which time was used for selection
@@ -14299,12 +14396,40 @@ async function startAutomation() {
         return;
     }
     
-    // Get the current template from window.currentTemplate
-    const currentTemplate = window.currentTemplate;
+    // Get the current template or create an empty one
+    let currentTemplate = window.currentTemplate;
     
     if (!currentTemplate || !currentTemplate.items) {
-        alert('No weekly template loaded. Please import weekly meetings first.');
-        return;
+        // Create an empty weekly template - prompt for date
+        const today = new Date();
+        const sunday = new Date(today);
+        sunday.setDate(today.getDate() - today.getDay()); // Get this week's Sunday
+        const defaultSundayStr = sunday.toISOString().split('T')[0];
+        
+        // Prompt user for the schedule date
+        const scheduleDate = await promptForScheduleDate(defaultSundayStr);
+        if (!scheduleDate) {
+            log('User cancelled schedule date selection', 'warning');
+            const startBtn = document.getElementById('startAutomationBtn');
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-play"></i> Start Automation';
+            return; // User cancelled
+        }
+        
+        currentTemplate = {
+            type: 'weekly',
+            filename: `empty_weekly_${scheduleDate}.sch`,
+            items: [],
+            raw_content: '',
+            schedule_date: scheduleDate,
+            defaults: {
+                minimum_spacing: 2,
+                duration_rotation: ['id', 'spots', 'short_form', 'long_form']
+            }
+        };
+        
+        window.currentTemplate = currentTemplate;
+        log(`Created empty weekly template for ${scheduleDate}`, 'info');
     }
     
     const startBtn = document.getElementById('startAutomationBtn');

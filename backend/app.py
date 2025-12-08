@@ -6918,6 +6918,10 @@ def fill_template_gaps():
         logger.info(f"Template has {len(template.get('items', []))} items")
         logger.info(f"Available content count: {len(available_content)}")
         
+        # Log if this is an empty template
+        if len(template.get('items', [])) == 0:
+            logger.info("Working with an EMPTY template - entire schedule will be filled from available content")
+        
         # Debug: Check expiration dates in available content
         content_with_expiry = 0
         content_without_expiry = 0
