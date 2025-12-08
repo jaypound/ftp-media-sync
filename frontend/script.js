@@ -16627,7 +16627,13 @@ let editingMeetingId = null;
 // Load meetings when panel is shown
 window.addEventListener('panelChanged', (e) => {
     if (e.detail.panel === 'meetings') {
-        loadMeetings();
+        // Use the new meeting schedule module instead of old loadMeetings
+        if (window.meetingScheduleLoadMeetings) {
+            window.meetingScheduleLoadMeetings();
+        } else {
+            // Fallback to old function if module not loaded
+            loadMeetings();
+        }
     }
 });
 

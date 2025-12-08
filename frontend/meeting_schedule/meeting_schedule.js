@@ -21,6 +21,10 @@ const meetingScheduleState = {
 function meetingScheduleInit() {
     console.log('Initializing Meeting Schedule module...');
     
+    // Make functions globally available
+    window.meetingScheduleLoadMeetings = meetingScheduleLoadMeetings;
+    window.meetingScheduleDisplayMeetings = meetingScheduleDisplayMeetings;
+    
     // Load meetings
     meetingScheduleLoadMeetings();
     
@@ -61,9 +65,9 @@ function meetingScheduleDisplayMeetings() {
     
     // Sort meetings by date and time (earliest first)
     const sortedMeetings = [...meetingScheduleState.meetings].sort((a, b) => {
-        // Compare dates first
-        const dateA = new Date(a.meeting_date);
-        const dateB = new Date(b.meeting_date);
+        // Compare dates first - parse dates without timezone conversion
+        const dateA = new Date(a.meeting_date + 'T12:00:00');
+        const dateB = new Date(b.meeting_date + 'T12:00:00');
         const dateDiff = dateA - dateB;
         
         if (dateDiff !== 0) return dateDiff;
@@ -100,30 +104,67 @@ function meetingScheduleDisplayMeetings() {
     
     let html = '';
     sortedMeetings.forEach(meeting => {
-        const meetingDate = new Date(meeting.meeting_date);
+        // Parse date at noon to avoid timezone issues
+        const meetingDate = new Date(meeting.meeting_date + 'T12:00:00');
         const dateStr = meetingDate.toLocaleDateString('en-US', {
             year: 'numeric',
             month: 'short',
             day: 'numeric'
         });
         
+        // Format created_at and updated_at dates with time
+        let createdAtDisplay = '--';
+        let updatedAtDisplay = '--';
+        
+        if (meeting.created_at) {
+            const createdDate = new Date(meeting.created_at);
+            const createdDateStr = createdDate.toLocaleDateString('en-US', {
+                year: '2-digit',
+                month: 'numeric',
+                day: 'numeric'
+            });
+            const createdTimeStr = createdDate.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+            createdAtDisplay = `${createdDateStr}<br><small>${createdTimeStr}</small>`;
+        }
+        
+        if (meeting.updated_at) {
+            const updatedDate = new Date(meeting.updated_at);
+            const updatedDateStr = updatedDate.toLocaleDateString('en-US', {
+                year: '2-digit',
+                month: 'numeric',
+                day: 'numeric'
+            });
+            const updatedTimeStr = updatedDate.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+            updatedAtDisplay = `${updatedDateStr}<br><small>${updatedTimeStr}</small>`;
+        }
+        
         const startTime = meeting.start_time || '--:--';
         const endTime = meeting.end_time || '--:--';
         const timeRange = endTime !== '--:--' ? `${startTime} - ${endTime}` : startTime;
         const room = meeting.room || 'TBD';
-        const broadcast = meeting.broadcast_on_atl26;
+        const broadcast = meeting.atl26_broadcast || meeting.broadcast_on_atl26 || meeting.broadcast;
         
         html += `
             <tr>
                 <td class="meeting-schedule-name">${meeting.meeting_name}</td>
                 <td class="meeting-schedule-date">${dateStr}</td>
-                <td class="meeting-schedule-time" colspan="2">${timeRange}</td>
+                <td class="meeting-schedule-time">${timeRange}</td>
                 <td><span class="meeting-schedule-room">${room}</span></td>
                 <td class="meeting-schedule-atl26">
                     ${broadcast ? 
                         '<i class="fas fa-check-circle meeting-schedule-broadcast-yes"></i>' : 
                         '<i class="fas fa-times-circle meeting-schedule-broadcast-no"></i>'}
                 </td>
+                <td class="meeting-schedule-date-entered">${createdAtDisplay}</td>
+                <td class="meeting-schedule-last-updated">${updatedAtDisplay}</td>
                 <td>
                     <div class="meeting-schedule-actions">
                         <button class="button secondary small" onclick="meetingScheduleEditMeeting(${meeting.id})">
@@ -150,9 +191,12 @@ function meetingScheduleOpenAddModal() {
     document.getElementById('meetingId').value = '';
     document.getElementById('meetingForm').reset();
     
-    // Set default date to today
+    // Set default date to today in local timezone
     const today = new Date();
-    const dateStr = today.toISOString().split('T')[0];
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
     document.getElementById('meetingDate').value = dateStr;
     
     // Set default broadcast checkbox to checked
@@ -190,7 +234,9 @@ async function meetingScheduleEditMeeting(meetingId) {
     // Populate form
     document.getElementById('meetingId').value = meeting.id;
     document.getElementById('meetingName').value = meeting.meeting_name;
-    document.getElementById('meetingDate').value = meeting.meeting_date.split('T')[0];
+    // Handle date format properly - could be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+    const dateValue = meeting.meeting_date.includes('T') ? meeting.meeting_date.split('T')[0] : meeting.meeting_date;
+    document.getElementById('meetingDate').value = dateValue;
     
     // Format time for HTML time input (expects 24-hour HH:MM format)
     let timeValue = meeting.start_time || '';
@@ -355,12 +401,7 @@ async function meetingScheduleSaveMeeting() {
             meetingScheduleCloseMeetingModal();
             // Reload meetings and ensure display is refreshed
             await meetingScheduleLoadMeetings();
-            // If we're on the meetings panel, also trigger the legacy refresh
-            const activePanel = document.querySelector('.panel.active');
-            if (activePanel && activePanel.id === 'meetings' && typeof loadMeetings === 'function') {
-                // Also refresh using the legacy system to ensure consistency
-                loadMeetings();
-            }
+            // No need to call the legacy loadMeetings anymore
         } else {
             window.showNotification(response.message || 'Failed to save meeting', 'error');
         }
@@ -381,11 +422,17 @@ async function meetingScheduleDeleteMeeting(meetingId) {
     
     try {
         const response = await window.API.delete(`/meetings/${meetingId}`);
-        if (response.success) {
-            window.showNotification('Meeting deleted', 'success');
+        if (response.success || response.status === 'success') {
+            window.showNotification('Meeting deleted successfully', 'success');
+            // Force reload and redisplay
             await meetingScheduleLoadMeetings();
+            // Also trigger display refresh explicitly
+            meetingScheduleDisplayMeetings();
+        } else {
+            window.showNotification(response.message || 'Failed to delete meeting', 'error');
         }
     } catch (error) {
+        console.error('Error deleting meeting:', error);
         window.showNotification('Failed to delete meeting', 'error');
     }
 }

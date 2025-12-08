@@ -65,6 +65,7 @@
 /* Table Container */
 .meeting-schedule-table-container {
     overflow-x: auto;
+    max-width: 100%;
 }
 
 /* Meetings Table */
@@ -145,6 +146,36 @@
 /* ATL26 Column */
 .meeting-schedule-atl26 {
     text-align: center;
+}
+
+/* Date Entered Column */
+.meeting-schedule-date-entered {
+    font-family: monospace;
+    font-size: 0.813rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.meeting-schedule-date-entered small {
+    font-size: 0.75rem;
+    color: var(--text-tertiary, #999);
+    opacity: 0.8;
+}
+
+/* Last Updated Column */
+.meeting-schedule-last-updated {
+    font-family: monospace;
+    font-size: 0.813rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.meeting-schedule-last-updated small {
+    font-size: 0.75rem;
+    color: var(--text-tertiary, #999);
+    opacity: 0.8;
 }
 
 .meeting-schedule-broadcast-yes {
