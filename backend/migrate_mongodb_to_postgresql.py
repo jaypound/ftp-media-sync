@@ -70,11 +70,20 @@ class MongoToPostgresMigration:
         if content_type:
             # Map existing content types
             type_map = {
-                'PSA': 'psa',
-                'PKG': 'pkg',
+                'AN': 'an',
+                'ATLD': 'atld',
+                'BMP': 'bmp',
+                'IMOW': 'imow',
+                'IM': 'im',
                 'IA': 'ia',
+                'LM': 'lm',
                 'MTG': 'mtg',
-                'MEETING': 'meeting'
+                'MAF': 'maf',
+                'PKG': 'pkg',
+                'PMO': 'pmo',
+                'PSA': 'psa',
+                'SZL': 'szl',
+                'SPP': 'spp'
             }
             mapped = type_map.get(content_type.upper())
             if mapped:
@@ -85,13 +94,19 @@ class MongoToPostgresMigration:
         if 'psa' in filename_lower:
             return 'psa'
         elif 'meeting' in filename_lower or 'council' in filename_lower or 'mtg' in filename_lower:
-            return 'meeting'
-        elif 'announcement' in filename_lower:
-            return 'announcement'
+            return 'mtg'
+        elif 'announcement' in filename_lower or '_an_' in filename_lower:
+            return 'an'
         elif 'pkg' in filename_lower:
             return 'pkg'
-        elif '_ia_' in filename_lower:
+        elif '_ia_' in filename_lower or 'inside atlanta' in filename_lower:
             return 'ia'
+        elif 'maf' in filename_lower or 'moving atlanta forward' in filename_lower:
+            return 'maf'
+        elif 'bmp' in filename_lower or 'bump' in filename_lower:
+            return 'bmp'
+        elif 'promo' in filename_lower or 'pmo' in filename_lower:
+            return 'pmo'
         else:
             return 'other'
     
