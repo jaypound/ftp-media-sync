@@ -88,17 +88,16 @@ class SchedulerJobs:
         """Start the scheduler with configured jobs"""
         # Scheduler now always starts - individual jobs check their own enabled status
         
-        # CASTUS SYNC JOB REMOVED - No longer scheduling automatic expiration sync
-        # # Schedule the Castus sync job at 9am, 12pm, 3pm, 6pm
-        # self.scheduler.add_job(
-        #     func=self.sync_all_expirations_from_castus,
-        #     trigger=CronTrigger(hour='9,12,15,18', minute=0),
-        #     # trigger=CronTrigger(minute='*'),  # TEST MODE: every minute
-        #     id='castus_sync_all',
-        #     name='Copy All Expirations from Castus',
-        #     misfire_grace_time=300,  # 5 minutes grace period
-        #     max_instances=1  # Only one instance can run at a time
-        # )
+        # Schedule the Castus sync job at 9am, 12pm, 3pm, 6pm (every 3 business hours)
+        self.scheduler.add_job(
+            func=self.sync_all_expirations_from_castus,
+            trigger=CronTrigger(hour='9,12,15,18', minute=0),
+            id='castus_sync_all',
+            name='Copy All Expirations from Castus',
+            misfire_grace_time=300,  # 5 minutes grace period
+            max_instances=1  # Only one instance can run at a time
+        )
+        logger.info("Castus expiration sync job scheduled for 9am, 12pm, 3pm, 6pm daily")
         
         # Schedule the meeting video generation check every minute
         self.scheduler.add_job(
