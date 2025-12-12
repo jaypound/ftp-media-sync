@@ -3115,3 +3115,25 @@ body.dark-mode .status {
     display: none !important;
 }
 
+/* Log content styling for modals */
+.log-content {
+    background-color: #f4f4f4;
+    color: #333;
+    padding: 10px;
+    border-radius: 4px;
+    overflow: auto;
+    max-height: 400px;
+    font-size: 12px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border: 1px solid #ddd;
+}
+
+/* Dark theme support for log content */
+[data-theme="dark"] .log-content {
+    background-color: #2d2d30;
+    color: #d4d4d4;
+    border-color: #3e3e42;
+}
+

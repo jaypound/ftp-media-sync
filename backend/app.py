@@ -251,6 +251,8 @@ import logging.handlers
 
 # Global variable to track fill gaps cancellation
 fill_gaps_cancelled = False
+# Global variable to store the last exported schedule date
+last_export_schedule_date = None
 fill_gaps_progress = {
     'files_searched': 0,
     'files_accepted': 0,
@@ -4968,12 +4970,284 @@ def export_schedule():
                 
                 if success:
                     file_size = os.path.getsize(temp_file_path)
-                    return jsonify({
+                    
+                    logger.info(f"Export successful - checking auto-import eligibility")
+                    logger.info(f"Export server: '{export_server}'")
+                    logger.info(f"Export path: '{export_path}'")
+                    
+                    # Auto-import the schedule from castus1 after successful export
+                    auto_import_result = None
+                    # Always try auto-import regardless of which server was used for export
+                    if True:  # Changed from: if export_server == 'source' or export_server == 'target':
+                        # Create debug log for import process
+                        import_log_path = f"logs/schedule_import_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                        os.makedirs('logs', exist_ok=True)
+                        
+                        with open(import_log_path, 'w') as import_log:
+                            import_log.write(f"=== SCHEDULE AUTO-IMPORT DEBUG LOG ===\n")
+                            import_log.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                            import_log.write(f"Export Server: {export_server}\n")
+                            import_log.write(f"Export Path: {export_path}\n")
+                            import_log.write(f"Export Filename: {filename}\n")
+                            import_log.write(f"Schedule Date: {date}\n")
+                            import_log.write(f"\n")
+                        
+                        try:
+                            logger.info("Auto-importing exported schedule from castus1...")
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Starting auto-import process...\n")
+                            
+                            # Find the newest schedule file in the Master directory
+                            master_path = '/mnt/md127/Schedules/Master'
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Master path: {master_path}\n")
+                            
+                            # Connect to source (castus1) server
+                            if 'source' not in ftp_managers:
+                                logger.warning("Source server not connected for auto-import")
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: Source server not in ftp_managers\n")
+                                    import_log.write(f"Available managers: {list(ftp_managers.keys())}\n")
+                            else:
+                                source_ftp = ftp_managers['source']
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Source FTP manager found\n")
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] FTP connected: {source_ftp.connected}\n")
+                                    if hasattr(source_ftp, 'config'):
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] FTP host: {source_ftp.config.get('host', 'unknown')}\n")
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Listing files in: {master_path}\n")
+                                
+                                try:
+                                    files = source_ftp.list_files(master_path)
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Found {len(files)} total files\n")
+                                
+                                except Exception as list_error:
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR listing files: {str(list_error)}\n")
+                                    raise list_error
+                                
+                                # Filter for .sch files and sort by modification time
+                                sch_files = [f for f in files if f['name'].endswith('.sch')]
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Found {len(sch_files)} .sch files\n")
+                                    if sch_files:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule files found:\n")
+                                        for idx, f in enumerate(sch_files[:10]):  # Show first 10
+                                            import_log.write(f"  [{idx+1}] {f['name']} (size: {f.get('size', 0)} bytes)\n")
+                                        if len(sch_files) > 10:
+                                            import_log.write(f"  ... and {len(sch_files) - 10} more\n")
+                                
+                                if sch_files:
+                                    # Sort by name to get the newest (assuming date-based naming)
+                                    sch_files.sort(key=lambda x: x['name'], reverse=True)
+                                    newest_file = sch_files[0]
+                                    
+                                    logger.info(f"Found newest schedule file: {newest_file['name']}")
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Selected newest file: {newest_file['name']}\n")
+                                    
+                                    # Import the schedule
+                                    import_path = f"{master_path}/{newest_file['name']}".replace('//', '/')
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Import path: {import_path}\n")
+                                    
+                                    # Download to temporary file
+                                    with tempfile.NamedTemporaryFile(mode='w+', suffix='.sch', delete=False) as import_temp_file:
+                                        import_temp_path = import_temp_file.name
+                                    
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Temp file created: {import_temp_path}\n")
+                                    
+                                    try:
+                                        # Download file
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading file...\n")
+                                        
+                                        download_success = source_ftp.download_file(import_path, import_temp_path)
+                                        
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Download result: {download_success}\n")
+                                        
+                                        if download_success:
+                                            # Check file size
+                                            file_size = os.path.getsize(import_temp_path)
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Downloaded file size: {file_size} bytes\n")
+                                            
+                                            # Parse schedule file
+                                            with open(import_temp_path, 'r') as f:
+                                                import_content = f.read()
+                                            
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] File content length: {len(import_content)} chars\n")
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] First 200 chars:\n{import_content[:200]}\n")
+                                            
+                                            # Parse the Castus schedule format
+                                            schedule_data = parse_castus_schedule(import_content)
+                                            
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Parse result:\n")
+                                                import_log.write(f"  Type: {schedule_data.get('type', 'unknown')}\n")
+                                                import_log.write(f"  Items: {len(schedule_data.get('items', []))}\n")
+                                            
+                                            # Actually save the schedule to the database
+                                            try:
+                                                # Determine schedule date from filename or use export date
+                                                import_date = date  # Use the exported schedule date
+                                                
+                                                # For weekly schedules, adjust to Sunday
+                                                if schedule_data['type'] == 'weekly':
+                                                    from datetime import timedelta
+                                                    schedule_date_obj = datetime.strptime(import_date, '%Y-%m-%d')
+                                                    days_since_sunday = (schedule_date_obj.weekday() + 1) % 7
+                                                    sunday_date = schedule_date_obj - timedelta(days=days_since_sunday)
+                                                    import_date = sunday_date.strftime('%Y-%m-%d')
+                                                    
+                                                    with open(import_log_path, 'a') as import_log:
+                                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Weekly schedule - adjusted date to Sunday: {import_date}\n")
+                                                
+                                                # Process schedule items
+                                                schedule_items = []
+                                                matched_count = 0
+                                                unmatched_count = 0
+                                                
+                                                with open(import_log_path, 'a') as import_log:
+                                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Processing {len(schedule_data['items'])} items for database import\n")
+                                                
+                                                for idx, item in enumerate(schedule_data['items']):
+                                                    file_path = item['file_path']
+                                                    file_name = item['filename']
+                                                    
+                                                    # Look up asset in database
+                                                    asset_match = db_manager.find_asset_by_filename(file_name)
+                                                    
+                                                    if asset_match:
+                                                        schedule_items.append({
+                                                            'file_path': file_path,
+                                                            'file_name': file_name,
+                                                            'asset_id': asset_match['id'],
+                                                            'duration_seconds': asset_match.get('duration_seconds', 0),
+                                                            'content_type': asset_match.get('content_type'),
+                                                            'content_title': asset_match.get('content_title'),
+                                                            'start_time': item.get('start_time'),
+                                                            'end_time': item.get('end_time'),
+                                                            'guid': item.get('guid')
+                                                        })
+                                                        matched_count += 1
+                                                    else:
+                                                        # Still add unmatched items
+                                                        schedule_items.append({
+                                                            'file_path': file_path,
+                                                            'file_name': file_name,
+                                                            'asset_id': None,
+                                                            'duration_seconds': item.get('duration_seconds', 0),
+                                                            'content_type': None,
+                                                            'content_title': file_name,
+                                                            'start_time': item.get('start_time'),
+                                                            'end_time': item.get('end_time'),
+                                                            'guid': item.get('guid')
+                                                        })
+                                                        unmatched_count += 1
+                                                
+                                                with open(import_log_path, 'a') as import_log:
+                                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Asset matching complete:\n")
+                                                    import_log.write(f"  Matched: {matched_count}\n")
+                                                    import_log.write(f"  Unmatched: {unmatched_count}\n")
+                                                
+                                                # Create the schedule
+                                                schedule_name = f"[AUTO-IMPORTED] {newest_file['name']}"
+                                                if schedule_data['type'] == 'weekly':
+                                                    schedule_name = f"[WEEKLY] {schedule_name}"
+                                                
+                                                with open(import_log_path, 'a') as import_log:
+                                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Creating schedule in database:\n")
+                                                    import_log.write(f"  Name: {schedule_name}\n")
+                                                    import_log.write(f"  Date: {import_date}\n")
+                                                
+                                                created_schedule = scheduler_postgres.create_schedule_from_template(
+                                                    schedule_date=import_date,
+                                                    items=schedule_items,
+                                                    schedule_name=schedule_name,
+                                                    channel='Comcast Channel 26',
+                                                    created_by='auto_import',
+                                                    template_name=newest_file['name']
+                                                )
+                                                
+                                                if created_schedule:
+                                                    with open(import_log_path, 'a') as import_log:
+                                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule created successfully!\n")
+                                                        import_log.write(f"  Schedule ID: {created_schedule['id']}\n")
+                                                        import_log.write(f"  Items saved: {created_schedule.get('items_count', 0)}\n")
+                                                    
+                                                    auto_import_result = {
+                                                        'imported': True,
+                                                        'filename': newest_file['name'],
+                                                        'type': schedule_data.get('type', 'unknown'),
+                                                        'items_count': len(schedule_data.get('items', [])),
+                                                        'schedule_id': created_schedule['id'],
+                                                        'schedule_name': schedule_name,
+                                                        'matched_assets': matched_count,
+                                                        'unmatched_assets': unmatched_count
+                                                    }
+                                                else:
+                                                    raise Exception("Failed to create schedule in database")
+                                                
+                                            except Exception as db_error:
+                                                with open(import_log_path, 'a') as import_log:
+                                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR saving to database:\n")
+                                                    import_log.write(f"  Error: {str(db_error)}\n")
+                                                raise db_error
+                                            
+                                            logger.info(f"Auto-import successful: {auto_import_result}")
+                                            
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] AUTO-IMPORT SUCCESSFUL\n")
+                                                import_log.write(f"  Result: {auto_import_result}\n")
+                                        else:
+                                            logger.warning("Failed to download schedule file for auto-import")
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: Download failed\n")
+                                    finally:
+                                        if os.path.exists(import_temp_path):
+                                            os.unlink(import_temp_path)
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Temp file cleaned up\n")
+                                else:
+                                    logger.info("No schedule files found in Master directory for auto-import")
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] No .sch files found in directory\n")
+                                    
+                        except Exception as import_error:
+                            logger.error(f"Auto-import error: {str(import_error)}")
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] EXCEPTION during auto-import:\n")
+                                import_log.write(f"  Type: {type(import_error).__name__}\n")
+                                import_log.write(f"  Message: {str(import_error)}\n")
+                                import traceback
+                                import_log.write(f"  Traceback:\n")
+                                import_log.write(traceback.format_exc())
+                            # Don't fail the export if auto-import fails
+                        
+                        # Log final status
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"\n[{datetime.now().strftime('%H:%M:%S')}] === AUTO-IMPORT COMPLETE ===\n")
+                            import_log.write(f"Log file saved to: {import_log_path}\n")
+                        
+                        logger.info(f"Auto-import debug log saved to: {import_log_path}")
+                    
+                    response_data = {
                         'success': True,
                         'message': f'Schedule exported successfully to {export_server} at {full_path}',
                         'file_path': full_path,
                         'file_size': file_size
-                    })
+                    }
+                    
+                    # Add auto-import result if available
+                    if auto_import_result:
+                        response_data['auto_import'] = auto_import_result
+                    
+                    return jsonify(response_data)
                 else:
                     return jsonify({
                         'success': False,
@@ -9428,6 +9702,11 @@ def export_template():
         export_server = data.get('export_server')
         export_path = data.get('export_path')
         filename = data.get('filename')
+        schedule_date = data.get('schedule_date')  # Get the schedule date
+        
+        # Store schedule date globally for auto-import to use
+        global last_export_schedule_date
+        last_export_schedule_date = schedule_date
         
         if not template or not export_server or not export_path or not filename:
             return jsonify({
@@ -9634,12 +9913,267 @@ def export_template():
             
             if success:
                 file_size = os.path.getsize(temp_file_path)
-                return jsonify({
+                
+                logger.info(f"Template export successful")
+                logger.info(f"Export server: '{export_server}'")
+                logger.info(f"Export path: '{export_path}'")
+                
+                # Auto-import not needed - schedule already created by return to automation
+                auto_import_result = None
+                
+                response_data = {
                     'success': True,
                     'message': f'Template exported successfully to {export_server} at {full_path}',
                     'file_path': full_path,
                     'file_size': file_size
-                })
+                }
+                
+                # Skip all the import code since schedule is created by return to automation
+                """
+                with open(import_log_path, 'w') as import_log:
+                    import_log.write(f"=== SCHEDULE AUTO-IMPORT DEBUG LOG ===\n")
+                    import_log.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    import_log.write(f"Export Server: {export_server}\n")
+                    import_log.write(f"Export Path: {export_path}\n")
+                    import_log.write(f"Export Filename: {filename}\n")
+                    import_log.write(f"Template Name: {template.get('name', 'Unknown')}\n")
+                    import_log.write(f"\n")
+                
+                try:
+                    logger.info("Auto-importing exported schedule from castus1...")
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Starting auto-import process...\n")
+                    
+                    # Find the newest schedule file in the Master directory
+                    master_path = '/mnt/md127/Schedules/Master'
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Master path: {master_path}\n")
+                    
+                    # Connect to source (castus1) server
+                    if 'source' not in ftp_managers:
+                        logger.warning("Source server not connected for auto-import")
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: Source server not in ftp_managers\n")
+                            import_log.write(f"Available managers: {list(ftp_managers.keys())}\n")
+                    else:
+                        source_ftp = ftp_managers['source']
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Source FTP manager found\n")
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] FTP connected: {source_ftp.connected}\n")
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Listing files in: {master_path}\n")
+                        
+                        try:
+                            files = source_ftp.list_files(master_path)
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Found {len(files)} total files\n")
+                        except Exception as list_error:
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR listing files: {str(list_error)}\n")
+                            raise list_error
+                        
+                        # Filter for .sch files
+                        sch_files = [f for f in files if f['name'].endswith('.sch')]
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Found {len(sch_files)} .sch files\n")
+                            if sch_files:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule files found:\n")
+                                for idx, f in enumerate(sch_files[:10]):
+                                    import_log.write(f"  [{idx+1}] {f['name']} (size: {f.get('size', 0)} bytes)\n")
+                                if len(sch_files) > 10:
+                                    import_log.write(f"  ... and {len(sch_files) - 10} more\n")
+                        
+                        if sch_files:
+                            # Sort by name to get the newest  
+                            sch_files.sort(key=lambda x: x['name'], reverse=True)
+                            newest_file = sch_files[0]
+                            
+                            logger.info(f"Found newest schedule file: {newest_file['name']}")
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Selected newest file: {newest_file['name']}\n")
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Export template complete - schedule already created by return to automation\n")
+                                # Download and parse schedule file
+                                import_path = f"{master_path}/{newest_file['name']}".replace('//', '/')
+                                
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading from: {import_path}\n")
+                                
+                                # Download to temporary file
+                                with tempfile.NamedTemporaryFile(mode='w+', suffix='.sch', delete=False) as temp_import_file:
+                                    temp_import_path = temp_import_file.name
+                                
+                                try:
+                                    # Download file
+                                    download_success = source_ftp.download_file(import_path, temp_import_path)
+                                    
+                                    if download_success:
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Download successful\n")
+                                        
+                                        # Parse schedule file
+                                        with open(temp_import_path, 'r') as f:
+                                            import_content = f.read()
+                                        
+                                        # Parse the Castus schedule format
+                                        schedule_data = parse_castus_schedule(import_content)
+                                        
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule parsed:\n")
+                                            import_log.write(f"  Type: {schedule_data['type']}\n")
+                                            import_log.write(f"  Items: {len(schedule_data['items'])}\n")
+                                        
+                                        # Determine schedule date - use the template's date if available
+                                        schedule_date = template.get('schedule_date', datetime.now().strftime('%Y-%m-%d'))
+                                        
+                                        # For weekly schedules, adjust the date to the Sunday of that week
+                                        if schedule_data['type'] == 'weekly':
+                                            from datetime import timedelta
+                                            schedule_date_obj = datetime.strptime(schedule_date, '%Y-%m-%d')
+                                            days_since_sunday = (schedule_date_obj.weekday() + 1) % 7
+                                            sunday_date = schedule_date_obj - timedelta(days=days_since_sunday)
+                                            original_date = schedule_date
+                                            schedule_date = sunday_date.strftime('%Y-%m-%d')
+                                            
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Weekly schedule: Adjusted date from {original_date} to {schedule_date} (Sunday)\n")
+                                        
+                                        # Process the schedule items
+                                        schedule_items = []
+                                        matched_count = 0
+                                        unmatched_count = 0
+                                        
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Looking up assets in database...\n")
+                                        
+                                        for idx, item in enumerate(schedule_data['items']):
+                                            file_path = item['file_path']
+                                            file_name = item['filename']
+                                            
+                                            # Look up asset in database
+                                            asset_match = db_manager.find_asset_by_filename(file_name)
+                                            
+                                            if asset_match:
+                                                schedule_items.append({
+                                                    'file_path': file_path,
+                                                    'file_name': file_name,
+                                                    'asset_id': asset_match['id'],
+                                                    'duration_seconds': asset_match.get('duration_seconds', 0),
+                                                    'content_type': asset_match.get('content_type'),
+                                                    'content_title': asset_match.get('content_title'),
+                                                    'start_time': item.get('start_time'),
+                                                    'end_time': item.get('end_time'),
+                                                    'guid': item.get('guid')
+                                                })
+                                                matched_count += 1
+                                            else:
+                                                schedule_items.append({
+                                                    'file_path': file_path,
+                                                    'file_name': file_name,
+                                                    'asset_id': None,
+                                                    'duration_seconds': item.get('duration_seconds', 0),
+                                                    'content_type': None,
+                                                    'content_title': file_name,
+                                                    'start_time': item.get('start_time'),
+                                                    'end_time': item.get('end_time'),
+                                                    'guid': item.get('guid')
+                                                })
+                                                unmatched_count += 1
+                                        
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Asset lookup complete:\n")
+                                            import_log.write(f"  Matched: {matched_count}\n")
+                                            import_log.write(f"  Unmatched: {unmatched_count}\n")
+                                        
+                                        # Create the schedule
+                                        schedule_name = f"[AUTO-IMPORTED] {newest_file['name']}"
+                                        if schedule_data['type'] == 'weekly':
+                                            schedule_name = f"[WEEKLY] {schedule_name}"
+                                        
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Creating schedule in database...\n")
+                                            import_log.write(f"  Name: {schedule_name}\n")
+                                            import_log.write(f"  Date: {schedule_date}\n")
+                                        
+                                        # Create schedule in database
+                                        created_schedule = scheduler_postgres.create_schedule_from_template(
+                                            schedule_date=schedule_date,
+                                            items=schedule_items,
+                                            schedule_name=schedule_name,
+                                            channel='Comcast Channel 26',
+                                            created_by='auto_import',
+                                            template_name=newest_file['name']
+                                        )
+                                        
+                                        if created_schedule and created_schedule.get('success'):
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule created successfully!\n")
+                                                import_log.write(f"  Schedule ID: {created_schedule.get('schedule_id')}\n")
+                                                import_log.write(f"  Total duration: {created_schedule.get('total_duration_hours', 0):.1f} hours\n")
+                                            
+                                            auto_import_result = {
+                                                'imported': True,
+                                                'filename': newest_file['name'],
+                                                'type': schedule_data.get('type', 'unknown'),
+                                                'items_count': len(schedule_data.get('items', [])),
+                                                'schedule_id': created_schedule.get('schedule_id'),
+                                                'schedule_name': schedule_name,
+                                                'matched_assets': matched_count,
+                                                'unmatched_assets': unmatched_count,
+                                                'total_duration_hours': created_schedule.get('total_duration_hours', 0)
+                                            }
+                                            
+                                            logger.info(f"Auto-import successful - Schedule ID: {created_schedule.get('schedule_id')}")
+                                        else:
+                                            raise Exception("Failed to create schedule in database")
+                                    else:
+                                        raise Exception("Failed to download schedule file")
+                                        
+                                finally:
+                                    # Clean up temp file
+                                    if 'temp_import_path' in locals() and os.path.exists(temp_import_path):
+                                        os.unlink(temp_import_path)
+                                    
+                            except Exception as import_err:
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR during import: {str(import_err)}\n")
+                                    import traceback
+                                    import_log.write(traceback.format_exc())
+                                raise import_err
+                        else:
+                            logger.info("No schedule files found in Master directory")
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] No .sch files found in directory\n")
+                        
+                except Exception as import_error:
+                    logger.error(f"Auto-import error: {str(import_error)}")
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] EXCEPTION during auto-import:\n")
+                        import_log.write(f"  Type: {type(import_error).__name__}\n") 
+                        import_log.write(f"  Message: {str(import_error)}\n")
+                        import traceback
+                        import_log.write(f"  Traceback:\n")
+                        import_log.write(traceback.format_exc())
+                    # Don't fail the export if auto-import fails
+                
+                # Log final status
+                with open(import_log_path, 'a') as import_log:
+                    import_log.write(f"\n[{datetime.now().strftime('%H:%M:%S')}] === AUTO-IMPORT COMPLETE ===\n")
+                    import_log.write(f"Log file saved to: {import_log_path}\n")
+                
+                logger.info(f"Auto-import debug log saved to: {import_log_path}")
+                
+                response_data = {
+                    'success': True,
+                    'message': f'Template exported successfully to {export_server} at {full_path}',
+                    'file_path': full_path,
+                    'file_size': file_size
+                }
+                
+                # Add auto-import result if available
+                if auto_import_result:
+                    response_data['auto_import'] = auto_import_result
+                """
+                
+                return jsonify(response_data)
             else:
                 return jsonify({
                     'success': False,
@@ -15986,6 +16520,409 @@ def get_default_graphics_history():
         
     except Exception as e:
         logger.error(f"Error getting graphics history: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/test-schedule-import-simple', methods=['GET'])
+def test_schedule_import_simple():
+    """Simple test endpoint to check if route is working"""
+    return jsonify({
+        'success': True,
+        'message': 'Test endpoint is working',
+        'ftp_managers': list(ftp_managers.keys())
+    })
+
+@app.route('/api/test-schedule-import', methods=['POST'])
+def test_schedule_import():
+    """Manually test the schedule import process from castus1 - performs a full import"""
+    logger.info("test_schedule_import endpoint called")
+    
+    # Get optional schedule_date from request
+    data = request.json or {}
+    provided_schedule_date = data.get('schedule_date')
+    
+    import traceback
+    import tempfile
+    
+    # Initialize log path variable
+    import_log_path = None
+    
+    try:
+        logger.info("=== MANUAL SCHEDULE IMPORT TEST ===")
+        
+        # Create debug log for import process
+        import_log_path = f"logs/schedule_import_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        os.makedirs('logs', exist_ok=True)
+        
+        logger.info(f"Creating import log at: {import_log_path}")
+        
+        with open(import_log_path, 'w') as import_log:
+            import_log.write(f"=== SCHEDULE AUTO-IMPORT TEST ===\n")
+            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Starting auto-import test from castus1\n")
+            import_log.write(f"FTP Managers available: {list(ftp_managers.keys())}\n\n")
+        
+        # Check if source is available
+        if 'source' not in ftp_managers:
+            with open(import_log_path, 'a') as import_log:
+                import_log.write("ERROR: Source FTP manager not found\n")
+            return jsonify({
+                'success': False,
+                'message': 'Source server not connected',
+                'log_path': import_log_path
+            })
+        
+        auto_import_result = None
+        source_ftp = ftp_managers['source']
+        master_path = '/mnt/md127/Schedules/Master'
+        
+        with open(import_log_path, 'a') as import_log:
+            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Looking for schedule files in: {master_path}\n")
+        
+        try:
+            # Get list of files
+            files = source_ftp.list_files(master_path)
+            
+            # Filter for .sch files and sort by name (newest first)
+            sch_files = [f for f in files if f['name'].endswith('.sch')]
+            
+            with open(import_log_path, 'a') as import_log:
+                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Found {len(sch_files)} schedule files\n")
+                
+            if not sch_files:
+                with open(import_log_path, 'a') as import_log:
+                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] No .sch files found\n")
+                auto_import_result = {
+                    'imported': False,
+                    'error': 'No schedule files found'
+                }
+            else:
+                # Sort by filename to get newest (assumes date-based naming)
+                sch_files.sort(key=lambda x: x['name'], reverse=True)
+                newest_file = sch_files[0]
+                
+                with open(import_log_path, 'a') as import_log:
+                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Selected newest file: {newest_file['name']}\n")
+                
+                # Download the file
+                remote_path = f"{master_path}/{newest_file['name']}"
+                temp_import_file = f"temp_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sch"
+                
+                try:
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Downloading file from: {remote_path}\n")
+                    
+                    source_ftp.download_file(remote_path, temp_import_file)
+                    
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] File downloaded successfully to: {temp_import_file}\n")
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Starting to parse schedule file...\n")
+                    
+                    # Parse the schedule file
+                    # Use the existing parse_castus_schedule function from this module
+                    with open(temp_import_file, 'r') as f:
+                        content = f.read()
+                    schedule_data = parse_castus_schedule(content)
+                    
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Parsed schedule - Type: {schedule_data.get('type', 'unknown')}, Items: {len(schedule_data['items'])}\n")
+                    
+                    # Use provided schedule date if available, otherwise try to determine it
+                    if provided_schedule_date:
+                        schedule_date = provided_schedule_date
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Using provided schedule date: {schedule_date}\n")
+                    elif last_export_schedule_date:
+                        # Use the schedule date from the last export
+                        schedule_date = last_export_schedule_date
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Using schedule date from last export: {schedule_date}\n")
+                    else:
+                        # Check if schedule data contains the air date
+                        schedule_date = schedule_data.get('air_date') or schedule_data.get('schedule_date')
+                        
+                        if not schedule_date:
+                            # Try to extract date from filename (format: YYYY_MM_DD_HH_MM_weekly.sch)
+                            import re
+                            filename_match = re.search(r'(\d{4})_(\d{2})_(\d{2})', newest_file['name'])
+                            if filename_match:
+                                year = int(filename_match.group(1))
+                                month = int(filename_match.group(2))
+                                day = int(filename_match.group(3))
+                                file_date = datetime(year, month, day)
+                                
+                                # For weekly schedules, this might be the export date, not the air date
+                                # The actual air date should have been set during schedule creation
+                                # For now, we'll use this date but may need to adjust
+                                schedule_date = file_date.strftime('%Y-%m-%d')
+                                
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule date extracted from filename: {schedule_date}\n")
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Note: This may be the export date, not the air date\n")
+                            else:
+                                # Last resort: use current date
+                                schedule_date = datetime.now().strftime('%Y-%m-%d')
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: Could not determine schedule date, using current date: {schedule_date}\n")
+                    
+                    # Look up assets in database
+                    
+                    matched_items = []
+                    unmatched_items = []
+                    
+                    for item in schedule_data['items']:
+                        file_name = item.get('filename', item.get('file_name', ''))
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Looking up asset: {file_name}\n")
+                        
+                        asset = db_manager.find_asset_by_filename(file_name)
+                        if asset:
+                            item['asset_id'] = asset['id']
+                            item['duration_seconds'] = asset['duration_seconds']
+                            matched_items.append(item)
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"  ✓ Found asset ID: {asset['id']}\n")
+                        else:
+                            unmatched_items.append(item)
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"  ✗ Asset not found in database\n")
+                    
+                    with open(import_log_path, 'a') as import_log:
+                        import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Asset matching complete - Matched: {len(matched_items)}, Unmatched: {len(unmatched_items)}\n")
+                    
+                    if matched_items:
+                        # Create the schedule in database
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Creating schedule in database...\n")
+                        
+                        # Update schedule name to include [AUTO-IMPORTED] prefix
+                        schedule_name = f"[AUTO-IMPORTED] {newest_file['name']}"
+                        schedule_data['items'] = matched_items
+                        
+                        # Create schedule using same approach as load_schedule_from_ftp
+                        schedule_type_label = "Weekly" if schedule_data.get('type') == 'weekly' else "Daily"
+                        result = scheduler_postgres.create_empty_schedule(
+                            schedule_date=schedule_date,
+                            schedule_name=schedule_name
+                        )
+                        
+                        if not result.get('success'):
+                            raise Exception(f"Failed to create schedule: {result.get('message', 'Unknown error')}")
+                        
+                        created_schedule = result
+                        schedule_id = result.get('schedule_id')
+                        
+                        if schedule_id:
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Schedule created successfully with ID: {schedule_id}\n")
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Now saving {len(matched_items)} items to schedule...\n")
+                            
+                            # Prepare items for saving - need to look up instance_id
+                            schedule_items = []
+                            
+                            # Get connection to look up instance IDs
+                            conn = db_manager._get_connection()
+                            try:
+                                cursor = conn.cursor()
+                                
+                                for idx, item in enumerate(matched_items):
+                                    asset_id = item['asset_id']
+                                    
+                                    # Look up instance ID for this asset
+                                    cursor.execute("""
+                                        SELECT id FROM instances 
+                                        WHERE asset_id = %s 
+                                        LIMIT 1
+                                    """, (asset_id,))
+                                    
+                                    instance_row = cursor.fetchone()
+                                    if instance_row:
+                                        # Handle both dict and tuple results
+                                        if isinstance(instance_row, dict):
+                                            instance_id = instance_row['id']
+                                        else:
+                                            instance_id = instance_row[0]
+                                        
+                                        # Clean up the start time - remove day name and convert to 24-hour format
+                                        start_time_raw = item.get('start_time', '00:00:00')
+                                        
+                                        # Parse time from format like "sat 11:58:28.735 pm"
+                                        try:
+                                            import re
+                                            # Extract time and AM/PM
+                                            time_match = re.search(r'(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d+))?\s*(am|pm)?', start_time_raw.lower())
+                                            if time_match:
+                                                hours = int(time_match.group(1))
+                                                minutes = int(time_match.group(2))
+                                                seconds = int(time_match.group(3))
+                                                am_pm = time_match.group(5)
+                                                
+                                                # Convert to 24-hour format
+                                                if am_pm == 'pm' and hours != 12:
+                                                    hours += 12
+                                                elif am_pm == 'am' and hours == 12:
+                                                    hours = 0
+                                                
+                                                # Ensure hours wrap around at 24
+                                                hours = hours % 24
+                                                
+                                                start_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                                            else:
+                                                # Fallback to default
+                                                start_time = '00:00:00'
+                                        except Exception as e:
+                                            with open(import_log_path, 'a') as import_log:
+                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: Error parsing time '{start_time_raw}': {str(e)}\n")
+                                            start_time = '00:00:00'
+                                        
+                                        schedule_items.append({
+                                            'schedule_id': schedule_id,
+                                            'asset_id': asset_id,
+                                            'instance_id': instance_id,
+                                            'sequence_number': idx + 1,
+                                            'scheduled_start_time': start_time,
+                                            'scheduled_duration_seconds': float(item.get('duration_seconds', 0))
+                                        })
+                                    else:
+                                        with open(import_log_path, 'a') as import_log:
+                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: No instance found for asset_id: {asset_id}\n")
+                                
+                                cursor.close()
+                            finally:
+                                db_manager._put_connection(conn)
+                            
+                            # Save the scheduled items
+                            saved_count = scheduler_postgres._save_scheduled_items(schedule_items)
+                            
+                            # Update schedule total duration
+                            total_duration = sum(item['scheduled_duration_seconds'] for item in schedule_items)
+                            scheduler_postgres._update_schedule_duration(schedule_id, total_duration)
+                            
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Saved {saved_count} items to schedule\n")
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Total duration: {total_duration/3600:.1f} hours\n")
+                        else:
+                            with open(import_log_path, 'a') as import_log:
+                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to create schedule - no ID returned\n")
+                        
+                        auto_import_result = {
+                            'imported': True,
+                            'schedule_id': schedule_id,
+                            'schedule_name': schedule_name,
+                            'matched_items': len(matched_items),
+                            'unmatched_items': len(unmatched_items),
+                            'source_file': newest_file['name'],
+                            'items_count': saved_count  # Add the saved count
+                        }
+                    else:
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] No items could be matched - schedule not created\n")
+                        auto_import_result = {
+                            'imported': False,
+                            'error': 'No items could be matched to database assets'
+                        }
+                
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_import_file):
+                        os.unlink(temp_import_file)
+                        with open(import_log_path, 'a') as import_log:
+                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Cleaned up temp file\n")
+        
+        except Exception as import_error:
+            with open(import_log_path, 'a') as import_log:
+                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR during auto-import:\n")
+                import_log.write(f"  Type: {type(import_error).__name__}\n")
+                import_log.write(f"  Message: {str(import_error)}\n")
+                import_log.write(f"  Traceback:\n")
+                import_log.write(traceback.format_exc())
+            
+            auto_import_result = {
+                'imported': False,
+                'error': str(import_error)
+            }
+        
+        # Log final status
+        with open(import_log_path, 'a') as import_log:
+            import_log.write(f"\n[{datetime.now().strftime('%H:%M:%S')}] === AUTO-IMPORT TEST COMPLETE ===\n")
+            if auto_import_result:
+                import_log.write(f"Result: {auto_import_result}\n")
+            import_log.write(f"Log file saved to: {import_log_path}\n")
+        
+        if auto_import_result and auto_import_result.get('imported'):
+            return jsonify({
+                'success': True,
+                'message': f'Successfully imported schedule: {auto_import_result["schedule_name"]}',
+                'schedule_id': auto_import_result.get('schedule_id'),
+                'schedule_name': auto_import_result.get('schedule_name'),
+                'items_count': auto_import_result.get('items_count', 0),
+                'details': auto_import_result,
+                'log_file': import_log_path
+            })
+        else:
+            error_msg = auto_import_result.get('error', 'Unknown error') if auto_import_result else 'Import failed'
+            return jsonify({
+                'success': False,
+                'message': f'Import failed: {error_msg}',
+                'details': auto_import_result,
+                'log_path': import_log_path
+            })
+            
+    except Exception as e:
+        logger.error(f"Test import error: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        if import_log_path and os.path.exists(import_log_path):
+            with open(import_log_path, 'a') as import_log:
+                import_log.write(f"\n[{datetime.now().strftime('%H:%M:%S')}] FATAL ERROR:\n")
+                import_log.write(f"  {str(e)}\n")
+                import_log.write(traceback.format_exc())
+        
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'details': {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'log_path': import_log_path if import_log_path else 'No log created'
+            }
+        })
+
+@app.route('/api/schedule-import-log', methods=['GET'])
+def get_schedule_import_log():
+    """Get the latest schedule import debug log"""
+    try:
+        import glob
+        
+        # Find all import log files
+        log_pattern = 'logs/schedule_import_debug_*.log'
+        log_files = glob.glob(log_pattern)
+        
+        if not log_files:
+            return jsonify({
+                'success': False,
+                'message': 'No import debug logs found'
+            })
+        
+        # Sort by filename (which includes timestamp) to get the latest
+        log_files.sort(reverse=True)
+        latest_log = log_files[0]
+        
+        # Read the log file
+        with open(latest_log, 'r') as f:
+            log_content = f.read()
+        
+        return jsonify({
+            'success': True,
+            'filename': os.path.basename(latest_log),
+            'path': latest_log,
+            'content': log_content,
+            'timestamp': os.path.getmtime(latest_log)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error retrieving import log: {str(e)}")
         return jsonify({
             'success': False,
             'message': str(e)

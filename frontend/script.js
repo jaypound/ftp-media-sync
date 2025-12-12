@@ -7201,6 +7201,22 @@ async function confirmExport() {
                 log(`📊 File size: ${formatFileSize(result.file_size)}`);
             }
             
+            // Check if auto-import was performed
+            if (result.auto_import) {
+                if (result.auto_import.imported) {
+                    log(`🔄 Auto-imported schedule from castus1:`, 'success');
+                    log(`  📄 File: ${result.auto_import.filename}`);
+                    log(`  📋 Type: ${result.auto_import.type}`);
+                    log(`  📊 Items: ${result.auto_import.items_count}`);
+                    if (result.auto_import.schedule_id) {
+                        log(`  🆔 Schedule ID: ${result.auto_import.schedule_id}`);
+                        log(`  📝 Schedule Name: ${result.auto_import.schedule_name}`);
+                        log(`  ✅ Matched Assets: ${result.auto_import.matched_assets}`);
+                        log(`  ❓ Unmatched Assets: ${result.auto_import.unmatched_assets}`);
+                    }
+                }
+            }
+            
             // Show success notification
             showNotification(
                 'Schedule Exported',
@@ -7208,8 +7224,16 @@ async function confirmExport() {
                 'success'
             );
             
-            // Show success modal
-            showExportResult(true, 'Export Successful!', `Schedule exported to ${result.file_path || fullPath}`);
+            // Show success modal with auto-import info
+            let successMessage = `Schedule exported to ${result.file_path || fullPath}`;
+            if (result.auto_import && result.auto_import.imported) {
+                successMessage += `\n\nAuto-imported ${result.auto_import.filename} from castus1`;
+                if (result.auto_import.schedule_id) {
+                    successMessage += `\n✅ Schedule created: ${result.auto_import.schedule_name}`;
+                    successMessage += `\n📊 ${result.auto_import.items_count} items (${result.auto_import.matched_assets} matched, ${result.auto_import.unmatched_assets} unmatched)`;
+                }
+            }
+            showExportResult(true, 'Export Successful!', successMessage);
         } else {
             log(`❌ ${result.message}`, 'error');
             
@@ -14645,7 +14669,8 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
                         export_server: server,
                         export_path: exportPath,
                         filename: filename,
-                        items: exportTemplate.items || []
+                        items: exportTemplate.items || [],
+                        schedule_date: updatedTemplate.schedule_date  // Include the schedule date
                     })
                 });
                 
@@ -14666,6 +14691,42 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
         }
         
         log('Automation process completed successfully!', 'success');
+        
+        // Auto-import the schedule that was just created
+        log('Starting auto-import of newly created schedule...', 'info');
+        
+        // Wait 2 seconds to ensure file is delivered to server
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        try {
+            const importResponse = await fetch('http://127.0.0.1:5000/api/test-schedule-import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    schedule_date: updatedTemplate.schedule_date  // Pass the schedule date
+                })
+            });
+            
+            const importResult = await importResponse.json();
+            
+            if (importResult.success) {
+                log(`✅ Schedule auto-imported successfully: ${importResult.schedule_name}`, 'success');
+                log(`  Schedule ID: ${importResult.schedule_id}`, 'info');
+                log(`  Items imported: ${importResult.items_count}`, 'info');
+                
+                // Check if log file exists and offer to view
+                if (importResult.log_file) {
+                    if (confirm('Schedule imported successfully. Would you like to view the import log?')) {
+                        showImportDebugLog();
+                    }
+                }
+            } else {
+                log(`⚠️ Auto-import failed: ${importResult.message}`, 'warning');
+            }
+        } catch (importError) {
+            log(`⚠️ Error during auto-import: ${importError.message}`, 'warning');
+            console.error('Auto-import error:', importError);
+        }
         
         // Create detailed message with exported file names
         let successMessage = 'Automation completed!\n\nSchedules have been exported:';
@@ -19704,3 +19765,100 @@ function stopMonitoringAsset(assetId) {
         window.loudnessMonitorIntervals.delete(assetId);
     }
 }
+
+// Test schedule import manually
+async function testScheduleImport() {
+    log('🧪 Testing schedule import from castus1...');
+    console.log('testScheduleImport called');
+    
+    try {
+        const response = await fetch('http://127.0.0.1:5000/api/test-schedule-import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ Import test successful: ${result.message}`, 'success');
+            if (result.details) {
+                if (result.details.newest_file) {
+                    log(`📄 Newest file: ${result.details.newest_file}`);
+                }
+                if (result.details.total_sch_files !== undefined) {
+                    log(`📊 Total schedule files: ${result.details.total_sch_files}`);
+                }
+                if (result.details.log_path) {
+                    log(`📋 Debug log: ${result.details.log_path}`);
+                }
+            }
+            
+            // Show the log
+            if (confirm('Import test complete. View debug log?')) {
+                viewScheduleImportLog();
+            }
+        } else {
+            log(`❌ Import test failed: ${result.message}`, 'error');
+            if (result.details) {
+                log(`📋 Details:`, 'error');
+                console.log(result.details);
+                if (result.details.log_path) {
+                    log(`📋 Debug log: ${result.details.log_path}`);
+                }
+            }
+            
+            // Show the log
+            if (confirm('Import test failed. View debug log?')) {
+                viewScheduleImportLog();
+            }
+        }
+    } catch (error) {
+        log(`❌ Error testing import: ${error.message}`, 'error');
+        console.error('Full error:', error);
+    }
+}
+
+// View schedule import debug log
+async function viewScheduleImportLog() {
+    log('📋 Fetching schedule import debug log...');
+    
+    try {
+        const response = await fetch('/api/schedule-import-log');
+        const result = await response.json();
+        
+        if (result.success) {
+            log(`✅ Retrieved import log: ${result.filename}`);
+            
+            // Create a modal to display the log
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'block';
+            modal.innerHTML = `
+                <div class="modal-content" style="width: 80%; max-width: 900px;">
+                    <div class="modal-header">
+                        <h2>Schedule Import Debug Log</h2>
+                        <span class="close" onclick="this.closest('.modal').remove()">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>File:</strong> ${result.filename}</p>
+                        <p><strong>Path:</strong> ${result.path}</p>
+                        <pre class="log-content">${result.content}</pre>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="button secondary" onclick="this.closest('.modal').remove()">Close</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        } else {
+            log(`❌ Failed to retrieve import log: ${result.message}`, 'error');
+            showNotification('Error', result.message, 'error');
+        }
+    } catch (error) {
+        log(`❌ Error fetching import log: ${error.message}`, 'error');
+        showNotification('Error', error.message, 'error');
+    }
+}
+
+// Expose testScheduleImport to global scope
+window.testScheduleImport = testScheduleImport;
