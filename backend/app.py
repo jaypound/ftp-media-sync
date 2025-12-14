@@ -13666,13 +13666,26 @@ def update_content_expiration():
     try:
         data = request.json
         asset_id = data.get('asset_id')
-        expiry_date = data.get('expiry_date')
+        expiry_date_str = data.get('expiry_date')
         
         if not asset_id:
             return jsonify({
                 'success': False,
                 'message': 'asset_id is required'
             }), 400
+        
+        # Convert date string to datetime object if provided
+        expiry_date = None
+        if expiry_date_str:
+            try:
+                # Parse the date string (expecting YYYY-MM-DD format)
+                from datetime import datetime
+                expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({
+                    'success': False,
+                    'message': f'Invalid date format. Expected YYYY-MM-DD, got: {expiry_date_str}'
+                }), 400
         
         logger.info(f"Updating expiration date for asset {asset_id} to {expiry_date}")
         
@@ -13687,7 +13700,13 @@ def update_content_expiration():
                 """, (asset_id,))
                 
                 result = cur.fetchone()
-                old_expiry = result[0] if result else None
+                if result:
+                    if isinstance(result, dict):
+                        old_expiry = result.get('content_expiry_date')
+                    else:
+                        old_expiry = result[0]
+                else:
+                    old_expiry = None
                 
                 if expiry_date:
                     # Update or insert the expiration date
@@ -13723,7 +13742,7 @@ def update_content_expiration():
             conn.rollback()
             raise e
         finally:
-            conn.close()
+            db_manager._put_connection(conn)
                 
         logger.info(f"Successfully updated expiration date for asset {asset_id}")
         return jsonify({
@@ -13733,7 +13752,7 @@ def update_content_expiration():
         
     except Exception as e:
         error_msg = f"Update content expiration error: {str(e)}"
-        logger.error(error_msg)
+        logger.error(error_msg, exc_info=True)
         return jsonify({
             'success': False,
             'message': error_msg
@@ -13746,7 +13765,7 @@ def update_content_go_live():
     try:
         data = request.json
         asset_id = data.get('asset_id')
-        go_live_date = data.get('go_live_date')
+        go_live_date_str = data.get('go_live_date')
         
         if not asset_id:
             return jsonify({
@@ -13754,11 +13773,39 @@ def update_content_go_live():
                 'message': 'asset_id is required'
             }), 400
         
+        # Convert date string to datetime object if provided
+        go_live_date = None
+        if go_live_date_str:
+            try:
+                # Parse the date string (expecting YYYY-MM-DD format)
+                from datetime import datetime
+                go_live_date = datetime.strptime(go_live_date_str, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({
+                    'success': False,
+                    'message': f'Invalid date format. Expected YYYY-MM-DD, got: {go_live_date_str}'
+                }), 400
+        
         logger.info(f"Updating go live date for asset {asset_id} to {go_live_date}")
         
         conn = db_manager._get_connection()
         try:
             with conn.cursor() as cur:
+                # First get the old value for audit logging
+                cur.execute("""
+                    SELECT go_live_date 
+                    FROM scheduling_metadata 
+                    WHERE asset_id = %s
+                """, (asset_id,))
+                old_row = cur.fetchone()
+                if old_row:
+                    if isinstance(old_row, dict):
+                        old_go_live = old_row.get('go_live_date')
+                    else:
+                        old_go_live = old_row[0]
+                else:
+                    old_go_live = None
+                
                 if go_live_date:
                     # Update or insert the go live date
                     cur.execute("""
@@ -13776,12 +13823,24 @@ def update_content_go_live():
                     """, (asset_id,))
                 
                 conn.commit()
+                
+                # Log the change to audit trail
+                if old_go_live != go_live_date:
+                    db_manager.log_metadata_change(
+                        asset_id=asset_id,
+                        field_name='go_live_date',
+                        old_value=old_go_live,
+                        new_value=go_live_date,
+                        changed_by='web_ui',
+                        change_source='web_ui',
+                        change_reason='Manual update via UI'
+                    )
         
         except Exception as e:
             conn.rollback()
             raise e
         finally:
-            conn.close()
+            db_manager._put_connection(conn)
                 
         logger.info(f"Successfully updated go live date for asset {asset_id}")
         return jsonify({

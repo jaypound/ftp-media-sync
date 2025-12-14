@@ -9133,13 +9133,40 @@ function formatGoLiveDate(goLiveDate) {
 
 // Edit go live date for individual content
 async function editGoLiveDate(assetId) {
-    // Find the content item
-    const content = availableContent.find(c => {
-        const itemId = c._id || c.id || c.guid;
-        return itemId == assetId || itemId === assetId || String(itemId) === String(assetId);
+    console.log('editGoLiveDate called with assetId:', assetId);
+    
+    // Ensure we have access to availableContent
+    const contentArray = window.availableContent || availableContent || [];
+    console.log('Available content length:', contentArray.length);
+    
+    if (contentArray.length === 0) {
+        console.error('No content available in array');
+        window.showNotification('Content data not loaded', 'error');
+        return;
+    }
+    
+    // Find the content item - try multiple ID fields
+    const content = contentArray.find(c => {
+        const itemId = c.id || c._id || c.guid;
+        const matches = itemId == assetId || 
+                       itemId === assetId || 
+                       String(itemId) === String(assetId) ||
+                       c.asset_id == assetId ||
+                       String(c.asset_id) === String(assetId);
+        if (matches) {
+            console.log('Found matching content:', c);
+        }
+        return matches;
     });
     
     if (!content) {
+        console.error('Content not found for assetId:', assetId);
+        console.log('Available IDs:', contentArray.map(c => ({
+            id: c.id,
+            _id: c._id,
+            asset_id: c.asset_id,
+            guid: c.guid
+        })));
         window.showNotification('Content not found', 'error');
         return;
     }
@@ -9179,8 +9206,11 @@ async function saveGoLiveDate(assetId) {
     const dateInput = document.getElementById('goLiveDate');
     const goLiveDate = dateInput.value;
     
+    console.log('Saving go-live date for asset:', assetId);
+    console.log('New go-live date:', goLiveDate);
+    
     try {
-        const response = await fetch('/api/update-content-go-live', {
+        const response = await fetch('http://127.0.0.1:5000/api/update-content-go-live', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -9200,7 +9230,8 @@ async function saveGoLiveDate(assetId) {
             document.getElementById('editGoLiveDateModal').remove();
             
             // Update the content in memory
-            const content = availableContent.find(c => {
+            const contentArray = window.availableContent || availableContent || [];
+            const content = contentArray.find(c => {
                 const itemId = c._id || c.id || c.guid;
                 return itemId == assetId || itemId === assetId || String(itemId) === String(assetId);
             });
@@ -9217,6 +9248,11 @@ async function saveGoLiveDate(assetId) {
                     closeContentDetailsModal();
                     viewContentDetails(assetId);
                 }
+            }
+            
+            // Also refresh the content list display if visible
+            if (window.displayAvailableContent) {
+                window.displayAvailableContent();
             }
         } else {
             window.showNotification(`Failed to update go live date: ${result.message}`, 'error');
@@ -9934,7 +9970,7 @@ function viewContentDetails(contentId) {
                         <strong>Go Live Date:</strong>
                         <span style="display: flex; align-items: center; gap: 10px;">
                             ${formatGoLiveDate(content.scheduling?.go_live_date) || 'Not Set'}
-                            <button class="button small primary" onclick="editGoLiveDate('${contentId}')" title="Edit go live date">
+                            <button class="button small primary" onclick="editGoLiveDate('${content.id || content._id || contentId}')" title="Edit go live date">
                                 <i class="fas fa-edit"></i>
                             </button>
                         </span>
@@ -9942,7 +9978,7 @@ function viewContentDetails(contentId) {
                         <strong>Expiration Date:</strong>
                         <span style="display: flex; align-items: center; gap: 10px;">
                             ${formatExpirationDate(content.scheduling?.content_expiry_date)}
-                            <button class="button small primary" onclick="schedulingEditExpiration('${contentId}', '${content.scheduling?.content_expiry_date || ''}')" title="Edit expiration date">
+                            <button class="button small primary" onclick="schedulingEditExpiration('${content.id || content._id || contentId}', '${content.scheduling?.content_expiry_date || ''}')" title="Edit expiration date">
                                 <i class="fas fa-edit"></i>
                             </button>
                         </span>

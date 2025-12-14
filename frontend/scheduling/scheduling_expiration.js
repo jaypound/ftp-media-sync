@@ -547,11 +547,15 @@ async function schedulingEditExpiration(assetId, currentExpiry) {
 
 // Save individual content expiration date
 async function schedulingSaveIndividualExpiration(assetId) {
+    console.log('Saving expiration date for asset:', assetId);
+    
     const dateInput = document.getElementById('expirationDate');
     const expiryDate = dateInput.value;
     
+    console.log('New expiration date:', expiryDate);
+    
     try {
-        const response = await fetch('/api/update-content-expiration', {
+        const response = await fetch('http://127.0.0.1:5000/api/update-content-expiration', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
