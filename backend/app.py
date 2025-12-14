@@ -4,6 +4,7 @@ from flask_cors import CORS
 import json
 import os
 import sys
+import urllib.parse
 from dotenv import load_dotenv
 from ftp_manager import FTPManager
 from file_scanner import FileScanner
@@ -1749,6 +1750,16 @@ def sync_single_content_metadata():
             conn = db_manager._get_connection()
             try:
                 with conn.cursor() as cursor:
+                    # First get the old values for audit logging
+                    cursor.execute("""
+                        SELECT content_expiry_date, go_live_date
+                        FROM scheduling_metadata
+                        WHERE asset_id = %s
+                    """, (asset_id,))
+                    old_row = cursor.fetchone()
+                    old_expiry = old_row['content_expiry_date'] if old_row else None
+                    old_go_live = old_row['go_live_date'] if old_row else None
+                    
                     # Update or create scheduling_metadata record
                     cursor.execute("""
                         UPDATE scheduling_metadata 
@@ -1767,6 +1778,37 @@ def sync_single_content_metadata():
                         """, (asset_id, expiry_date, go_live_date))
                 
                 conn.commit()
+                
+                # Log the changes to audit trail
+                logger.info(f"Checking for audit log changes - asset_id: {asset_id}")
+                logger.info(f"Old expiry: {old_expiry}, New expiry: {expiry_date}")
+                logger.info(f"Old go_live: {old_go_live}, New go_live: {go_live_date}")
+                
+                if old_expiry != expiry_date:
+                    logger.info(f"Logging expiry date change for asset {asset_id}")
+                    audit_id = db_manager.log_metadata_change(
+                        asset_id=asset_id,
+                        field_name='content_expiry_date',
+                        old_value=old_expiry,
+                        new_value=expiry_date,
+                        changed_by='castus_sync',
+                        change_source='castus_sync',
+                        change_reason='Synced from Castus metadata'
+                    )
+                    logger.info(f"Audit log created with ID: {audit_id}")
+                
+                if old_go_live != go_live_date:
+                    logger.info(f"Logging go_live date change for asset {asset_id}")
+                    audit_id = db_manager.log_metadata_change(
+                        asset_id=asset_id,
+                        field_name='go_live_date',
+                        old_value=old_go_live,
+                        new_value=go_live_date,
+                        changed_by='castus_sync',
+                        change_source='castus_sync',
+                        change_reason='Synced from Castus metadata'
+                    )
+                    logger.info(f"Audit log created with ID: {audit_id}")
                 
                 # Return the dates
                 return jsonify({
@@ -13400,6 +13442,223 @@ def clear_content_expirations():
         return jsonify({'success': False, 'message': error_msg})
 
 
+@app.route('/api/metadata-audit/<asset_id>', methods=['GET'])
+def get_asset_audit_history(asset_id):
+    """Get audit history for a specific asset"""
+    logger.info(f"=== GET ASSET AUDIT HISTORY ===")
+    logger.info(f"Requested asset_id: {asset_id}")
+    logger.info(f"URL-decoded asset_id: {urllib.parse.unquote(asset_id)}")
+    
+    try:
+        field_name = request.args.get('field_name')
+        limit = int(request.args.get('limit', 50))
+        
+        # Try both the original and URL-decoded version
+        asset_id_decoded = urllib.parse.unquote(asset_id)
+        
+        logger.info(f"Fetching audit history for asset_id: {asset_id_decoded}, field: {field_name}, limit: {limit}")
+        history = db_manager.get_asset_audit_history(asset_id_decoded, field_name, limit)
+        logger.info(f"Found {len(history)} audit records")
+        
+        return jsonify({
+            'success': True,
+            'asset_id': asset_id_decoded,
+            'history': history,
+            'count': len(history)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting audit history: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/debug/metadata-audit/<file_name>', methods=['GET'])
+def debug_metadata_audit(file_name):
+    """Debug endpoint to check metadata and audit logs for a specific file"""
+    logger.info(f"=== DEBUG METADATA AUDIT ===")
+    logger.info(f"File name: {file_name}")
+    
+    try:
+        conn = db_manager._get_connection()
+        try:
+            from psycopg2.extras import RealDictCursor
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Find the asset by filename
+            cursor.execute("""
+                SELECT a.id as asset_id, a.content_title, a.content_type,
+                       i.file_name, sm.content_expiry_date, sm.go_live_date,
+                       sm.metadata_synced_at
+                FROM assets a
+                LEFT JOIN instances i ON a.id = i.asset_id
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE i.file_name LIKE %s
+                LIMIT 5
+            """, (f'%{file_name}%',))
+            
+            assets = cursor.fetchall()
+            
+            audit_logs = []
+            if assets:
+                # Get audit logs for these assets
+                asset_ids = [a['asset_id'] for a in assets]
+                cursor.execute("""
+                    SELECT * FROM metadata_audit_log
+                    WHERE asset_id = ANY(%s)
+                    ORDER BY changed_at DESC
+                    LIMIT 50
+                """, (asset_ids,))
+                
+                audit_logs = cursor.fetchall()
+            
+            cursor.close()
+            
+            return jsonify({
+                'success': True,
+                'file_name_search': file_name,
+                'assets_found': assets,
+                'asset_count': len(assets),
+                'audit_logs': audit_logs,
+                'audit_count': len(audit_logs)
+            })
+            
+        finally:
+            db_manager._put_connection(conn)
+            
+    except Exception as e:
+        logger.error(f"Debug error: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/metadata-audit-log', methods=['GET'])
+def get_metadata_audit_log():
+    """Get all audit logs with filtering"""
+    try:
+        # Parse query parameters
+        date_from = request.args.get('date_from')
+        date_to = request.args.get('date_to')
+        field_name = request.args.get('field_name')
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 100))
+        
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        # Parse dates if provided
+        if date_from:
+            date_from = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+        if date_to:
+            date_to = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+        
+        # Get audit logs
+        result = db_manager.get_all_audit_logs(
+            date_from=date_from,
+            date_to=date_to,
+            field_name=field_name,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Calculate total pages
+        total_pages = (result['total'] + limit - 1) // limit
+        
+        return jsonify({
+            'success': True,
+            'logs': result['logs'],
+            'pagination': {
+                'total': result['total'],
+                'page': page,
+                'limit': limit,
+                'total_pages': total_pages
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting audit log: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/metadata-audit/export', methods=['GET'])
+def export_metadata_audit():
+    """Export audit logs to CSV"""
+    try:
+        import csv
+        from io import StringIO
+        
+        # Parse query parameters (same as audit log)
+        date_from = request.args.get('date_from')
+        date_to = request.args.get('date_to')
+        field_name = request.args.get('field_name')
+        
+        # Parse dates if provided
+        if date_from:
+            date_from = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+        if date_to:
+            date_to = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+        
+        # Get all logs (no pagination for export)
+        result = db_manager.get_all_audit_logs(
+            date_from=date_from,
+            date_to=date_to,
+            field_name=field_name,
+            limit=10000,  # Large limit for export
+            offset=0
+        )
+        
+        # Create CSV
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Date/Time',
+            'Asset ID',
+            'Content Title',
+            'Field',
+            'Old Value',
+            'New Value',
+            'Change Type',
+            'Changed By',
+            'Change Source',
+            'Change Reason'
+        ])
+        
+        # Write data
+        for log in result['logs']:
+            writer.writerow([
+                log.get('changed_at'),
+                log.get('asset_id'),
+                log.get('content_title', ''),
+                log.get('field_name'),
+                log.get('old_value', ''),
+                log.get('new_value', ''),
+                log.get('change_type', ''),
+                log.get('changed_by', ''),
+                log.get('change_source', ''),
+                log.get('change_reason', '')
+            ])
+        
+        # Generate response
+        csv_content = output.getvalue()
+        output.close()
+        
+        from flask import make_response
+        response = make_response(csv_content)
+        response.headers['Content-Type'] = 'text/csv'
+        response.headers['Content-Disposition'] = f'attachment; filename=metadata_audit_log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error exporting audit log: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
 @app.route('/api/update-content-expiration', methods=['POST'])
 def update_content_expiration():
     """Update expiration date for a single content item"""
@@ -13420,6 +13679,16 @@ def update_content_expiration():
         conn = db_manager._get_connection()
         try:
             with conn.cursor() as cur:
+                # First get the old value for audit logging
+                cur.execute("""
+                    SELECT content_expiry_date 
+                    FROM scheduling_metadata 
+                    WHERE asset_id = %s
+                """, (asset_id,))
+                
+                result = cur.fetchone()
+                old_expiry = result[0] if result else None
+                
                 if expiry_date:
                     # Update or insert the expiration date
                     cur.execute("""
@@ -13437,6 +13706,18 @@ def update_content_expiration():
                     """, (asset_id,))
                 
                 conn.commit()
+                
+                # Log the change to audit trail
+                if old_expiry != expiry_date:
+                    db_manager.log_metadata_change(
+                        asset_id=asset_id,
+                        field_name='content_expiry_date',
+                        old_value=old_expiry,
+                        new_value=expiry_date,
+                        changed_by='web_ui',
+                        change_source='web_ui',
+                        change_reason='Manual update via UI'
+                    )
         
         except Exception as e:
             conn.rollback()
@@ -13679,13 +13960,15 @@ def sync_castus_expiration():
             conn = db_manager._get_connection()
             try:
                 with conn.cursor() as cursor:
-                    # Check if metadata record exists
+                    # First get the old expiration date for audit logging
                     cursor.execute("""
-                        SELECT id FROM scheduling_metadata 
+                        SELECT content_expiry_date FROM scheduling_metadata 
                         WHERE asset_id = %s
                     """, (asset_id,))
+                    old_row = cursor.fetchone()
+                    old_expiry = old_row['content_expiry_date'] if old_row else None
                     
-                    if cursor.fetchone():
+                    if old_row:
                         # Update existing record
                         logger.info(f"Updating existing scheduling_metadata record for asset {asset_id}")
                         cursor.execute("""
@@ -13705,6 +13988,18 @@ def sync_castus_expiration():
                         logger.info("Insert completed")
                     
                 conn.commit()
+                
+                # Log the change to audit trail
+                if old_expiry != expiration_date:
+                    db_manager.log_metadata_change(
+                        asset_id=asset_id,
+                        field_name='content_expiry_date',
+                        old_value=old_expiry,
+                        new_value=expiration_date,
+                        changed_by='castus_sync',
+                        change_source='castus_sync_single',
+                        change_reason='Synced expiration date from Castus metadata'
+                    )
                 
                 logger.info(f"Database commit successful - expiration date for asset {asset_id} set to {expiration_date}")
                 
@@ -13801,13 +14096,15 @@ def sync_all_castus_expirations():
                         conn = db_manager._get_connection()
                         try:
                             with conn.cursor() as cursor:
-                                # Check if metadata record exists
+                                # First get the old expiration date for audit logging
                                 cursor.execute("""
-                                    SELECT id FROM scheduling_metadata 
+                                    SELECT content_expiry_date FROM scheduling_metadata 
                                     WHERE asset_id = %s
                                 """, (asset_id,))
+                                old_row = cursor.fetchone()
+                                old_expiry = old_row['content_expiry_date'] if old_row else None
                                 
-                                if cursor.fetchone():
+                                if old_row:
                                     # Update existing record
                                     cursor.execute("""
                                         UPDATE scheduling_metadata 
@@ -13823,6 +14120,19 @@ def sync_all_castus_expirations():
                                     """, (asset_id, expiration_date))
                                 
                             conn.commit()
+                            
+                            # Log the change to audit trail
+                            if old_expiry != expiration_date:
+                                db_manager.log_metadata_change(
+                                    asset_id=asset_id,
+                                    field_name='content_expiry_date',
+                                    old_value=old_expiry,
+                                    new_value=expiration_date,
+                                    changed_by='castus_sync',
+                                    change_source='castus_sync_all',
+                                    change_reason='Batch sync expiration dates from Castus metadata'
+                                )
+                            
                             synced += 1
                             logger.debug(f"Synced asset {asset_id}: {expiration_date}")
                         finally:

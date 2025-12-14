@@ -3137,3 +3137,105 @@ body.dark-mode .status {
     border-color: #3e3e42;
 }
 
+/* Metadata History Table Styles */
+.metadata-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    background-color: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.metadata-history-table thead {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.metadata-history-table th {
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.metadata-history-table td {
+    padding: 0.75rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.85rem;
+}
+
+.metadata-history-table tbody tr:hover {
+    background-color: var(--hover-color);
+}
+
+.metadata-history-table tbody tr:nth-child(even) {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+body.dark-mode .metadata-history-table tbody tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Metadata Change Log Filters */
+.metadata-change-log-filters {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background-color: rgba(0, 0, 0, 0.03);
+    border-radius: var(--radius-sm);
+    margin-bottom: 1rem;
+}
+
+.metadata-change-log-filters select {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--card-background);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.metadata-change-log-filters .button.small {
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+}
+
+/* Metadata history icon in content table */
+.content-actions .button.info {
+    background-color: var(--info-color);
+}
+
+.content-actions .button.info:hover {
+    background-color: #0288d1;
+    transform: translateY(-1px);
+}
+
+/* Metadata history modal specific styling */
+#metadataHistoryModal .modal-body,
+#metadataChangeLogModal .modal-body {
+    padding: 1rem;
+}
+
+#metadataHistoryModal .metadata-history-header,
+#metadataChangeLogModal .metadata-history-header {
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#metadataHistoryModal .metadata-history-header h4,
+#metadataChangeLogModal .metadata-history-header h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary);
+}
+
+#metadataHistoryModal .metadata-history-header .asset-info,
+#metadataChangeLogModal .metadata-history-header .asset-info {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+

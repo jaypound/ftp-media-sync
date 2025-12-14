@@ -407,6 +407,16 @@ class SchedulerJobs:
                                 
                         # Update database
                         with conn.cursor(cursor_factory=None) as update_cursor:
+                            # First get old values for audit logging
+                            update_cursor.execute("""
+                                SELECT content_expiry_date, go_live_date
+                                FROM scheduling_metadata
+                                WHERE asset_id = %s
+                            """, (asset_id,))
+                            old_row = update_cursor.fetchone()
+                            old_expiry_audit = old_row[0] if old_row else None
+                            old_go_live_audit = old_row[1] if old_row else None
+                            
                             update_cursor.execute("""
                                 UPDATE scheduling_metadata 
                                 SET content_expiry_date = %s,
@@ -424,6 +434,29 @@ class SchedulerJobs:
                                 """, (asset_id, expiry_date, go_live_date))
                                 
                         conn.commit()
+                        
+                        # Log changes to audit trail
+                        if old_expiry_audit != expiry_date:
+                            self.db_manager.log_metadata_change(
+                                asset_id=asset_id,
+                                field_name='content_expiry_date',
+                                old_value=old_expiry_audit,
+                                new_value=expiry_date,
+                                changed_by='scheduler_job',
+                                change_source='scheduler_sync',
+                                change_reason=f'Scheduled sync from Castus metadata ({source})'
+                            )
+                        
+                        if old_go_live_audit != go_live_date:
+                            self.db_manager.log_metadata_change(
+                                asset_id=asset_id,
+                                field_name='go_live_date',
+                                old_value=old_go_live_audit,
+                                new_value=go_live_date,
+                                changed_by='scheduler_job',
+                                change_source='scheduler_sync',
+                                change_reason=f'Scheduled sync from Castus metadata ({source})'
+                            )
                         synced += 1
                         if expiry_date or go_live_date:
                             if changed:

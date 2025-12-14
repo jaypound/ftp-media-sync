@@ -2004,6 +2004,176 @@ class PostgreSQLDatabaseManager:
             return []
         finally:
             self._put_connection(conn)
+    
+    def log_metadata_change(self, asset_id, field_name: str, old_value, new_value, 
+                          changed_by: str = 'system', change_source: str = 'api', 
+                          change_reason: str = None, instance_id: int = None) -> int:
+        """Log a metadata change to the audit trail"""
+        # Ensure asset_id is an integer
+        try:
+            asset_id = int(asset_id)
+        except (ValueError, TypeError):
+            logger.error(f"Invalid asset_id: {asset_id} (must be integer)")
+            return None
+            
+        logger.info(f"log_metadata_change called: asset_id={asset_id}, field={field_name}")
+        logger.info(f"  old_value={old_value} (type: {type(old_value)})")
+        logger.info(f"  new_value={new_value} (type: {type(new_value)})")
+        logger.info(f"  changed_by={changed_by}, source={change_source}")
+        
+        if not self.connected:
+            logger.warning("Database not connected")
+            return None
+            
+        conn = self._get_connection()
+        try:
+            # Use regular cursor (not dict cursor) for stored procedures
+            cursor = conn.cursor(cursor_factory=None)
+            
+            # Call the database function
+            cursor.execute("""
+                SELECT log_metadata_change(%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                asset_id, instance_id, field_name, old_value, new_value,
+                changed_by, change_source, change_reason
+            ))
+            
+            result = cursor.fetchone()
+            logger.info(f"Stored procedure result: {result}")
+            
+            # Handle both tuple and dict results
+            if result:
+                if isinstance(result, dict):
+                    log_id = result.get('log_metadata_change')
+                else:
+                    log_id = result[0]
+            else:
+                log_id = None
+            
+            conn.commit()
+            cursor.close()
+            
+            if log_id:
+                logger.info(f"Logged metadata change successfully: log_id={log_id}")
+            else:
+                logger.info(f"No log created (stored procedure returned NULL)")
+                logger.info(f"This happens when old_value IS NOT DISTINCT FROM new_value")
+            
+            return log_id
+            
+        except Exception as e:
+            logger.error(f"Error logging metadata change: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            conn.rollback()
+            return None
+        finally:
+            self._put_connection(conn)
+    
+    def get_asset_audit_history(self, asset_id, field_name: str = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get audit history for a specific asset"""
+        if not self.connected:
+            return []
+            
+        # Ensure asset_id is an integer
+        try:
+            asset_id = int(asset_id)
+        except (ValueError, TypeError):
+            logger.error(f"Invalid asset_id for audit history: {asset_id}")
+            return []
+            
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            if field_name:
+                cursor.execute("""
+                    SELECT * FROM v_metadata_audit_log
+                    WHERE asset_id = %s AND field_name = %s
+                    ORDER BY changed_at DESC
+                    LIMIT %s
+                """, (asset_id, field_name, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM v_metadata_audit_log
+                    WHERE asset_id = %s
+                    ORDER BY changed_at DESC
+                    LIMIT %s
+                """, (asset_id, limit))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            
+            return [dict(row) for row in results]
+            
+        except Exception as e:
+            logger.error(f"Error getting audit history: {str(e)}")
+            return []
+        finally:
+            self._put_connection(conn)
+    
+    def get_all_audit_logs(self, date_from: datetime = None, date_to: datetime = None, 
+                          field_name: str = None, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
+        """Get all audit logs with filtering"""
+        if not self.connected:
+            return {'logs': [], 'total': 0}
+            
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Build the WHERE clause
+            where_clauses = []
+            params = []
+            
+            if date_from:
+                where_clauses.append("changed_at >= %s")
+                params.append(date_from)
+            
+            if date_to:
+                where_clauses.append("changed_at <= %s")
+                params.append(date_to)
+            
+            if field_name:
+                where_clauses.append("field_name = %s")
+                params.append(field_name)
+            
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+            
+            # Get total count
+            cursor.execute(f"""
+                SELECT COUNT(*) as total 
+                FROM v_metadata_audit_log 
+                WHERE {where_sql}
+            """, params)
+            
+            total = cursor.fetchone()['total']
+            
+            # Get paginated results
+            params.extend([limit, offset])
+            cursor.execute(f"""
+                SELECT * FROM v_metadata_audit_log
+                WHERE {where_sql}
+                ORDER BY changed_at DESC
+                LIMIT %s OFFSET %s
+            """, params)
+            
+            results = cursor.fetchall()
+            cursor.close()
+            
+            return {
+                'logs': [dict(row) for row in results],
+                'total': total,
+                'limit': limit,
+                'offset': offset
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting all audit logs: {str(e)}")
+            return {'logs': [], 'total': 0}
+        finally:
+            self._put_connection(conn)
 
 
 # Global database manager instance - will be replaced in database.py

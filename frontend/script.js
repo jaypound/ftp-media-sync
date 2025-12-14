@@ -5932,6 +5932,9 @@ function displayAvailableContent() {
         }
         
         html += `
+                    <button class="button small info" onclick="showMetadataHistory('${contentId}')" title="Metadata History">
+                        <i class="fas fa-history"></i>
+                    </button>
                     <button class="button small warning" onclick="showRenameDialog('${contentId}')" title="Rename/Fix">
                         <i class="fas fa-edit"></i> R
                     </button>
@@ -9662,6 +9665,10 @@ async function syncContentExpiration(contentId) {
     // Show loading notification
     showNotification('Syncing metadata from Castus...', 'info', 10000);
     
+    const syncAssetId = content.id || content._id;
+    console.log('Syncing metadata for asset_id:', syncAssetId);
+    console.log('Content object:', content);
+    
     try {
         const response = await fetch('/api/sync-single-content-metadata', {
             method: 'POST',
@@ -9669,7 +9676,7 @@ async function syncContentExpiration(contentId) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                asset_id: content.id || content._id,
+                asset_id: syncAssetId,
                 file_path: content.file_path || content.file_name,
                 content_type: content.content_type,
                 server: 'source'
@@ -9725,6 +9732,116 @@ async function syncContentExpiration(contentId) {
             `Failed to sync: ${error.message}`,
             'error'
         );
+    }
+}
+
+async function showMetadataHistory(contentId) {
+    console.log('Showing metadata history for content:', contentId);
+    
+    // Find the content item to get asset_id
+    const content = availableContent.find(c => {
+        const itemId = c._id || c.id || c.guid;
+        return itemId == contentId || itemId === contentId || String(itemId) === String(contentId);
+    });
+    
+    if (!content) {
+        showNotification('Content not found', 'error');
+        return;
+    }
+    
+    // Get the asset ID (for PostgreSQL) - must match what was used in sync
+    const assetId = content.id || content._id || content.asset_id;
+    
+    console.log('Found content:', content);
+    console.log('Using asset_id for history lookup:', assetId);
+    
+    try {
+        // Fetch audit history - encode the asset_id for URL safety
+        const encodedAssetId = encodeURIComponent(assetId);
+        console.log('Fetching audit history from:', `/api/metadata-audit/${encodedAssetId}`);
+        
+        const response = await fetch(`/api/metadata-audit/${encodedAssetId}`);
+        const result = await response.json();
+        
+        if (!result.success) {
+            showNotification('Failed to load metadata history', 'error');
+            return;
+        }
+        
+        // Create modal content
+        let modalHtml = `
+            <div class="modal" id="metadataHistoryModal" style="display: block;">
+                <div class="modal-content" style="max-width: 700px;">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-history"></i> Metadata Change History</h3>
+                        <button class="modal-close" onclick="document.getElementById('metadataHistoryModal').remove()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <h4>${content.file_name || content.content_title || 'Unknown'}</h4>
+        `;
+        
+        if (result.history && result.history.length > 0) {
+            modalHtml += `
+                        <div class="metadata-history-table">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date/Time</th>
+                                        <th>Field</th>
+                                        <th>From</th>
+                                        <th>To</th>
+                                        <th>Changed By</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+            `;
+            
+            result.history.forEach(log => {
+                const changedAt = new Date(log.changed_at).toLocaleString();
+                const fieldName = log.field_name === 'content_expiry_date' ? 'Expiration' : 'Go Live';
+                const oldValue = log.old_value ? new Date(log.old_value).toLocaleDateString() : '(not set)';
+                const newValue = log.new_value ? new Date(log.new_value).toLocaleDateString() : '(cleared)';
+                const changeType = log.change_type || 'Updated';
+                
+                modalHtml += `
+                    <tr>
+                        <td>${changedAt}</td>
+                        <td>${fieldName}</td>
+                        <td>${oldValue}</td>
+                        <td>${newValue}</td>
+                        <td>${log.changed_by || 'System'}</td>
+                    </tr>
+                `;
+            });
+            
+            modalHtml += `
+                                </tbody>
+                            </table>
+                        </div>
+            `;
+        } else {
+            modalHtml += `
+                        <p style="text-align: center; color: #666; padding: 20px;">
+                            No metadata changes recorded for this content.
+                        </p>
+            `;
+        }
+        
+        modalHtml += `
+                    </div>
+                    <div class="modal-footer">
+                        <button class="button secondary" onclick="document.getElementById('metadataHistoryModal').remove()">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add modal to page
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+    } catch (error) {
+        console.error('Error fetching metadata history:', error);
+        showNotification('Error loading metadata history', 'error');
     }
 }
 
@@ -14998,6 +15115,7 @@ window.loadAvailableContent = loadAvailableContent;
 window.sortContent = sortContent;
 window.getSortIcon = getSortIcon;
 window.viewContentDetails = viewContentDetails;
+window.showMetadataHistory = showMetadataHistory;
 window.addToTemplate = addToTemplate;
 window.closeContentDetailsModal = closeContentDetailsModal;
 window.updateContentTypeFromDetails = updateContentTypeFromDetails;

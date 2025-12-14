@@ -589,6 +589,188 @@ async function schedulingSaveIndividualExpiration(assetId) {
     }
 }
 
+// Show metadata change log modal
+async function schedulingShowMetadataChangeLog() {
+    try {
+        // Fetch all audit logs
+        const response = await fetch('http://127.0.0.1:5000/api/metadata-audit/all?limit=100');
+        const result = await response.json();
+        
+        if (result.success) {
+            // Create modal to display audit logs
+            const modalHtml = `
+                <div class="modal" id="metadataChangeLogModal" style="display: block;">
+                    <div class="modal-content" style="max-width: 900px;">
+                        <div class="modal-header">
+                            <h3><i class="fas fa-history"></i> Metadata Change Log</h3>
+                            <button class="modal-close" onclick="document.getElementById('metadataChangeLogModal').remove()">&times;</button>
+                        </div>
+                        <div class="modal-body" style="max-height: 600px; overflow-y: auto;">
+                            <div class="metadata-change-log-filters" style="margin-bottom: 1rem;">
+                                <select id="changeLogFieldFilter" onchange="schedulingFilterChangeLog()" style="margin-right: 1rem;">
+                                    <option value="">All Fields</option>
+                                    <option value="content_expiry_date">Expiration Date</option>
+                                    <option value="go_live_date">Go-Live Date</option>
+                                </select>
+                                <button class="button small" onclick="schedulingExportChangeLog()">
+                                    <i class="fas fa-download"></i> Export CSV
+                                </button>
+                            </div>
+                            <div id="changeLogTableContainer">
+                                ${schedulingRenderChangeLogTable(result.logs)}
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="button secondary" onclick="document.getElementById('metadataChangeLogModal').remove()">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Store logs for filtering/export
+            window.metadataChangeLogData = result.logs;
+        } else {
+            if (window.showNotification) {
+                window.showNotification('Failed to load metadata change log', 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching metadata change log:', error);
+        if (window.showNotification) {
+            window.showNotification('Error loading metadata change log', 'error');
+        }
+    }
+}
+
+// Render change log table
+function schedulingRenderChangeLogTable(logs) {
+    if (!logs || logs.length === 0) {
+        return '<p style="text-align: center; padding: 2rem;">No metadata changes recorded</p>';
+    }
+    
+    let html = `
+        <table class="metadata-history-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Date/Time</th>
+                    <th>Asset</th>
+                    <th>Type</th>
+                    <th>Field</th>
+                    <th>Old Value</th>
+                    <th>New Value</th>
+                    <th>Changed By</th>
+                    <th>Source</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    logs.forEach(log => {
+        const changedAt = new Date(log.changed_at);
+        const dateStr = changedAt.toLocaleDateString();
+        const timeStr = changedAt.toLocaleTimeString();
+        
+        const oldValue = log.old_value ? new Date(log.old_value).toLocaleDateString() : 'Not Set';
+        const newValue = log.new_value ? new Date(log.new_value).toLocaleDateString() : 'Cleared';
+        
+        const fieldLabel = log.field_name === 'content_expiry_date' ? 'Expiration' : 'Go-Live';
+        
+        html += `
+            <tr>
+                <td>${dateStr} ${timeStr}</td>
+                <td title="${log.asset_id}">${log.content_title || log.asset_id}</td>
+                <td>${log.content_type || 'N/A'}</td>
+                <td>${fieldLabel}</td>
+                <td>${oldValue}</td>
+                <td>${newValue}</td>
+                <td>${log.changed_by || 'System'}</td>
+                <td>${log.change_source || 'Unknown'}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    return html;
+}
+
+// Filter change log
+function schedulingFilterChangeLog() {
+    const fieldFilter = document.getElementById('changeLogFieldFilter').value;
+    const container = document.getElementById('changeLogTableContainer');
+    
+    if (!window.metadataChangeLogData) return;
+    
+    let filteredLogs = window.metadataChangeLogData;
+    
+    if (fieldFilter) {
+        filteredLogs = filteredLogs.filter(log => log.field_name === fieldFilter);
+    }
+    
+    container.innerHTML = schedulingRenderChangeLogTable(filteredLogs);
+}
+
+// Export change log to CSV
+function schedulingExportChangeLog() {
+    if (!window.metadataChangeLogData || window.metadataChangeLogData.length === 0) {
+        if (window.showNotification) {
+            window.showNotification('No data to export', 'warning');
+        }
+        return;
+    }
+    
+    // Create CSV content
+    let csv = 'Date/Time,Asset ID,Asset Title,Content Type,Field,Old Value,New Value,Changed By,Source,Reason\n';
+    
+    window.metadataChangeLogData.forEach(log => {
+        const changedAt = new Date(log.changed_at).toISOString();
+        const oldValue = log.old_value || '';
+        const newValue = log.new_value || '';
+        const reason = log.change_reason || '';
+        
+        // Escape fields that might contain commas
+        const escapeCSV = (str) => {
+            if (!str) return '';
+            return str.includes(',') || str.includes('"') || str.includes('\n') 
+                ? '"' + str.replace(/"/g, '""') + '"' 
+                : str;
+        };
+        
+        csv += [
+            changedAt,
+            escapeCSV(log.asset_id),
+            escapeCSV(log.content_title || ''),
+            escapeCSV(log.content_type || ''),
+            log.field_name,
+            oldValue,
+            newValue,
+            escapeCSV(log.changed_by || ''),
+            escapeCSV(log.change_source || ''),
+            escapeCSV(reason)
+        ].join(',') + '\n';
+    });
+    
+    // Download CSV
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `metadata_change_log_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    if (window.showNotification) {
+        window.showNotification('Change log exported successfully', 'success');
+    }
+}
+
 // Export functions to global scope
 window.schedulingExpirationInit = schedulingExpirationInit;
 window.schedulingShowExpirationModal = schedulingShowExpirationModal;
@@ -600,6 +782,10 @@ window.schedulingDisplayAvailableContentWithExpiration = schedulingDisplayAvaila
 window.schedulingClearAllExpirations = schedulingClearAllExpirations;
 window.schedulingEditExpiration = schedulingEditExpiration;
 window.schedulingSaveIndividualExpiration = schedulingSaveIndividualExpiration;
+window.schedulingShowMetadataChangeLog = schedulingShowMetadataChangeLog;
+window.schedulingFilterChangeLog = schedulingFilterChangeLog;
+window.schedulingExportChangeLog = schedulingExportChangeLog;
+window.schedulingRenderChangeLogTable = schedulingRenderChangeLogTable;
 
 // Initialize when loaded
 if (document.readyState === 'loading') {
