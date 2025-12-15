@@ -1285,7 +1285,6 @@ class PostgreSQLDatabaseManager:
                     'topics': topics_by_asset.get(asset_id, []),  # Add topics from tags
                     'engagement_score': row['engagement_score'],
                     'analysis_completed': row['analysis_completed'],
-                    'featured': row.get('featured', False),  # Add featured field at root level
                     'scheduling': {
                         'available_for_scheduling': row.get('available_for_scheduling', True),
                         'content_expiry_date': row['content_expiry_date'],
@@ -1293,7 +1292,8 @@ class PostgreSQLDatabaseManager:
                         'last_scheduled_date': row['last_scheduled_date'],
                         'total_airings': row.get('total_airings', 0),
                         'priority_score': float(row['priority_score']) if row['priority_score'] else 0,
-                        'optimal_timeslots': row.get('optimal_timeslots', [])
+                        'optimal_timeslots': row.get('optimal_timeslots', []),
+                        'featured': row.get('featured', False)  # Add featured field inside scheduling
                     }
                 }
                 content_list.append(content)

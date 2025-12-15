@@ -5911,7 +5911,7 @@ function displayAvailableContent() {
                 <div class="content-featured" style="text-align: center;">
                     <input type="checkbox" 
                            class="featured-checkbox" 
-                           ${content.featured ? 'checked' : ''} 
+                           ${content.scheduling?.featured ? 'checked' : ''} 
                            onchange="updateFeaturedStatus('${contentId}', this.checked)"
                            title="Mark as featured for heavy rotation">
                 </div>
@@ -14867,11 +14867,9 @@ async function executeAutomation(selectedFile, fileName, programmingDelay, curre
                 log(`  Schedule ID: ${importResult.schedule_id}`, 'info');
                 log(`  Items imported: ${importResult.items_count}`, 'info');
                 
-                // Check if log file exists and offer to view
+                // Log file exists but don't interrupt the flow
                 if (importResult.log_file) {
-                    if (confirm('Schedule imported successfully. Would you like to view the import log?')) {
-                        showImportDebugLog();
-                    }
+                    log('✅ Schedule imported successfully. Import log available if needed.', 'info');
                 }
             } else {
                 log(`⚠️ Auto-import failed: ${importResult.message}`, 'warning');
