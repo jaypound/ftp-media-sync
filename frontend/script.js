@@ -9365,7 +9365,7 @@ function showContentDeleteOptionsModal(contentId) {
     document.getElementById('contentDeleteServersOptions').style.display = 'none';
     document.getElementById('deleteContentFromSource').checked = false;
     document.getElementById('deleteContentFromTarget').checked = true;
-    document.getElementById('contentDeleteDryRun').checked = true;
+    document.getElementById('contentDeleteDryRun').checked = false;
     
     // Add event listener for radio button changes
     const radioButtons = document.querySelectorAll('input[name="deleteContentOption"]');

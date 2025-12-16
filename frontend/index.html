@@ -2106,11 +2106,11 @@
                             <span style="font-size: 0.9em; color: #666;">(Keep the actual file)</span>
                         </label>
                     </div>
-                    <div class="delete-option">
+                    <div class="delete-option" style="display: none;">
                         <label>
-                            <input type="radio" name="deleteContentOption" value="database-and-files">
+                            <input type="radio" name="deleteContentOption" value="database-and-files" disabled>
                             <i class="fas fa-trash-alt"></i> Database Entry and Files
-                            <span style="font-size: 0.9em; color: #666;">(Delete from servers)</span>
+                            <span style="font-size: 0.9em; color: #666;">(Not functioning - Delete from servers)</span>
                         </label>
                     </div>
                 </div>
@@ -2138,7 +2138,7 @@
                 
                 <div class="dry-run-option">
                     <label>
-                        <input type="checkbox" id="contentDeleteDryRun" checked>
+                        <input type="checkbox" id="contentDeleteDryRun">
                         <i class="fas fa-shield-alt"></i> Dry Run (simulate deletion without actually deleting)
                     </label>
                 </div>
