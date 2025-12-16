@@ -254,3 +254,182 @@ function schedulingDisplayScheduleList(schedules) {
 // Export functions to global scope
 window.schedulingDisplayScheduleDetails = schedulingDisplayScheduleDetails;
 window.schedulingDisplayScheduleList = schedulingDisplayScheduleList;
+
+// All Audit Log Functions
+let allAuditLogs = [];
+
+function openAllAuditLogModal() {
+    const modal = document.getElementById('allAuditLogModal');
+    if (!modal) {
+        console.error('All audit log modal not found');
+        return;
+    }
+    
+    modal.style.display = 'block';
+    loadAllAuditLogs();
+}
+
+function closeAllAuditLogModal() {
+    const modal = document.getElementById('allAuditLogModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function loadAllAuditLogs() {
+    const contentDiv = document.getElementById('allAuditLogContent');
+    contentDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-spinner fa-spin" style="font-size: 2em;"></i><p>Loading audit logs...</p></div>';
+    
+    try {
+        const response = await fetch('/api/metadata-audit-log?limit=1000');
+        const data = await response.json();
+        
+        if (data.success) {
+            allAuditLogs = data.logs || [];
+            displayAuditLogs(allAuditLogs);
+            updateAuditLogCount(allAuditLogs.length);
+        } else {
+            contentDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--error-color);"><i class="fas fa-exclamation-circle" style="font-size: 2em;"></i><p>Failed to load audit logs</p></div>';
+        }
+    } catch (error) {
+        console.error('Error loading audit logs:', error);
+        contentDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--error-color);"><i class="fas fa-exclamation-circle" style="font-size: 2em;"></i><p>Error loading audit logs</p></div>';
+    }
+}
+
+function displayAuditLogs(logs) {
+    const contentDiv = document.getElementById('allAuditLogContent');
+    
+    if (!logs || logs.length === 0) {
+        contentDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);"><i class="fas fa-info-circle" style="font-size: 2em;"></i><p>No audit logs found</p></div>';
+        return;
+    }
+    
+    let html = '<table class="audit-log-table" style="width: 100%; border-collapse: collapse;">';
+    html += '<thead><tr style="background: var(--card-bg); border-bottom: 2px solid var(--border-color);">';
+    html += '<th style="padding: 12px; text-align: left;">Date/Time</th>';
+    html += '<th style="padding: 12px; text-align: left;">File</th>';
+    html += '<th style="padding: 12px; text-align: left;">Field</th>';
+    html += '<th style="padding: 12px; text-align: left;">Change</th>';
+    html += '<th style="padding: 12px; text-align: left;">Type</th>';
+    html += '<th style="padding: 12px; text-align: left;">Source</th>';
+    html += '</tr></thead>';
+    html += '<tbody>';
+    
+    logs.forEach((log, index) => {
+        const changeDate = new Date(log.changed_at);
+        const formattedDate = changeDate.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        });
+        
+        const rowStyle = index % 2 === 0 ? 'background: var(--bg-color);' : 'background: var(--card-bg);';
+        
+        html += `<tr style="${rowStyle} border-bottom: 1px solid var(--border-color);">`;
+        html += `<td style="padding: 12px; font-size: 0.9em;">${formattedDate}</td>`;
+        html += `<td style="padding: 12px; font-weight: 500;">${log.content_title || log.asset_id || 'Unknown'}</td>`;
+        html += `<td style="padding: 12px;">${log.field_name || 'Unknown'}</td>`;
+        html += `<td style="padding: 12px;">`;
+        
+        if (log.old_value || log.new_value) {
+            const oldVal = log.old_value || '<em>empty</em>';
+            const newVal = log.new_value || '<em>empty</em>';
+            html += `<div style="font-size: 0.85em;">`;
+            html += `<div><span style="color: var(--text-secondary);">From:</span> ${oldVal}</div>`;
+            html += `<div><span style="color: var(--text-secondary);">To:</span> ${newVal}</div>`;
+            html += `</div>`;
+        } else {
+            html += '<em>No details</em>';
+        }
+        
+        html += `</td>`;
+        html += `<td style="padding: 12px;">${log.change_type || 'Unknown'}</td>`;
+        html += `<td style="padding: 12px;">${log.change_source || 'Unknown'}</td>`;
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    contentDiv.innerHTML = html;
+}
+
+function filterAuditLogs() {
+    const typeFilter = document.getElementById('auditLogTypeFilter').value;
+    const contentFilter = document.getElementById('auditLogContentFilter').value;
+    const searchTerm = document.getElementById('auditLogSearchInput').value.toLowerCase();
+    
+    let filtered = allAuditLogs;
+    
+    // Filter by activity type
+    if (typeFilter) {
+        filtered = filtered.filter(log => log.change_type === typeFilter);
+    }
+    
+    // Filter by content type
+    if (contentFilter) {
+        filtered = filtered.filter(log => {
+            const title = (log.content_title || '').toLowerCase();
+            return title.includes(`_${contentFilter}_`) || title.includes(`_${contentFilter.toLowerCase()}_`);
+        });
+    }
+    
+    // Filter by search term
+    if (searchTerm) {
+        filtered = filtered.filter(log => {
+            const title = (log.content_title || '').toLowerCase();
+            const field = (log.field_name || '').toLowerCase();
+            const oldVal = (log.old_value || '').toLowerCase();
+            const newVal = (log.new_value || '').toLowerCase();
+            return title.includes(searchTerm) || 
+                   field.includes(searchTerm) ||
+                   oldVal.includes(searchTerm) ||
+                   newVal.includes(searchTerm);
+        });
+    }
+    
+    displayAuditLogs(filtered);
+    updateAuditLogCount(filtered.length);
+}
+
+function updateAuditLogCount(count) {
+    const countSpan = document.getElementById('auditLogCount');
+    if (countSpan) {
+        countSpan.textContent = `(${count} logs)`;
+    }
+}
+
+async function exportAuditLogs() {
+    try {
+        const typeFilter = document.getElementById('auditLogTypeFilter').value;
+        const contentFilter = document.getElementById('auditLogContentFilter').value;
+        
+        let url = '/api/metadata-audit/export?';
+        if (typeFilter) url += `field_name=${encodeURIComponent(typeFilter)}&`;
+        
+        const response = await fetch(url);
+        const blob = await response.blob();
+        
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `audit_log_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        showNotification('Audit log exported successfully', 'success');
+    } catch (error) {
+        console.error('Error exporting audit logs:', error);
+        showNotification('Failed to export audit logs', 'error');
+    }
+}
+
+// Export the audit log functions
+window.openAllAuditLogModal = openAllAuditLogModal;
+window.closeAllAuditLogModal = closeAllAuditLogModal;
+window.filterAuditLogs = filterAuditLogs;
+window.exportAuditLogs = exportAuditLogs;

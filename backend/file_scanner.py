@@ -78,6 +78,11 @@ class FileScanner:
                 file_name = file_info.get('name', 'unknown')
                 file_logger.debug(f"Checking file: {file_name} - Size: {file_info.get('size', 0)}")
                 
+                # Special logging for LM files
+                if '_LM_' in file_name:
+                    logger.info(f"Found LM file: {file_name} in {path}")
+                    file_logger.info(f"LM FILE FOUND: {file_name} in {path}")
+                
                 if self._should_include_file(file_info, filters):
                     # Add relative path information
                     file_info = self._add_relative_path(file_info, path, base_path)
@@ -143,6 +148,13 @@ class FileScanner:
             
             included_count = 0
             for file_info in current_files:
+                file_name = file_info.get('name', 'unknown')
+                
+                # Special logging for LM files
+                if '_LM_' in file_name:
+                    logger.info(f"Found LM file in recursive scan: {file_name} in {current_path}")
+                    file_logger.info(f"LM FILE IN RECURSIVE: {file_name} in {current_path}")
+                
                 if self._should_include_file(file_info, filters):
                     # Add relative path information
                     file_info = self._add_relative_path(file_info, current_path, base_path)
@@ -188,6 +200,23 @@ class FileScanner:
         # Create a new file_info dict with path information
         updated_file_info = file_info.copy()
         updated_file_info['path'] = relative_path
+        updated_file_info['full_path'] = current_path_clean + '/' + file_info['name']
+        
+        # Detect content type from filename
+        content_type = self._detect_content_type(file_info['name'])
+        if content_type:
+            updated_file_info['content_type'] = content_type
+            # Log every file with detected content type for debugging
+            logger.info(f"File: {file_info['name']} - Detected type: {content_type} - Path: {current_path_clean}")
+            
+            # Check if file is in correct folder
+            is_misplaced = self._check_if_misplaced(content_type, current_path_clean)
+            updated_file_info['is_misplaced'] = is_misplaced
+            
+            # Debug logging for misplaced files
+            if is_misplaced:
+                logger.warning(f"MISPLACED FILE DETECTED: {file_info['name']} (type: {content_type}) in {current_path_clean}")
+                file_logger.warning(f"MISPLACED: {file_info['name']} - Type: {content_type} - Path: {current_path_clean}")
         
         # Debug logging
         logger.debug(f"File: {file_info['name']} -> Relative path: {relative_path}")
@@ -270,6 +299,111 @@ class FileScanner:
         except Exception as e:
             logger.error(f"Error getting subdirectories: {str(e)}")
             return []
+    
+    def _detect_content_type(self, filename):
+        """Detect content type from filename patterns like _MTG_, _PKG_, etc."""
+        import re
+        
+        # Common content type patterns in filenames
+        content_types = [
+            'AN', 'ATLD', 'BMP', 'IM', 'IMOW', 'IA', 'LM', 'MTG', 
+            'MAF', 'PKG', 'PMO', 'PSA', 'SZL', 'SPP', 'SSP'
+        ]
+        
+        # Look for pattern like _TYPE_ in filename
+        for content_type in content_types:
+            pattern = f'_{content_type}_'
+            if pattern in filename.upper():
+                return content_type
+        
+        # Also check for pattern at start like 251210_SPP_
+        match = re.match(r'^\d{6}_([A-Z]+)_', filename)
+        if match and match.group(1) in content_types:
+            return match.group(1)
+        
+        return None
+    
+    def _check_if_misplaced(self, content_type, folder_path):
+        """Check if a file with given content type is in the wrong folder"""
+        # Skip checking files in FILL folders and all subfolders
+        folder_lower = folder_path.lower()
+        if '/fill/' in folder_lower or folder_lower.endswith('/fill'):
+            return False
+            
+        # Map content types to expected folder patterns based on actual folder structure
+        folder_mappings = {
+            'AN': ['atlanta now'],  # ATLANTA NOW folder
+            'ATLD': ['atl direct'],  # ATL DIRECT folder
+            'BMP': ['bumps'],  # BUMPS folder
+            'IM': ['interstitials', 'interstitial'],  # Not seen in folder list
+            'IMOW': ['imow'],  # IMOW folder
+            'IA': ['inside atlanta'],  # INSIDE ATLANTA folder
+            'LM': ['legislative minute'],  # LEGISLATIVE MINUTE folder
+            'MTG': ['meetings'],  # MEETINGS folder
+            'MAF': ['moving atlanta forward'],  # MOVING ATLANTA FORWARD folder
+            'PKG': ['pkgs'],  # PKGS folder
+            'PMO': ['promos'],  # PROMOS folder
+            'PSA': ['psas'],  # PSAs folder
+            'SZL': ['sizzles'],  # SIZZLES folder
+            'SPP': ['special projects'],  # SPECIAL PROJECTS folder
+            'SSP': ['special projects']  # Also SPECIAL PROJECTS folder
+        }
+        
+        # Get expected folders for this content type
+        expected_folders = folder_mappings.get(content_type, [])
+        if not expected_folders:
+            return False
+        
+        # Check if current folder contains any of the expected folder names
+        folder_lower = folder_path.lower()
+        
+        # Debug logging
+        logger.debug(f"Checking if {content_type} file is misplaced in: {folder_path}")
+        logger.debug(f"Expected folders: {expected_folders}")
+        logger.debug(f"Folder path (lowercase): {folder_lower}")
+        
+        # Check if any expected folder name is in the path
+        for expected in expected_folders:
+            if expected in folder_lower:
+                logger.debug(f"Found expected folder '{expected}' in path - file is correctly placed")
+                return False  # File is in correct folder
+        
+        # Additional check: if file is ONLY in a generic content folder (not in a specific content type folder)
+        # Don't allow generic folders to override specific content type checks
+        # For example: /ATL26 On-Air Content/PKGS should still check for correct content type
+        generic_folders = ['media', 'videos', 'files', 'archive']
+        
+        # Special handling: if path ends with a content-specific folder like PKGS, don't allow generic override
+        path_parts = folder_lower.split('/')
+        # Filter out empty parts from path
+        path_parts = [p for p in path_parts if p]
+        last_folder = path_parts[-1] if path_parts else ''
+        
+        # More debug logging with path parts
+        logger.debug(f"Path parts: {path_parts}")
+        logger.debug(f"Last folder: '{last_folder}'")
+        
+        # If the last folder in path is a known content folder, enforce strict checking
+        known_content_folders = ['pkgs', 'meetings', 'legislative minute', 'promos', 'psas', 
+                                'bumps', 'inside atlanta', 'moving atlanta forward', 'special projects']
+        
+        # Log detailed debug info for LM files
+        if content_type == 'LM':
+            logger.warning(f"LM FILE CHECK: path={folder_path}, last_folder={last_folder}, expected={expected_folders}")
+        
+        if last_folder in known_content_folders:
+            logger.debug(f"In specific content folder '{last_folder}' - strict checking enforced")
+            # Don't check generic folders, enforce content type match
+        else:
+            # Check generic folders only if not in a specific content folder
+            for generic in generic_folders:
+                if generic in folder_lower:
+                    logger.debug(f"Found generic folder '{generic}' - allowing file placement")
+                    return False
+        
+        # File appears to be misplaced
+        logger.info(f"FILE IS MISPLACED: {content_type} file not in any of these folders: {expected_folders}")
+        return True
     
     def get_file_info(self, file_path, base_path):
         """Get file information for a specific file path"""

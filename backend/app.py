@@ -2077,6 +2077,40 @@ def test_connection():
         logger.error(error_msg, exc_info=True)
         return jsonify({'success': False, 'message': error_msg})
 
+@app.route('/api/check-misplaced', methods=['GET'])
+def check_misplaced():
+    """Debug endpoint to check for misplaced files"""
+    try:
+        # Scan target server for misplaced files
+        if 'target' not in ftp_managers or not ftp_managers['target'].is_connection_alive():
+            return jsonify({'success': False, 'message': 'Target server not connected'})
+        
+        scanner = FileScanner(ftp_managers['target'])
+        path = '/mnt/main/ATL26 On-Air Content'
+        files = scanner.scan_directory(path, {'extensions': ['mp4', 'mkv', 'avi', 'mov']})
+        
+        # Filter for misplaced files
+        misplaced = []
+        for file_info in files:
+            if file_info.get('is_misplaced', False) and file_info.get('content_type'):
+                misplaced.append({
+                    'filename': file_info['name'],
+                    'content_type': file_info['content_type'],
+                    'current_folder': file_info.get('full_path', '').rsplit('/', 1)[0],
+                    'full_path': file_info.get('full_path', '')
+                })
+        
+        return jsonify({
+            'success': True,
+            'total_files': len(files),
+            'misplaced_count': len(misplaced),
+            'misplaced_files': misplaced
+        })
+        
+    except Exception as e:
+        logger.error(f"Check misplaced error: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': str(e)})
+
 @app.route('/api/scan-files', methods=['POST'])
 def scan_files():
     logger.info("=== SCAN FILES REQUEST ===")
@@ -2107,22 +2141,46 @@ def scan_files():
         # Create a lookup map for analyzed files
         analyzed_map = {af['file_path']: af for af in analyzed_files}
         
+        # Collect misplaced files
+        misplaced_files = []
+        
         # Add analysis status to each file
         for file_info in files:
             file_path = file_info.get('path', file_info.get('name', ''))
             file_info['is_analyzed'] = file_path in analyzed_map
             if file_info['is_analyzed']:
                 file_info['analysis_info'] = analyzed_map[file_path]
+            
+            # Check if file is misplaced
+            if file_info.get('is_misplaced', False) and file_info.get('content_type'):
+                misplaced_files.append({
+                    'filename': file_info['name'],
+                    'content_type': file_info['content_type'],
+                    'current_folder': file_info.get('full_path', '').rsplit('/', 1)[0],
+                    'server': server_type
+                })
         
         analyzed_count = len(analyzed_files)
         logger.info(f"Analysis status check completed: {analyzed_count}/{len(files)} files analyzed")
+        logger.info(f"Found {len(misplaced_files)} misplaced files")
         
-        return jsonify({
+        response_data = {
             'success': True, 
             'files': files,
             'count': len(files),
             'analyzed_count': analyzed_count
-        })
+        }
+        
+        # Add misplaced files notification if any found
+        if misplaced_files:
+            response_data['misplaced_files'] = misplaced_files
+            response_data['misplaced_count'] = len(misplaced_files)
+            logger.info(f"Returning {len(misplaced_files)} misplaced files in response")
+            # Debug log the first few misplaced files
+            for i, mf in enumerate(misplaced_files[:3]):
+                logger.info(f"Misplaced file {i+1}: {mf}")
+        
+        return jsonify(response_data)
         
     except Exception as e:
         error_msg = f"Scan error: {str(e)}"

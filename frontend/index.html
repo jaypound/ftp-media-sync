@@ -532,7 +532,13 @@
             <div class="scheduling-grid">
                 <!-- Available Content Section -->
                 <div class="scheduling-card collapsed">
-                    <h3><i class="fas fa-video"></i> Available Content <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d; margin-left: 0.5rem;"></span></h3>
+                    <h3>
+                        <i class="fas fa-video"></i> Available Content 
+                        <span id="contentCount" style="font-weight: normal; font-size: 0.9em; color: #6c757d; margin-left: 0.5rem;"></span>
+                        <button id="viewAllAuditLog" class="btn btn-sm" style="float: right; font-size: 0.85em; padding: 0.25rem 0.75rem;" title="View all metadata audit logs">
+                            <i class="fas fa-history"></i> Audit Log
+                        </button>
+                    </h3>
                     <div class="card-content">
                         <div class="content-filters">
                         <div class="filter-row">
@@ -2369,6 +2375,60 @@
             </div>
             <div class="modal-footer">
                 <button class="button secondary" onclick="fillGraphicsCloseHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Audit Log Modal -->
+    <div id="allAuditLogModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 1200px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-history"></i> All Metadata Audit Logs</h3>
+                <button class="modal-close" onclick="closeAllAuditLogModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <div class="filter-row" style="display: flex; gap: 10px; align-items: center;">
+                        <select id="auditLogTypeFilter" onchange="filterAuditLogs()">
+                            <option value="">All Activity Types</option>
+                            <option value="manual_update">Manual Updates</option>
+                            <option value="ai_enrichment">AI Enrichment</option>
+                            <option value="auto_detection">Auto Detection</option>
+                        </select>
+                        <select id="auditLogContentFilter" onchange="filterAuditLogs()">
+                            <option value="">All Content Types</option>
+                            <option value="AN">Atlanta Now</option>
+                            <option value="ATLD">ATL Direct</option>
+                            <option value="BMP">Bumps</option>
+                            <option value="IMOW">IMOW</option>
+                            <option value="IM">Inclusion Months</option>
+                            <option value="IA">Inside Atlanta</option>
+                            <option value="LM">Legislative Minute</option>
+                            <option value="MTG">Meetings</option>
+                            <option value="MAF">Moving Atlanta Forward</option>
+                            <option value="PKG">Packages</option>
+                            <option value="PMO">Promos</option>
+                            <option value="PSA">PSAs</option>
+                            <option value="SZL">Sizzles</option>
+                            <option value="SPP">Special Projects</option>
+                            <option value="OTHER">Other</option>
+                        </select>
+                        <input type="text" id="auditLogSearchInput" placeholder="Search files..." style="flex: 1; padding: 0.5rem;" onkeyup="filterAuditLogs()">
+                        <span id="auditLogCount" style="color: var(--text-secondary); font-size: 0.9em;"></span>
+                    </div>
+                </div>
+                <div id="allAuditLogContent" style="max-height: 600px; overflow-y: auto;">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 2em;"></i>
+                        <p>Loading audit logs...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="exportAuditLogs()">
+                    <i class="fas fa-download"></i> Export CSV
+                </button>
+                <button class="button primary" onclick="closeAllAuditLogModal()">Close</button>
             </div>
         </div>
     </div>

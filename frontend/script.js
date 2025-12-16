@@ -1854,6 +1854,14 @@ async function scanFiles() {
         sourceFiles = sourceResult.files;
         log(`Found ${sourceFiles.length} files on source server`);
         
+        // Check for misplaced files in source
+        if (sourceResult.misplaced_files && sourceResult.misplaced_files.length > 0) {
+            log(`⚠️ Found ${sourceResult.misplaced_files.length} misplaced files on source server:`, 'warning');
+            sourceResult.misplaced_files.forEach(misplaced => {
+                log(`  • ${misplaced.content_type} file "${misplaced.filename}" in folder: ${misplaced.current_folder}`, 'warning');
+            });
+        }
+        
         // Debug: Log a sample of source files
         if (sourceFiles.length > 0) {
             log(`Debug: Sample source files (first 3):`);
@@ -1882,6 +1890,19 @@ async function scanFiles() {
         targetFiles = targetResult.files;
         log(`Found ${targetFiles.length} files on target server`);
         
+        // Debug log the entire result to check misplaced_files
+        console.log('Target scan result:', targetResult);
+        console.log('Misplaced files in result:', targetResult.misplaced_files);
+        console.log('Misplaced count in result:', targetResult.misplaced_count);
+        
+        // Check for misplaced files in target
+        if (targetResult.misplaced_files && targetResult.misplaced_files.length > 0) {
+            log(`⚠️ Found ${targetResult.misplaced_files.length} misplaced files on target server:`, 'warning');
+            targetResult.misplaced_files.forEach(misplaced => {
+                log(`  • ${misplaced.content_type} file "${misplaced.filename}" in folder: ${misplaced.current_folder}`, 'warning');
+            });
+        }
+        
         // Debug: Log a sample of target files
         if (targetFiles.length > 0) {
             log(`Debug: Sample target files (first 3):`);
@@ -1891,6 +1912,38 @@ async function scanFiles() {
         }
         
         log('File scan completed', 'success');
+        
+        // Store results globally to avoid scope issues
+        window.lastSourceResult = sourceResult;
+        window.lastTargetResult = targetResult;
+        
+        // Check if we have any misplaced files to report
+        const allMisplacedFiles = [];
+        console.log('Checking for misplaced files...');
+        console.log('sourceResult exists?', !!sourceResult);
+        console.log('targetResult exists?', !!targetResult);
+        console.log('sourceResult.misplaced_files:', sourceResult?.misplaced_files);
+        console.log('targetResult.misplaced_files:', targetResult?.misplaced_files);
+        
+        if (sourceResult && sourceResult.misplaced_files && sourceResult.misplaced_files.length > 0) {
+            console.log('Adding source misplaced files:', sourceResult.misplaced_files.length);
+            allMisplacedFiles.push(...sourceResult.misplaced_files);
+        }
+        if (targetResult && targetResult.misplaced_files && targetResult.misplaced_files.length > 0) {
+            console.log('Adding target misplaced files:', targetResult.misplaced_files.length);
+            allMisplacedFiles.push(...targetResult.misplaced_files);
+        }
+        
+        console.log('Total misplaced files found:', allMisplacedFiles.length);
+        console.log('All misplaced files:', allMisplacedFiles);
+        
+        // Show misplaced files notification if any found
+        if (allMisplacedFiles.length > 0) {
+            console.log('Calling showMisplacedFilesNotification with:', allMisplacedFiles);
+            showMisplacedFilesNotification(allMisplacedFiles);
+        } else {
+            console.log('No misplaced files to show');
+        }
         
         // Display scanned files
         displayScannedFiles();
@@ -10110,6 +10163,14 @@ async function updateThemeFromDetails(contentId) {
 document.addEventListener('DOMContentLoaded', function() {
     initializeSchedulingDates();
     loadSchedulingConfig();
+    
+    // Add event listener for the audit log button
+    const auditLogButton = document.getElementById('viewAllAuditLog');
+    if (auditLogButton) {
+        auditLogButton.addEventListener('click', function() {
+            openAllAuditLogModal();
+        });
+    }
 });
 
 // Load scheduling configuration from backend
@@ -15641,6 +15702,9 @@ async function scanSelectedFolders() {
             const onAirSourceFiles = sourceResult.files;
             log(`Found ${onAirSourceFiles.length} files in On-Air Content (source)`);
             
+            // Store the source result globally for misplaced files check
+            window.lastSourceResult = sourceResult;
+            
             // Scan target
             const targetResponse = await fetch('/api/scan-files', {
                 method: 'POST',
@@ -15659,6 +15723,34 @@ async function scanSelectedFolders() {
             
             const onAirTargetFiles = targetResult.files;
             log(`Found ${onAirTargetFiles.length} files in On-Air Content (target)`);
+            
+            // Store the target result globally for misplaced files check
+            window.lastTargetResult = targetResult;
+            
+            // Check for misplaced files here
+            console.log('Target scan result:', targetResult);
+            console.log('Misplaced files in result:', targetResult.misplaced_files);
+            console.log('Misplaced count in result:', targetResult.misplaced_count);
+            
+            // Check if we have any misplaced files to report
+            const allMisplacedFiles = [];
+            
+            if (sourceResult.misplaced_files && sourceResult.misplaced_files.length > 0) {
+                console.log('Adding source misplaced files:', sourceResult.misplaced_files.length);
+                allMisplacedFiles.push(...sourceResult.misplaced_files);
+            }
+            if (targetResult.misplaced_files && targetResult.misplaced_files.length > 0) {
+                console.log('Adding target misplaced files:', targetResult.misplaced_files.length);
+                allMisplacedFiles.push(...targetResult.misplaced_files);
+            }
+            
+            console.log('Total misplaced files found:', allMisplacedFiles.length);
+            
+            // Show misplaced files notification if any found
+            if (allMisplacedFiles.length > 0) {
+                console.log('Calling showMisplacedFilesNotification with:', allMisplacedFiles);
+                showMisplacedFilesNotification(allMisplacedFiles);
+            }
             
             // Add to main arrays with folder info
             onAirSourceFiles.forEach(file => {
@@ -18688,6 +18780,61 @@ async function removeMissingFiles() {
     }
 }
 
+// Function to show misplaced files notification
+function showMisplacedFilesNotification(misplacedFiles) {
+    // Create modal HTML
+    const modalHtml = `
+        <div id="misplacedFilesModal" class="modal" style="display: block;">
+            <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+                <div class="modal-header">
+                    <h3><i class="fas fa-exclamation-triangle" style="color: #ff9800;"></i> Files Found in Wrong Folders</h3>
+                    <button class="modal-close" onclick="closeMisplacedFilesModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom: 20px;">
+                        The following files appear to be in the wrong folders based on their content type:
+                    </p>
+                    <div class="misplaced-files-list">
+                        ${misplacedFiles.map(file => `
+                            <div class="misplaced-file-item" style="padding: 10px; border-bottom: 1px solid var(--border-color); margin-bottom: 10px;">
+                                <div style="font-weight: bold; margin-bottom: 5px;">
+                                    <i class="fas fa-file-video"></i> ${file.filename}
+                                </div>
+                                <div style="color: var(--text-secondary); font-size: 0.9em;">
+                                    <div><strong>Content Type:</strong> ${file.content_type}</div>
+                                    <div><strong>Current Location:</strong> ${file.server.toUpperCase()} - ${file.current_folder}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="info-box" style="margin-top: 20px;">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Recommendation:</strong> Move these files to their appropriate folders to maintain proper organization.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="button secondary" onclick="closeMisplacedFilesModal()">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to page
+    const modalContainer = document.createElement('div');
+    modalContainer.innerHTML = modalHtml;
+    document.body.appendChild(modalContainer);
+}
+
+// Function to close misplaced files modal
+function closeMisplacedFilesModal() {
+    const modal = document.getElementById('misplacedFilesModal');
+    if (modal) {
+        modal.parentElement.remove();
+    }
+}
+
 // Make functions available globally
 window.showMissingFilesModal = showMissingFilesModal;
 window.closeMissingFilesModal = closeMissingFilesModal;
@@ -18695,6 +18842,18 @@ window.proceedWithMissingFiles = proceedWithMissingFiles;
 window.removeMissingFiles = removeMissingFiles;
 window.continueCreateSchedule = continueCreateSchedule;
 window.updateFileAnalysisStatus = updateFileAnalysisStatus;
+window.showMisplacedFilesNotification = showMisplacedFilesNotification;
+window.closeMisplacedFilesModal = closeMisplacedFilesModal;
+
+// Debug function to manually show misplaced files
+window.debugShowMisplacedFiles = function() {
+    if (window.lastTargetResult?.misplaced_files) {
+        console.log('Showing misplaced files from last scan:', window.lastTargetResult.misplaced_files);
+        showMisplacedFilesNotification(window.lastTargetResult.misplaced_files);
+    } else {
+        console.log('No misplaced files found in last scan');
+    }
+};
 
 // FTP Keep-Alive System for Scheduling Tab
 let ftpKeepAliveInterval = null;
