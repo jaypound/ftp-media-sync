@@ -1,0 +1,17 @@
+{
+    "enabled": false,
+    "comment": "Set enabled to true to activate fair holiday greeting rotation",
+    "min_time_between_plays": {
+        "hours": 2
+    },
+    "max_plays_per_day": 3,
+    "max_plays_per_week": 10,
+    "fair_rotation_weight": 0.9,
+    "date_range": {
+        "start": "2025-12-01",
+        "end": "2026-01-15"
+    },
+    "priority_boost_unplayed": 1000,
+    "replay_delay_minutes": 120,
+    "log_level": "INFO"
+}

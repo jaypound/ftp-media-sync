@@ -3660,6 +3660,7 @@ def reorder_schedule_items():
 def search_schedule_content(schedule_id, search_term):
     """Search for content within a schedule"""
     logger.info(f"=== SEARCH SCHEDULE CONTENT: schedule_id={schedule_id}, search_term='{search_term}' ===")
+    logger.info(f"Starting search at: {datetime.now().isoformat()}")
     try:
         from psycopg2.extras import RealDictCursor
         import json
@@ -3679,9 +3680,18 @@ def search_schedule_content(schedule_id, search_term):
             if not schedule_info:
                 raise ValueError("Schedule not found")
             
-            # Check if this is a weekly schedule (duration > 24 hours)
+            # Check if this is a weekly schedule
             total_seconds = float(schedule_info.get('total_duration_seconds', 0) or 0)
-            is_weekly_schedule = total_seconds > 86400  # More than 24 hours
+            schedule_name = schedule_info.get('schedule_name', '').lower()
+            
+            # Multiple ways to detect weekly schedule:
+            # 1. Duration > 24 hours
+            # 2. Name contains 'weekly'
+            # 3. Will check cumulative duration later
+            is_weekly_schedule = (total_seconds > 86400) or ('weekly' in schedule_name)
+            
+            logger.info(f"Schedule info: name='{schedule_info['schedule_name']}', air_date={schedule_info['air_date']}, total_seconds={total_seconds}")
+            logger.info(f"Initial weekly detection: duration_based={total_seconds > 86400}, name_based={'weekly' in schedule_name}, is_weekly={is_weekly_schedule}")
             
             # Search for content in schedule items
             # Search in file_name, content_title, and content_type fields
@@ -3715,10 +3725,22 @@ def search_schedule_content(schedule_id, search_term):
             cumulative_seconds = 0
             item_start_times = {}
             
-            for item in all_items:
+            logger.info(f"Building cumulative start times for {len(all_items)} items...")
+            for idx, item in enumerate(all_items):
                 item_start_times[item['id']] = cumulative_seconds
                 duration = float(item['scheduled_duration_seconds'] or 0)
+                
+                if idx < 5 or item['file_name'].lower().find(search_term.lower()) != -1:  # Log first 5 or matching items
+                    logger.info(f"Item {idx}: id={item['id']}, file='{item['file_name']}', cumulative_start={cumulative_seconds}s ({cumulative_seconds/86400:.2f} days), duration={duration}s")
+                
                 cumulative_seconds += duration
+            
+            logger.info(f"Total cumulative time: {cumulative_seconds}s ({cumulative_seconds/86400:.2f} days)")
+            
+            # Double-check weekly schedule detection based on cumulative time
+            if not is_weekly_schedule and cumulative_seconds > 86400:
+                logger.info(f"Detected weekly schedule based on cumulative duration: {cumulative_seconds/86400:.2f} days")
+                is_weekly_schedule = True
             
             # Now search for matching items
             cursor.execute("""
@@ -3758,8 +3780,13 @@ def search_schedule_content(schedule_id, search_term):
             # Log first few items to debug
             if len(matches) > 0:
                 logger.info(f"Total matches: {len(matches)}, is_weekly: {is_weekly_schedule}")
-                for i, match in enumerate(matches[:3]):
-                    logger.info(f"Match {i}: id={match['id']}, file={match['file_name']}, metadata={match.get('metadata')}")
+                logger.info(f"Schedule air_date: {schedule_date}")
+                for i, match in enumerate(matches[:5]):
+                    metadata_str = match.get('metadata')
+                    if metadata_str:
+                        logger.info(f"Match {i}: id={match['id']}, file={match['file_name'][:50]}, has_metadata=True, metadata_type={type(metadata_str).__name__}")
+                    else:
+                        logger.info(f"Match {i}: id={match['id']}, file={match['file_name'][:50]}, has_metadata=False")
             
             for match in matches:
                 if is_weekly_schedule:
@@ -3776,7 +3803,8 @@ def search_schedule_content(schedule_id, search_term):
                     if metadata and isinstance(metadata, dict) and 'day_offset' in metadata:
                         # Use metadata day_offset
                         days_offset = metadata['day_offset']
-                        logger.info(f"File: {match['file_name']}, using metadata day_offset: {days_offset}")
+                        logger.info(f"[METADATA PATH] File: {match['file_name'][:50]}, day_offset from metadata: {days_offset}")
+                        
                         # Parse the scheduled time
                         scheduled_time = match['scheduled_start_time']
                         if isinstance(scheduled_time, str):
@@ -3784,22 +3812,38 @@ def search_schedule_content(schedule_id, search_term):
                             hours = int(time_parts[0])
                             minutes = int(time_parts[1])
                             seconds = float(time_parts[2]) if len(time_parts) > 2 else 0
+                            logger.info(f"  Parsed time string: {scheduled_time} -> {hours}h {minutes}m {seconds}s")
                         else:
                             hours = scheduled_time.hour
                             minutes = scheduled_time.minute
                             seconds = scheduled_time.second + (scheduled_time.microsecond / 1000000)
+                            logger.info(f"  Time object: {hours}h {minutes}m {seconds}s")
                         
                         scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
                         scheduled_datetime = scheduled_datetime + timedelta(days=days_offset, hours=hours, minutes=minutes, seconds=seconds)
+                        logger.info(f"  Final datetime: {scheduled_datetime} (day: {scheduled_datetime.strftime('%A')})")
                     else:
                         # Fallback: use cumulative time to determine actual day
                         cumulative_start = item_start_times.get(match['id'], 0)
                         days_offset = int(cumulative_start // 86400)
                         time_in_day = cumulative_start % 86400
-                        logger.info(f"File: {match['file_name']}, fallback - cumulative_start: {cumulative_start}, days_offset: {days_offset}")
+                        
+                        hours_in_day = int(time_in_day // 3600)
+                        minutes_in_day = int((time_in_day % 3600) // 60)
+                        seconds_in_day = time_in_day % 60
+                        
+                        logger.info(f"[FALLBACK PATH] File: {match['file_name'][:50]}")
+                        logger.info(f"  Item ID: {match['id']}, cumulative_start: {cumulative_start}s")
+                        logger.info(f"  Days offset: {days_offset}, time in day: {time_in_day}s ({hours_in_day}:{minutes_in_day:02d}:{seconds_in_day:02.0f})")
+                        
+                        if not metadata:
+                            logger.info(f"  No metadata found")
+                        else:
+                            logger.info(f"  Metadata exists but no day_offset: {metadata}")
                         
                         scheduled_datetime = datetime.combine(schedule_date, datetime.min.time())
                         scheduled_datetime = scheduled_datetime + timedelta(days=days_offset, seconds=time_in_day)
+                        logger.info(f"  Final datetime: {scheduled_datetime} (day: {scheduled_datetime.strftime('%A')})")
                 else:
                     # For daily schedules, use the scheduled_start_time directly
                     scheduled_time = match['scheduled_start_time']
@@ -3837,6 +3881,21 @@ def search_schedule_content(schedule_id, search_term):
                     'content_type': match['content_type'],
                     'asset_id': match['asset_id']
                 })
+            
+            # Log summary of day distribution
+            if is_weekly_schedule and len(processed_matches) > 0:
+                day_counts = {}
+                for match in processed_matches:
+                    dt = datetime.fromisoformat(match['scheduled_start'])
+                    day_name = dt.strftime('%A')
+                    day_counts[day_name] = day_counts.get(day_name, 0) + 1
+                
+                logger.info("=== SEARCH RESULTS DAY DISTRIBUTION ===")
+                for day in ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']:
+                    count = day_counts.get(day, 0)
+                    if count > 0:
+                        logger.info(f"  {day}: {count} items")
+                logger.info(f"Total unique days: {len(unique_days)}")
             
             return {
                 'search_term': search_term,
