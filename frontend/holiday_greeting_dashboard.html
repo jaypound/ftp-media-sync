@@ -379,7 +379,7 @@
 
         async function loadDashboard() {
             try {
-                const response = await fetch('http://127.0.0.1:5000/api/holiday-greeting-stats');
+                const response = await fetch('/api/holiday-greeting-stats');
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -556,7 +556,7 @@
 
         async function exportStats() {
             try {
-                const response = await fetch('http://127.0.0.1:5000/api/holiday-greeting-stats');
+                const response = await fetch('/api/holiday-greeting-stats');
                 const data = await response.json();
                 
                 if (!data.success) {
@@ -597,7 +597,7 @@
             }
 
             try {
-                const response = await fetch('http://127.0.0.1:5000/api/holiday-greeting-reset', {
+                const response = await fetch('/api/holiday-greeting-reset', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ confirm: true })

@@ -1137,7 +1137,7 @@ async function autoGenerationLoadStatus() {
     }
     
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/auto-generation/status');
+        const response = await fetch('/api/auto-generation/status');
         const result = await response.json();
         
         if (result.success) {
@@ -1182,7 +1182,7 @@ async function autoGenerationLoadStatus() {
             }
             
             // Load config for checkbox
-            const configResponse = await fetch('http://127.0.0.1:5000/api/auto-generation/config');
+            const configResponse = await fetch('/api/auto-generation/config');
             const configResult = await configResponse.json();
             
             if (configResult.success) {
@@ -1216,7 +1216,7 @@ async function autoGenerationToggle() {
         const checkbox = document.getElementById('autoGenerationEnabled');
         const enabled = checkbox.checked;
         
-        const response = await fetch('http://127.0.0.1:5000/api/auto-generation/config', {
+        const response = await fetch('/api/auto-generation/config', {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
@@ -1257,7 +1257,7 @@ function autoGenerationRefreshStatus() {
 
 async function autoGenerationShowHistory() {
     try {
-        const response = await fetch('http://127.0.0.1:5000/api/auto-generation/history');
+        const response = await fetch('/api/auto-generation/history');
         const result = await response.json();
         
         if (result.success) {
