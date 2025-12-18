@@ -11,6 +11,7 @@ from psycopg2.extras import RealDictCursor
 from database import db_manager
 import json
 import random
+from holiday_greeting_integration import HolidayGreetingIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,10 @@ class PostgreSQLScheduler:
         self.rotation_index = 0
         self.target_duration_seconds = 24 * 60 * 60  # 24 hours in seconds
         self._config_loaded = False
+        
+        # Initialize holiday greeting integration (DISABLED by default)
+        self.holiday_integration = HolidayGreetingIntegration(db_manager)
+        logger.info(f"Holiday greeting integration initialized (enabled: {self.holiday_integration.enabled})")
     
     def _load_config_if_needed(self):
         """Load configuration on first use to avoid circular imports"""
@@ -390,6 +395,15 @@ class PostgreSQLScheduler:
                 # Mark content items with the delay factor used to retrieve them
                 for item in available_content:
                     item['_delay_factor_used'] = factor
+                
+                # Apply holiday greeting fair rotation filter if enabled
+                if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                    available_content = self.holiday_integration.filter_available_content(
+                        available_content, 
+                        duration_category, 
+                        exclude_ids
+                    )
+                
                 return available_content
         
         # No content found even with no delays - check if we can reset
@@ -1296,7 +1310,8 @@ class PostgreSQLScheduler:
                     # Add metadata for theme conflict checking
                     'content_type': content.get('content_type'),
                     'theme': content.get('theme'),
-                    'duration_category': content.get('duration_category')
+                    'duration_category': content.get('duration_category'),
+                    'file_name': content.get('file_name')  # Add for holiday greeting tracking
                 }
                 
                 scheduled_items.append(item)
@@ -1545,6 +1560,14 @@ class PostgreSQLScheduler:
                 ))
             
             conn.commit()
+            
+            # Record holiday greeting scheduling if applicable
+            if hasattr(self, 'holiday_integration') and asset and 'file_name' in asset:
+                self.holiday_integration.record_scheduled_item(
+                    asset['asset_id'], 
+                    asset['file_name']
+                )
+            
             cursor.close()
             return True
             
@@ -1716,6 +1739,13 @@ class PostgreSQLScheduler:
                     'scheduled'
                 ))
                 saved_count += 1
+                
+                # Record holiday greeting scheduling if applicable
+                if hasattr(self, 'holiday_integration') and 'file_name' in item:
+                    self.holiday_integration.record_scheduled_item(
+                        item['asset_id'], 
+                        item['file_name']
+                    )
             
             conn.commit()
             cursor.close()
@@ -2867,7 +2897,8 @@ class PostgreSQLScheduler:
                         # Add metadata for theme conflict checking
                         'content_type': content.get('content_type'),
                         'theme': content.get('theme'),
-                        'duration_category': content.get('duration_category')
+                        'duration_category': content.get('duration_category'),
+                        'file_name': content.get('file_name')  # Add for holiday greeting tracking
                     }
                     
                     scheduled_items.append(item)
@@ -3289,7 +3320,8 @@ class PostgreSQLScheduler:
                         # Add metadata for theme conflict checking
                         'content_type': content.get('content_type'),
                         'theme': content.get('theme'),
-                        'duration_category': content.get('duration_category')
+                        'duration_category': content.get('duration_category'),
+                        'file_name': content.get('file_name')  # Add for holiday greeting tracking
                     }
                     
                     scheduled_items.append(item)

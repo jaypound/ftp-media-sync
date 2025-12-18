@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holiday Greeting Rotation Dashboard - FTP Media Sync</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .dashboard-header {
+            background: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.1em;
+        }
+
+        .status-indicator .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.disabled .dot {
+            background: #6b7280;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .dashboard-card {
+            background: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .dashboard-card h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--primary-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .distribution-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 600px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .distribution-item {
+            display: grid;
+            grid-template-columns: 200px 1fr 60px;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+
+        .distribution-item .name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .distribution-bar {
+            background: var(--background-color);
+            border-radius: 4px;
+            height: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .distribution-fill {
+            background: var(--primary-color);
+            height: 100%;
+            transition: width 0.3s ease;
+            min-width: 2px;
+        }
+
+        .distribution-fill.zero {
+            background: #ef4444;
+            width: 5px !important;
+        }
+
+        .distribution-fill.low {
+            background: #f59e0b;
+        }
+
+        .distribution-fill.good {
+            background: #22c55e;
+        }
+
+        .distribution-count {
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: var(--background-color);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid var(--border-color);
+        }
+
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .metric-label {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        .fairness-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .fairness-bar {
+            width: 100px;
+            height: 8px;
+            background: var(--background-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .fairness-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .next-up-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .next-up-item {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .next-up-item:last-child {
+            border-bottom: none;
+        }
+
+        .next-up-item .badge {
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+        }
+
+        .next-up-item .badge.zero {
+            background: #ef4444;
+        }
+
+        .recent-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-size: 0.9em;
+        }
+
+        .recent-item {
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            gap: 10px;
+        }
+
+        .recent-item:last-child {
+            border-bottom: none;
+        }
+
+        .recent-item .time {
+            color: var(--text-secondary);
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .refresh-indicator {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+
+        .warning-banner {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .dark-mode .warning-banner {
+            background: #451a03;
+            color: #fbbf24;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-content">
+            <div class="navbar-brand">
+                <i class="fas fa-sync-alt"></i>
+                <span>FTP Media Sync for Castus Servers</span>
+            </div>
+            <div class="navbar-nav">
+                <a href="index.html" class="nav-item" style="text-decoration: none;">
+                    <i class="fas fa-home"></i>
+                    Dashboard
+                </a>
+                <button class="nav-item active">
+                    <i class="fas fa-snowflake"></i>
+                    Holiday Greetings
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="dashboard-container">
+        <div class="dashboard-header">
+            <div>
+                <h2><i class="fas fa-snowflake"></i> Holiday Greeting Rotation Dashboard</h2>
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="dot"></span>
+                    <span class="status-text">Loading...</span>
+                </div>
+            </div>
+            <div class="action-buttons">
+                <button class="button secondary" onclick="refreshDashboard()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+                <button class="button secondary" onclick="exportStats()">
+                    <i class="fas fa-download"></i> Export CSV
+                </button>
+                <button class="button danger" onclick="resetCounts()">
+                    <i class="fas fa-undo"></i> Reset Counts
+                </button>
+            </div>
+        </div>
+
+        <div class="warning-banner" id="warningBanner">
+            <i class="fas fa-exclamation-triangle"></i> 
+            <span id="warningText"></span>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-value" id="totalGreetings">-</div>
+                <div class="metric-label">Total Greetings</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="totalPlays">-</div>
+                <div class="metric-label">Total Plays</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="avgPlays">-</div>
+                <div class="metric-label">Average Plays</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">
+                    <span id="fairnessScore">-</span>%
+                    <div class="fairness-indicator">
+                        <div class="fairness-bar">
+                            <div class="fairness-fill" id="fairnessFill"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="metric-label">Fairness Score</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="neverPlayed">-</div>
+                <div class="metric-label">Never Played</div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="dashboard-card">
+                <h3><i class="fas fa-chart-bar"></i> Current Distribution</h3>
+                <div class="distribution-chart" id="distributionChart">
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 2em;"></i>
+                        <p>Loading distribution...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard-card">
+                <h3><i class="fas fa-list-ol"></i> Next Up to Schedule</h3>
+                <ul class="next-up-list" id="nextUpList">
+                    <li style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        Loading...
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <h3><i class="fas fa-history"></i> Recently Scheduled</h3>
+            <ul class="recent-list" id="recentList">
+                <li style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                    Loading...
+                </li>
+            </ul>
+        </div>
+
+        <div class="refresh-indicator" id="refreshIndicator">
+            Auto-refresh in <span id="refreshCountdown">30</span> seconds
+        </div>
+    </div>
+
+    <script>
+        let refreshTimer;
+        let countdownTimer;
+        let refreshCountdown = 30;
+
+        async function loadDashboard() {
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/holiday-greeting-stats');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+
+                if (!data.success) {
+                    showError(data.message || 'Unknown error occurred');
+                    return;
+                }
+
+                updateStatus(data.enabled);
+                updateMetrics(data);
+                updateDistribution(data.distribution);
+                updateNextUp(data.next_up);
+                updateRecent(data.recent);
+                checkWarnings(data);
+
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                showError(`Failed to connect to backend: ${error.message}`);
+            }
+        }
+
+        function updateStatus(enabled) {
+            const indicator = document.getElementById('statusIndicator');
+            if (enabled) {
+                indicator.classList.remove('disabled');
+                indicator.querySelector('.status-text').textContent = 'Fair Rotation Active';
+            } else {
+                indicator.classList.add('disabled');
+                indicator.querySelector('.status-text').textContent = 'System Disabled';
+            }
+        }
+
+        function updateMetrics(data) {
+            const dist = data.distribution || {};
+            document.getElementById('totalGreetings').textContent = dist.unique_greetings || 0;
+            document.getElementById('totalPlays').textContent = dist.total_plays || 0;
+            document.getElementById('avgPlays').textContent = (dist.average_plays || 0).toFixed(1);
+            document.getElementById('fairnessScore').textContent = data.fairness_score || 0;
+            document.getElementById('neverPlayed').textContent = data.never_played || 0;
+
+            // Update fairness bar
+            const fairnessFill = document.getElementById('fairnessFill');
+            const score = data.fairness_score || 0;
+            fairnessFill.style.width = score + '%';
+            
+            if (score >= 80) {
+                fairnessFill.style.background = '#22c55e';
+            } else if (score >= 50) {
+                fairnessFill.style.background = '#f59e0b';
+            } else {
+                fairnessFill.style.background = '#ef4444';
+            }
+        }
+
+        function updateDistribution(distribution) {
+            const chart = document.getElementById('distributionChart');
+            
+            if (!distribution || !distribution.distribution) {
+                chart.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">No data available</p>';
+                return;
+            }
+
+            const items = Object.entries(distribution.distribution)
+                .sort((a, b) => b[1].count - a[1].count);
+
+            const maxCount = Math.max(...items.map(([_, data]) => data.count));
+
+            let html = '';
+            for (const [name, data] of items) {
+                const percentage = maxCount > 0 ? (data.count / maxCount * 100) : 0;
+                let colorClass = 'good';
+                if (data.count === 0) colorClass = 'zero';
+                else if (data.count < distribution.average_plays * 0.5) colorClass = 'low';
+
+                html += `
+                    <div class="distribution-item">
+                        <div class="name" title="${name}">${name}</div>
+                        <div class="distribution-bar">
+                            <div class="distribution-fill ${colorClass}" style="width: ${percentage}%"></div>
+                        </div>
+                        <div class="distribution-count">${data.count}</div>
+                    </div>
+                `;
+            }
+
+            chart.innerHTML = html;
+        }
+
+        function updateNextUp(nextUp) {
+            const list = document.getElementById('nextUpList');
+            
+            if (!nextUp || nextUp.length === 0) {
+                list.innerHTML = '<li style="text-align: center; color: var(--text-secondary);">No data available</li>';
+                return;
+            }
+
+            let html = '';
+            for (const item of nextUp.slice(0, 10)) {
+                const badgeClass = item.scheduled_count === 0 ? 'zero' : '';
+                html += `
+                    <li class="next-up-item">
+                        <span>${item.file_name}</span>
+                        <span class="badge ${badgeClass}">${item.scheduled_count} plays</span>
+                    </li>
+                `;
+            }
+
+            list.innerHTML = html;
+        }
+
+        function updateRecent(recent) {
+            const list = document.getElementById('recentList');
+            
+            if (!recent || recent.length === 0) {
+                list.innerHTML = '<li style="text-align: center; color: var(--text-secondary);">No recent schedules</li>';
+                return;
+            }
+
+            let html = '';
+            for (const item of recent) {
+                const time = new Date(item.last_scheduled).toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                });
+                html += `
+                    <li class="recent-item">
+                        <span class="time">${time}</span>
+                        <span>${item.file_name}</span>
+                    </li>
+                `;
+            }
+
+            list.innerHTML = html;
+        }
+
+        function checkWarnings(data) {
+            const banner = document.getElementById('warningBanner');
+            const text = document.getElementById('warningText');
+            
+            let warnings = [];
+            
+            if (data.never_played > 5) {
+                warnings.push(`${data.never_played} greetings have never been played`);
+            }
+            
+            if (data.fairness_score < 50) {
+                warnings.push(`Fairness score is low (${data.fairness_score}%)`);
+            }
+
+            if (warnings.length > 0) {
+                text.textContent = warnings.join(' • ');
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+
+        function showError(message) {
+            const banner = document.getElementById('warningBanner');
+            const text = document.getElementById('warningText');
+            text.textContent = 'Error: ' + message;
+            banner.style.display = 'block';
+        }
+
+        function refreshDashboard() {
+            loadDashboard();
+            resetRefreshTimer();
+        }
+
+        async function exportStats() {
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/holiday-greeting-stats');
+                const data = await response.json();
+                
+                if (!data.success) {
+                    alert('Failed to export data');
+                    return;
+                }
+
+                // Create CSV content
+                let csv = 'Holiday Greeting,Play Count,Last Scheduled\n';
+                if (data.distribution && data.distribution.distribution) {
+                    for (const [name, info] of Object.entries(data.distribution.distribution)) {
+                        csv += `"${name}",${info.count},"${info.last_scheduled}"\n`;
+                    }
+                }
+
+                // Download CSV
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `holiday_greetings_${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+
+            } catch (error) {
+                console.error('Error exporting:', error);
+                alert('Failed to export data');
+            }
+        }
+
+        async function resetCounts() {
+            if (!confirm('This will reset all play counts to 0. Are you sure?')) {
+                return;
+            }
+
+            if (!confirm('This action cannot be undone. Continue?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/holiday-greeting-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert(data.message);
+                    refreshDashboard();
+                } else {
+                    alert('Failed to reset counts: ' + data.message);
+                }
+
+            } catch (error) {
+                console.error('Error resetting counts:', error);
+                alert('Failed to reset counts');
+            }
+        }
+
+        function resetRefreshTimer() {
+            clearInterval(refreshTimer);
+            clearInterval(countdownTimer);
+            refreshCountdown = 30;
+            document.getElementById('refreshCountdown').textContent = refreshCountdown;
+
+            countdownTimer = setInterval(() => {
+                refreshCountdown--;
+                document.getElementById('refreshCountdown').textContent = refreshCountdown;
+            }, 1000);
+
+            refreshTimer = setInterval(() => {
+                refreshDashboard();
+            }, 30000);
+        }
+
+        // Initialize
+        loadDashboard();
+        resetRefreshTimer();
+
+        // Theme detection - apply dark mode by default
+        const theme = localStorage.getItem('theme') || 'dark';
+        if (theme === 'dark') {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+    </script>
+</body>
+</html>

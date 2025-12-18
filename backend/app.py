@@ -17654,6 +17654,167 @@ def auto_generation_history():
             'message': str(e)
         })
 
+@app.route('/api/holiday-greeting-stats', methods=['GET'])
+def get_holiday_greeting_stats():
+    """Get statistics for holiday greeting rotation dashboard"""
+    conn = None
+    try:
+        # Get the scheduler instance from the global scheduler_postgres
+        scheduler = scheduler_postgres
+        
+        if not hasattr(scheduler, 'holiday_integration'):
+            return jsonify({
+                'success': False,
+                'message': 'Holiday greeting integration not initialized'
+            })
+        
+        integration = scheduler.holiday_integration
+        
+        # Get current distribution
+        distribution = integration.get_current_distribution()
+        
+        # Get next up to schedule
+        from psycopg2.extras import RealDictCursor
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        try:
+            # Get greetings that haven't been scheduled yet or have lowest count
+            cursor.execute("""
+                SELECT 
+                    hgr.asset_id,
+                    hgr.file_name,
+                    hgr.scheduled_count,
+                    hgr.last_scheduled,
+                    a.duration_category
+                FROM holiday_greeting_rotation hgr
+                JOIN assets a ON hgr.asset_id = a.id
+                ORDER BY 
+                    hgr.scheduled_count ASC,
+                    hgr.last_scheduled ASC NULLS FIRST
+                LIMIT 10
+            """)
+            next_up = []
+            for row in cursor.fetchall():
+                next_up.append({
+                    'asset_id': row['asset_id'],
+                    'file_name': row['file_name'].replace('251210_SSP_', '').replace('251209_SPP_', '').replace('.mp4', ''),
+                    'scheduled_count': row['scheduled_count'],
+                    'last_scheduled': row['last_scheduled'].isoformat() if row['last_scheduled'] else 'Never',
+                    'duration_category': row['duration_category']
+                })
+            
+            # Get recently scheduled
+            cursor.execute("""
+                SELECT 
+                    hgr.file_name,
+                    hgr.last_scheduled,
+                    hgr.scheduled_count
+                FROM holiday_greeting_rotation hgr
+                WHERE hgr.last_scheduled IS NOT NULL
+                ORDER BY hgr.last_scheduled DESC
+                LIMIT 10
+            """)
+            recent = []
+            for row in cursor.fetchall():
+                recent.append({
+                    'file_name': row['file_name'].replace('251210_SSP_', '').replace('251209_SPP_', '').replace('.mp4', ''),
+                    'last_scheduled': row['last_scheduled'].isoformat() if row['last_scheduled'] else None,
+                    'scheduled_count': row['scheduled_count']
+                })
+        finally:
+            cursor.close()
+            
+        # Calculate fairness score
+        if distribution.get('distribution'):
+            counts = [item['count'] for item in distribution['distribution'].values()]
+            if counts:
+                avg = sum(counts) / len(counts)
+                variance = sum((x - avg) ** 2 for x in counts) / len(counts)
+                std_dev = variance ** 0.5
+                # Fairness score: 100% when std_dev is 0, decreases as variance increases
+                fairness_score = max(0, 100 - (std_dev / (avg + 1) * 100)) if avg > 0 else 0
+            else:
+                fairness_score = 100
+        else:
+            fairness_score = 0
+        
+        # Count never played
+        never_played = sum(1 for item in distribution.get('distribution', {}).values() if item['count'] == 0)
+        
+        return jsonify({
+            'success': True,
+            'enabled': integration.enabled,
+            'distribution': distribution,
+            'next_up': next_up,
+            'recent': recent,
+            'fairness_score': round(fairness_score, 1),
+            'never_played': never_played,
+            'config': {
+                'date_range': integration.scheduler.config.get('date_range') if integration.scheduler else None
+            }
+        })
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error getting holiday greeting stats: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+    finally:
+        if conn:
+            db_manager._put_connection(conn)
+
+@app.route('/api/holiday-greeting-reset', methods=['POST'])
+def reset_holiday_greeting_counts():
+    """Reset all holiday greeting counts (admin function)"""
+    conn = None
+    try:
+        # Check if user wants to reset
+        data = request.json
+        if not data.get('confirm'):
+            return jsonify({
+                'success': False,
+                'message': 'Please confirm reset'
+            })
+        
+        from psycopg2.extras import RealDictCursor
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        try:
+            # Reset all counts
+            cursor.execute("""
+                UPDATE holiday_greeting_rotation
+                SET scheduled_count = 0,
+                    last_scheduled = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+            """)
+            
+            affected = cursor.rowcount
+            conn.commit()
+        finally:
+            cursor.close()
+        
+        logger.info(f"Reset holiday greeting counts for {affected} items")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Reset {affected} holiday greeting counts'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error resetting holiday greeting counts: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+    finally:
+        if conn:
+            db_manager._put_connection(conn)
+
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")
     print("Backend will be available at: http://127.0.0.1:5000")

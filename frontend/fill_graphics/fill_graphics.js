@@ -1130,6 +1130,12 @@ window.updateGenerateButton = fillGraphicsUpdateGenerateButton;
 
 // Auto Generation Functions
 async function autoGenerationLoadStatus() {
+    // Only proceed if we're on a page with auto generation UI
+    const autoGenCard = document.querySelector('.auto-generation-card');
+    if (!autoGenCard) {
+        return; // Silently exit if not on the right page
+    }
+    
     try {
         const response = await fetch('http://127.0.0.1:5000/api/auto-generation/status');
         const result = await response.json();
@@ -1198,7 +1204,10 @@ async function autoGenerationLoadStatus() {
         }
     } catch (error) {
         console.error('Error loading auto generation status:', error);
-        showNotification('Error loading auto generation status', 'error');
+        // Only show notification if we're on the fill graphics page
+        if (document.querySelector('.auto-generation-card')) {
+            showNotification('Error loading auto generation status', 'error');
+        }
     }
 }
 

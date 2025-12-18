@@ -1,5 +1,5 @@
 {
-    "enabled": false,
+    "enabled": true,
     "comment": "Set enabled to true to activate fair holiday greeting rotation",
     "min_time_between_plays": {
         "hours": 2
