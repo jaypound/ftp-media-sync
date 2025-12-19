@@ -24,9 +24,20 @@ class PostgreSQLScheduler:
         self.target_duration_seconds = 24 * 60 * 60  # 24 hours in seconds
         self._config_loaded = False
         
-        # Initialize holiday greeting integration (DISABLED by default)
-        self.holiday_integration = HolidayGreetingIntegration(db_manager)
-        logger.info(f"Holiday greeting integration initialized (enabled: {self.holiday_integration.enabled})")
+        # Defer holiday greeting integration initialization until database is ready
+        self.holiday_integration = None
+    
+    def _ensure_holiday_integration(self):
+        """Initialize holiday integration if not already done"""
+        if self.holiday_integration is None:
+            try:
+                self.holiday_integration = HolidayGreetingIntegration(db_manager)
+                logger.info(f"Holiday greeting integration initialized (enabled: {self.holiday_integration.enabled})")
+            except Exception as e:
+                logger.error(f"Failed to initialize holiday greeting integration: {e}")
+                # Create a disabled integration as fallback
+                self.holiday_integration = HolidayGreetingIntegration(None)
+                self.holiday_integration.enabled = False
     
     def _load_config_if_needed(self):
         """Load configuration on first use to avoid circular imports"""
@@ -397,12 +408,21 @@ class PostgreSQLScheduler:
                     item['_delay_factor_used'] = factor
                 
                 # Apply holiday greeting fair rotation filter if enabled
-                if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
-                    available_content = self.holiday_integration.filter_available_content(
-                        available_content, 
-                        duration_category, 
-                        exclude_ids
-                    )
+                self._ensure_holiday_integration()
+                if hasattr(self, 'holiday_integration'):
+                    logger.info(f"Holiday integration exists, enabled={self.holiday_integration.enabled}")
+                    if self.holiday_integration.enabled:
+                        logger.info(f"Applying holiday greeting filter for {duration_category}")
+                        available_content = self.holiday_integration.filter_available_content(
+                            available_content, 
+                            duration_category, 
+                            exclude_ids,
+                            schedule_date
+                        )
+                    else:
+                        logger.info("Holiday integration is disabled")
+                else:
+                    logger.warning("No holiday_integration attribute found")
                 
                 return available_content
         
@@ -678,6 +698,7 @@ class PostgreSQLScheduler:
             # Get delay configuration
             base_delay = 0
             additional_delay = 0
+            featured_delay = 2.0  # Default featured delay
             
             if not ignore_delays:
                 if delay_reduction_factor == 0.0:
@@ -815,6 +836,7 @@ class PostgreSQLScheduler:
                 query_parts.append("""
                     AND (
                         sm.last_scheduled_date IS NULL 
+                        OR sm.last_scheduled_date > %s  -- Content scheduled in the future is available
                         OR EXTRACT(EPOCH FROM (%s - sm.last_scheduled_date)) / 3600 >= 
                             CASE 
                                 WHEN EXISTS (
@@ -826,7 +848,7 @@ class PostgreSQLScheduler:
                             END
                     )
                 """)
-                params.extend([compare_date, featured_delay, base_delay, additional_delay])
+                params.extend([compare_date, compare_date, featured_delay, base_delay, additional_delay])
             
             # Remove invalid existence check - scheduled_items doesn't have available_for_scheduling column
             # The available_for_scheduling check is already done via scheduling_metadata table above
@@ -927,6 +949,11 @@ class PostgreSQLScheduler:
             self._config_loaded = False
             self._load_config_if_needed()
             
+            # Reset holiday greeting session tracking for new schedule
+            self._ensure_holiday_integration()
+            if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                self.holiday_integration.reset_session()
+            
             # Parse date
             schedule_dt = datetime.strptime(schedule_date, '%Y-%m-%d')
             
@@ -957,6 +984,30 @@ class PostgreSQLScheduler:
                     'success': False,
                     'message': 'Failed to create schedule record'
                 }
+            
+            # Set up holiday greeting daily assignments if enabled
+            self._ensure_holiday_integration()
+            if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                logger.info("Setting up holiday greeting daily assignments for daily schedule")
+                try:
+                    # Create daily assignments for the single day
+                    from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
+                    daily_assignments = HolidayGreetingDailyAssignments(db_manager)
+                    success = daily_assignments.assign_greetings_for_schedule(
+                        schedule_id, 
+                        schedule_dt,
+                        num_days=1
+                    )
+                    
+                    if success:
+                        # Set the current schedule ID in holiday integration
+                        self._ensure_holiday_integration()
+                        self.holiday_integration.set_current_schedule(schedule_id)
+                        logger.info(f"Successfully assigned holiday greetings for schedule {schedule_id}")
+                    else:
+                        logger.warning("Failed to assign holiday greeting daily assignments")
+                except Exception as e:
+                    logger.error(f"Error setting up holiday greeting daily assignments: {e}")
             
             # Build the schedule
             scheduled_items = []
@@ -1022,6 +1073,9 @@ class PostgreSQLScheduler:
                 logger.info(f"Using default featured config")
                 
             while total_duration < self.target_duration_seconds:
+                # Calculate remaining hours for use throughout this iteration
+                remaining_hours = (self.target_duration_seconds - total_duration) / 3600
+                
                 # Determine if we should prioritize featured content based on time of day
                 should_try_featured = False
                 
@@ -1069,7 +1123,6 @@ class PostgreSQLScheduler:
                     )
                 
                 if not available_content:
-                    remaining_hours = (self.target_duration_seconds - total_duration) / 3600
                     logger.warning(f"No available content for category: {duration_category} even without delays. "
                                  f"Remaining hours in day: {remaining_hours:.1f}")
                     
@@ -1562,6 +1615,7 @@ class PostgreSQLScheduler:
             conn.commit()
             
             # Record holiday greeting scheduling if applicable
+            self._ensure_holiday_integration()
             if hasattr(self, 'holiday_integration') and asset and 'file_name' in asset:
                 self.holiday_integration.record_scheduled_item(
                     asset['asset_id'], 
@@ -1741,6 +1795,7 @@ class PostgreSQLScheduler:
                 saved_count += 1
                 
                 # Record holiday greeting scheduling if applicable
+                self._ensure_holiday_integration()
                 if hasattr(self, 'holiday_integration') and 'file_name' in item:
                     self.holiday_integration.record_scheduled_item(
                         item['asset_id'], 
@@ -2238,6 +2293,11 @@ class PostgreSQLScheduler:
             self._config_loaded = False
             self._load_config_if_needed()
             
+            # Reset holiday greeting session tracking for new schedule
+            self._ensure_holiday_integration()
+            if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                self.holiday_integration.reset_session()
+            
             # Parse start date and ensure it's a Sunday
             start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
             
@@ -2247,6 +2307,43 @@ class PostgreSQLScheduler:
                 days_since_sunday = (start_date_obj.weekday() + 1) % 7
                 start_date_obj = start_date_obj - timedelta(days=days_since_sunday)
                 logger.info(f"Adjusted start date to Sunday: {start_date_obj.strftime('%Y-%m-%d')}")
+            
+            # Set up holiday greeting daily assignments BEFORE creating schedules
+            self._ensure_holiday_integration()
+            if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                logger.info("Setting up holiday greeting daily assignments for weekly schedule")
+                try:
+                    # We need to create a temporary schedule ID for the assignments
+                    # Since we're creating 7 separate daily schedules, we'll use a special approach
+                    # We'll get the first available schedule ID and use that for assignments
+                    conn = db_manager._get_connection()
+                    cursor = conn.cursor()
+                    
+                    # Get the next schedule ID that will be created
+                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM schedules")
+                    next_schedule_id = cursor.fetchone()[0]
+                    cursor.close()
+                    db_manager._put_connection(conn)
+                    
+                    from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
+                    daily_assignments = HolidayGreetingDailyAssignments(db_manager)
+                    success = daily_assignments.assign_greetings_for_schedule(
+                        next_schedule_id,  # Use the predicted next schedule ID
+                        start_date_obj,
+                        num_days=7
+                    )
+                    
+                    if success:
+                        logger.info(f"Successfully pre-assigned holiday greetings for week starting {start_date}")
+                        # Set the schedule ID so the holiday integration knows to use daily assignments
+                        self._ensure_holiday_integration()
+                        self.holiday_integration.set_current_schedule(next_schedule_id)
+                    else:
+                        logger.warning("Failed to pre-assign holiday greeting daily assignments")
+                except Exception as e:
+                    logger.error(f"Error setting up holiday greeting daily assignments: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
             
             created_schedules = []
             failed_days = []
@@ -2272,6 +2369,11 @@ class PostgreSQLScheduler:
                             'total_duration': result.get('schedule_details', {}).get('total_duration', 0)
                         })
                         logger.info(f"✅ Created schedule for {day_name}")
+                        
+                        # Update holiday integration with the actual schedule ID for this day
+                        self._ensure_holiday_integration()
+                        if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                            self.holiday_integration.set_current_schedule(result.get('schedule_id'))
                     else:
                         failed_days.append({
                             'date': current_date_str,
@@ -2419,6 +2521,30 @@ class PostgreSQLScheduler:
                     'message': 'Failed to create schedule record'
                 }
             
+            # Set up holiday greeting daily assignments if enabled
+            self._ensure_holiday_integration()
+            if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                logger.info("Setting up holiday greeting daily assignments for weekly schedule")
+                try:
+                    # Create daily assignments for the 7-day schedule
+                    from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
+                    daily_assignments = HolidayGreetingDailyAssignments(db_manager)
+                    success = daily_assignments.assign_greetings_for_schedule(
+                        schedule_id, 
+                        start_date_obj,
+                        num_days=7
+                    )
+                    
+                    if success:
+                        # Set the current schedule ID in holiday integration
+                        self._ensure_holiday_integration()
+                        self.holiday_integration.set_current_schedule(schedule_id)
+                        logger.info(f"Successfully assigned holiday greetings for schedule {schedule_id}")
+                    else:
+                        logger.warning("Failed to assign holiday greeting daily assignments")
+                except Exception as e:
+                    logger.error(f"Error setting up holiday greeting daily assignments: {e}")
+            
             # Build the weekly schedule (7 days of content)
             scheduled_items = []
             total_duration = 0
@@ -2501,6 +2627,9 @@ class PostgreSQLScheduler:
                 day_start_time = total_duration  # Track where this day started
                 
                 while total_duration < day_target_seconds:
+                    # Calculate remaining hours for use throughout this iteration
+                    remaining_hours = (day_target_seconds - total_duration) / 3600
+                    
                     # Check if we're stuck at the same position
                     current_position_hours = round(total_duration / 3600, 2)
                     if current_position_hours == last_position:
@@ -2565,7 +2694,6 @@ class PostgreSQLScheduler:
                     
                     if not available_content:
                         current_time_str = self._seconds_to_time(total_duration % (24 * 60 * 60))
-                        remaining_hours = (day_target_seconds - total_duration) / 3600
                         logger.warning(f"No available content for category: {duration_category} on {day_name} at {current_time_str} "
                                      f"(hour {(total_duration % (24 * 60 * 60)) / 3600:.1f}) even without delays. "
                                      f"Remaining hours in day: {remaining_hours:.1f}")
@@ -3066,6 +3194,11 @@ class PostgreSQLScheduler:
             self._config_loaded = False
             self._load_config_if_needed()
             
+            # Reset holiday greeting session tracking for new schedule
+            self._ensure_holiday_integration()
+            if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
+                self.holiday_integration.reset_session()
+            
             # Calculate start and end dates for the month
             start_date = datetime(year, month, 1)
             
@@ -3196,7 +3329,6 @@ class PostgreSQLScheduler:
                     
                     if not available_content:
                         current_time_str = self._seconds_to_time(total_duration % (24 * 60 * 60))
-                        remaining_hours = (day_target_seconds - total_duration) / 3600
                         logger.warning(f"No available content for category: {duration_category} on {day_name} at {current_time_str} "
                                      f"(hour {(total_duration % (24 * 60 * 60)) / 3600:.1f}) even without delays. "
                                      f"Remaining hours in day: {remaining_hours:.1f}")

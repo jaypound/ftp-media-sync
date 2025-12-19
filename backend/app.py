@@ -17815,6 +17815,30 @@ def reset_holiday_greeting_counts():
         if conn:
             db_manager._put_connection(conn)
 
+@app.route('/api/reset-holiday-greeting-session', methods=['POST'])
+def reset_holiday_greeting_session():
+    """Reset the holiday greeting session tracking for a new schedule"""
+    try:
+        # Get the holiday integration from the scheduler
+        if hasattr(scheduler_postgres, 'holiday_integration'):
+            scheduler_postgres.holiday_integration.reset_session()
+            logger.info("Holiday greeting session reset")
+            return jsonify({
+                'success': True,
+                'message': 'Holiday greeting session reset successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Holiday greeting integration not found'
+            })
+    except Exception as e:
+        logger.error(f"Error resetting holiday greeting session: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
 if __name__ == '__main__':
     print("Starting FTP Sync Backend with DEBUG logging...")
     print("Backend will be available at: http://127.0.0.1:5000")

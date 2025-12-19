@@ -1824,6 +1824,7 @@ function reportsDisplayAvailableContentResults(data) {
 
 // Load Schedule Content Search Report
 async function reportsLoadScheduleContentSearch() {
+    console.log('Loading Schedule Content Search Report...');
     const reportContent = document.getElementById('reportContent');
     
     // First, show schedule selector
@@ -1860,12 +1861,15 @@ async function reportsLoadScheduleContentSearch() {
     
     // Load available schedules
     try {
-        const response = await window.API.get('/schedules/list');
+        console.log('Fetching schedules from API...');
+        // Try the endpoint that other reports use
+        const response = await window.API.get('/list-schedules');
+        console.log('API Response:', response);
         
         if (response.success && response.schedules) {
             const select = document.getElementById('scheduleSelect');
             const schedules = response.schedules.sort((a, b) => 
-                new Date(b.schedule_date) - new Date(a.schedule_date)
+                new Date(b.air_date || b.schedule_date) - new Date(a.air_date || a.schedule_date)
             );
             
             if (schedules.length === 0) {
@@ -1873,13 +1877,13 @@ async function reportsLoadScheduleContentSearch() {
             } else {
                 select.innerHTML = '<option value="">Select a schedule...</option>';
                 schedules.forEach(schedule => {
-                    const date = new Date(schedule.schedule_date);
+                    const date = new Date(schedule.air_date || schedule.schedule_date);
                     const createdAt = schedule.created_at ? new Date(schedule.created_at) : null;
                     const option = document.createElement('option');
                     option.value = schedule.id;
                     
                     // Format the display text with creation time
-                    let displayText = `${date.toLocaleDateString()} - ${schedule.schedule_name || 'Unnamed Schedule'} (${schedule.total_items} items)`;
+                    let displayText = `${date.toLocaleDateString()} - ${schedule.name || schedule.schedule_name || 'Unnamed Schedule'} (${schedule.total_items} items)`;
                     if (createdAt) {
                         displayText += ` - Created: ${createdAt.toLocaleDateString()} ${createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
                     }
@@ -1907,7 +1911,32 @@ async function reportsLoadScheduleContentSearch() {
         }
     } catch (error) {
         console.error('Error loading schedules:', error);
-        document.getElementById('scheduleSelect').innerHTML = '<option value="">Error loading schedules</option>';
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            response: error.response
+        });
+        
+        // Check if it's a network error
+        const errorMessage = error.message || 'Unknown error';
+        document.getElementById('scheduleSelect').innerHTML = `<option value="">Error loading schedules: ${errorMessage}</option>`;
+        
+        // Show more detailed error in the UI
+        const resultsDiv = document.getElementById('reportResults');
+        resultsDiv.style.display = 'block';
+        resultsDiv.innerHTML = `
+            <div class="report-error">
+                <h3>Error Loading Schedules</h3>
+                <p>Failed to load schedules from the server.</p>
+                <p>Error: ${errorMessage}</p>
+                <p>Please check:</p>
+                <ul>
+                    <li>The backend server is running on port 5000</li>
+                    <li>The database connection is active</li>
+                    <li>Check browser console for more details</li>
+                </ul>
+            </div>
+        `;
     }
 }
 
@@ -1964,7 +1993,7 @@ function reportsDisplayScheduleContentSearchResults(data) {
         <div class="report-results-content">
             <div class="report-timestamp">
                 Search Term: "<strong>${data.search_term}</strong>" | 
-                Schedule: ${data.schedule_name || 'Unnamed'} (${new Date(data.schedule_date).toLocaleDateString()})
+                Schedule: ${data.schedule_name || data.name || 'Unnamed'} (${new Date(data.schedule_date || data.air_date).toLocaleDateString()})
             </div>
     `;
     

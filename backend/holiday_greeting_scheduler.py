@@ -15,10 +15,11 @@ import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Set
 import json
+import os
 
 # Create dedicated logger for holiday greeting scheduling
 logger = logging.getLogger('holiday_greeting_scheduler')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 # Create file handler for holiday greeting logs
 handler = logging.FileHandler('logs/holiday_greeting_scheduler.log')
@@ -48,7 +49,25 @@ class HolidayGreetingScheduler:
             config: Configuration dictionary (optional)
         """
         self.db_manager = db_manager
-        self.config = config or self._get_default_config()
+        
+        # Load config from file if it exists, otherwise use default
+        if config:
+            self.config = config
+        else:
+            config_file = 'holiday_greeting_config.json'
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, 'r') as f:
+                        loaded_config = json.load(f)
+                        # Start with default and update with loaded config
+                        self.config = self._get_default_config()
+                        self.config.update(loaded_config)
+                        logger.info(f"Loaded config from {config_file}: enabled={self.config.get('enabled')}")
+                except Exception as e:
+                    logger.error(f"Error loading config file: {e}")
+                    self.config = self._get_default_config()
+            else:
+                self.config = self._get_default_config()
         
         # Pattern to identify holiday greetings
         self.greeting_pattern = re.compile(
@@ -59,7 +78,9 @@ class HolidayGreetingScheduler:
         # In-memory tracking (until DB table approved)
         self.rotation_history = {}
         
-        logger.info("Holiday Greeting Scheduler initialized (INACTIVE MODE)")
+        # Log initialization status based on actual config
+        mode = "ACTIVE" if self.config.get('enabled', False) else "INACTIVE"
+        logger.info(f"Holiday Greeting Scheduler initialized ({mode} MODE)")
         logger.info(f"Configuration: {json.dumps(self.config, indent=2, default=str)}")
     
     def _get_default_config(self) -> Dict:
