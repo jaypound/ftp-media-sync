@@ -35,6 +35,9 @@ class HolidayGreetingDailyAssignments:
         """
         conn = None
         try:
+            logger.info(f"=== Starting daily assignment creation ===")
+            logger.info(f"Schedule ID: {schedule_id}, Start date: {start_date}, Days: {num_days}")
+            
             from psycopg2.extras import RealDictCursor
             
             # Ensure database is connected before attempting to get connection
@@ -141,6 +144,7 @@ class HolidayGreetingDailyAssignments:
         conn = None
         try:
             from psycopg2.extras import RealDictCursor
+            logger.info(f"Getting greetings for schedule {schedule_id}, date {date}")
             conn = self.db_manager._get_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
@@ -154,7 +158,9 @@ class HolidayGreetingDailyAssignments:
             """, (schedule_id, date, date))
             
             results = cursor.fetchall()
-            return [row['asset_id'] for row in results]
+            asset_ids = [row['asset_id'] for row in results]
+            logger.info(f"Found {len(asset_ids)} greetings for date {date}: {asset_ids}")
+            return asset_ids
             
         except Exception as e:
             logger.error(f"Error getting greetings for date: {e}")

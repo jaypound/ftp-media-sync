@@ -31,8 +31,11 @@ class PostgreSQLScheduler:
         """Initialize holiday integration if not already done"""
         if self.holiday_integration is None:
             try:
+                logger.warning("[HOLIDAY DEBUG] Initializing holiday greeting integration...")
                 self.holiday_integration = HolidayGreetingIntegration(db_manager)
-                logger.info(f"Holiday greeting integration initialized (enabled: {self.holiday_integration.enabled})")
+                logger.warning(f"[HOLIDAY DEBUG] Holiday greeting integration initialized (enabled: {self.holiday_integration.enabled})")
+                if self.holiday_integration.scheduler:
+                    logger.warning(f"[HOLIDAY DEBUG] Scheduler exists with config: {self.holiday_integration.scheduler.config}")
             except Exception as e:
                 logger.error(f"Failed to initialize holiday greeting integration: {e}")
                 # Create a disabled integration as fallback
@@ -363,7 +366,8 @@ class PostgreSQLScheduler:
         return []
     
     def _get_content_with_progressive_delays(self, duration_category: str, exclude_ids: List[int], 
-                                            schedule_date: str, scheduled_asset_times: dict = None) -> List[Dict[str, Any]]:
+                                            schedule_date: str, scheduled_asset_times: dict = None,
+                                            last_scheduled_theme: str = None) -> List[Dict[str, Any]]:
         """Get available content, progressively relaxing delay requirements if needed
         
         This method tries to get content with increasingly relaxed delay requirements:
@@ -409,16 +413,29 @@ class PostgreSQLScheduler:
                 
                 # Apply holiday greeting fair rotation filter if enabled
                 self._ensure_holiday_integration()
+                logger.warning(f"[HOLIDAY DEBUG] Before filter: {len(available_content)} items for {duration_category}")
                 if hasattr(self, 'holiday_integration'):
                     logger.info(f"Holiday integration exists, enabled={self.holiday_integration.enabled}")
                     if self.holiday_integration.enabled:
                         logger.info(f"Applying holiday greeting filter for {duration_category}")
+                        # Count holiday greetings before filtering - match the pattern used by holiday_greeting_scheduler
+                        import re
+                        greeting_pattern = re.compile(r'holiday\s*greeting', re.IGNORECASE)
+                        holiday_count_before = sum(1 for c in available_content if greeting_pattern.search(c.get('file_name', '')) or greeting_pattern.search(c.get('content_title', '')))
+                        logger.warning(f"[HOLIDAY DEBUG] Holiday greetings BEFORE filter: {holiday_count_before}")
+                        
                         available_content = self.holiday_integration.filter_available_content(
                             available_content, 
                             duration_category, 
                             exclude_ids,
-                            schedule_date
+                            schedule_date,
+                            last_scheduled_theme
                         )
+                        
+                        # Count holiday greetings after filtering - use same pattern
+                        holiday_count_after = sum(1 for c in available_content if greeting_pattern.search(c.get('file_name', '')) or greeting_pattern.search(c.get('content_title', '')))
+                        logger.warning(f"[HOLIDAY DEBUG] Holiday greetings AFTER filter: {holiday_count_after}")
+                        logger.warning(f"[HOLIDAY DEBUG] Total items after filter: {len(available_content)}")
                     else:
                         logger.info("Holiday integration is disabled")
                 else:
@@ -985,29 +1002,11 @@ class PostgreSQLScheduler:
                     'message': 'Failed to create schedule record'
                 }
             
-            # Set up holiday greeting daily assignments if enabled
+            # Set the current schedule ID in holiday integration
             self._ensure_holiday_integration()
             if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
-                logger.info("Setting up holiday greeting daily assignments for daily schedule")
-                try:
-                    # Create daily assignments for the single day
-                    from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
-                    daily_assignments = HolidayGreetingDailyAssignments(db_manager)
-                    success = daily_assignments.assign_greetings_for_schedule(
-                        schedule_id, 
-                        schedule_dt,
-                        num_days=1
-                    )
-                    
-                    if success:
-                        # Set the current schedule ID in holiday integration
-                        self._ensure_holiday_integration()
-                        self.holiday_integration.set_current_schedule(schedule_id)
-                        logger.info(f"Successfully assigned holiday greetings for schedule {schedule_id}")
-                    else:
-                        logger.warning("Failed to assign holiday greeting daily assignments")
-                except Exception as e:
-                    logger.error(f"Error setting up holiday greeting daily assignments: {e}")
+                self.holiday_integration.set_current_schedule(schedule_id)
+                logger.info(f"Holiday integration schedule_id set to: {schedule_id}")
             
             # Build the schedule
             scheduled_items = []
@@ -1110,7 +1109,8 @@ class PostgreSQLScheduler:
                             duration_category, 
                             exclude_ids=scheduled_asset_ids,
                             schedule_date=schedule_date,
-                            scheduled_asset_times=scheduled_asset_times
+                            scheduled_asset_times=scheduled_asset_times,
+                            last_scheduled_theme=last_scheduled_theme
                         )
                 else:
                     # Not appropriate time/slot for featured content, get regular content
@@ -1119,7 +1119,8 @@ class PostgreSQLScheduler:
                         duration_category, 
                         exclude_ids=scheduled_asset_ids,
                         schedule_date=schedule_date,
-                        scheduled_asset_times=scheduled_asset_times
+                        scheduled_asset_times=scheduled_asset_times,
+                        last_scheduled_theme=last_scheduled_theme
                     )
                 
                 if not available_content:
@@ -1270,9 +1271,24 @@ class PostgreSQLScheduler:
                             content = candidate
                 
                 # If no good content found (all have very negative scores), use the first available
+                # UNLESS it's a holiday greeting with a theme conflict
                 if not content and available_content:
-                    content = available_content[0]
-                    logger.warning(f"All content has poor scores, using first available")
+                    # Check if the first available item is a holiday greeting with theme conflict
+                    first_item = available_content[0]
+                    first_theme = first_item.get('theme', '').strip() if first_item.get('theme') else None
+                    first_file = first_item.get('file_name', '')
+                    
+                    # Check if it's a holiday greeting (by theme or filename)
+                    is_holiday_greeting = (first_theme and first_theme.lower() == 'holidaygreeting') or \
+                                        ('holiday' in first_file.lower() and 'greeting' in first_file.lower())
+                    
+                    # If it's a holiday greeting and we just scheduled something with HolidayGreeting theme, skip it
+                    if is_holiday_greeting and last_scheduled_theme and last_scheduled_theme.lower() == 'holidaygreeting':
+                        logger.warning(f"Preventing back-to-back holiday greetings - skipping {first_file}")
+                        # Don't select anything - let the loop continue and try a different category
+                    else:
+                        content = available_content[0]
+                        logger.warning(f"All content has poor scores, using first available")
                 
                 if not content:
                     # This shouldn't happen if available_content has items
@@ -1311,6 +1327,10 @@ class PostgreSQLScheduler:
                 
                 # The delay constraint checking is now handled in get_available_content
                 # with progressive delay reduction, so we don't need to check again here
+                
+                # Debug: Check if we selected a holiday greeting
+                if content and ('holiday' in content.get('file_name', '').lower() and 'greeting' in content.get('file_name', '').lower()):
+                    logger.warning(f"[HOLIDAY DEBUG] Selected holiday greeting: {content['file_name']} (theme: {content.get('theme')})")
                 
                 # Check if this content would cross midnight
                 content_duration = float(content['duration_seconds'])
@@ -1446,6 +1466,34 @@ class PostgreSQLScheduler:
                             logger.warning(f"   - {cat}: {count} resets")
             
             logger.info(f"Created schedule with {saved_count} items, total duration: {total_duration/3600:.2f} hours")
+            
+            # Auto-populate holiday greeting daily assignments if enabled
+            self._ensure_holiday_integration()
+            logger.info(f"Holiday integration check: has integration = {hasattr(self, 'holiday_integration')}")
+            if hasattr(self, 'holiday_integration'):
+                logger.info(f"Holiday integration enabled = {self.holiday_integration.enabled}")
+                logger.info(f"Holiday integration scheduler = {self.holiday_integration.scheduler}")
+                if self.holiday_integration.enabled:
+                    try:
+                        logger.info(f"Auto-populating holiday greeting assignments for daily schedule {schedule_id}")
+                        meeting_dates_only = self.holiday_integration.scheduler.config.get('auto_populate_meeting_dates_only', False) if self.holiday_integration.scheduler else False
+                        logger.info(f"Meeting dates only = {meeting_dates_only}")
+                        self.holiday_integration.auto_populate_daily_assignments(
+                            schedule_id, 
+                            schedule_dt.date(),
+                            is_weekly=False,
+                            meeting_dates_only=meeting_dates_only
+                        )
+                        logger.info("Auto-population call completed")
+                    except Exception as e:
+                        logger.error(f"Error auto-populating holiday greetings: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        # Don't fail the schedule creation for this error
+                else:
+                    logger.info("Holiday integration is DISABLED")
+            else:
+                logger.warning("No holiday_integration attribute found")
             
             return {
                 'success': True,
@@ -2521,29 +2569,11 @@ class PostgreSQLScheduler:
                     'message': 'Failed to create schedule record'
                 }
             
-            # Set up holiday greeting daily assignments if enabled
+            # Set the current schedule ID in holiday integration
             self._ensure_holiday_integration()
             if hasattr(self, 'holiday_integration') and self.holiday_integration.enabled:
-                logger.info("Setting up holiday greeting daily assignments for weekly schedule")
-                try:
-                    # Create daily assignments for the 7-day schedule
-                    from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
-                    daily_assignments = HolidayGreetingDailyAssignments(db_manager)
-                    success = daily_assignments.assign_greetings_for_schedule(
-                        schedule_id, 
-                        start_date_obj,
-                        num_days=7
-                    )
-                    
-                    if success:
-                        # Set the current schedule ID in holiday integration
-                        self._ensure_holiday_integration()
-                        self.holiday_integration.set_current_schedule(schedule_id)
-                        logger.info(f"Successfully assigned holiday greetings for schedule {schedule_id}")
-                    else:
-                        logger.warning("Failed to assign holiday greeting daily assignments")
-                except Exception as e:
-                    logger.error(f"Error setting up holiday greeting daily assignments: {e}")
+                self.holiday_integration.set_current_schedule(schedule_id)
+                logger.info(f"Holiday integration schedule_id set to: {schedule_id}")
             
             # Build the weekly schedule (7 days of content)
             scheduled_items = []
@@ -2680,7 +2710,8 @@ class PostgreSQLScheduler:
                                 duration_category, 
                                 exclude_ids=day_scheduled_asset_ids,
                                 schedule_date=current_day.strftime('%Y-%m-%d'),
-                                scheduled_asset_times=None
+                                scheduled_asset_times=None,
+                                last_scheduled_theme=last_scheduled_theme
                             )
                     else:
                         # Not time for featured content yet or outside preferred time, get regular content
@@ -2689,7 +2720,8 @@ class PostgreSQLScheduler:
                             duration_category, 
                             exclude_ids=day_scheduled_asset_ids,
                             schedule_date=current_day.strftime('%Y-%m-%d'),
-                            scheduled_asset_times=None
+                            scheduled_asset_times=None,
+                            last_scheduled_theme=last_scheduled_theme
                         )
                     
                     if not available_content:
@@ -3168,6 +3200,34 @@ class PostgreSQLScheduler:
             
             logger.info(f"Created weekly schedule with {saved_count} items, total duration: {total_duration/3600:.2f} hours")
             
+            # Auto-populate holiday greeting daily assignments if enabled
+            self._ensure_holiday_integration()
+            logger.info(f"Holiday integration check: has integration = {hasattr(self, 'holiday_integration')}")
+            if hasattr(self, 'holiday_integration'):
+                logger.info(f"Holiday integration enabled = {self.holiday_integration.enabled}")
+                logger.info(f"Holiday integration scheduler = {self.holiday_integration.scheduler}")
+                if self.holiday_integration.enabled:
+                    try:
+                        logger.info(f"Auto-populating holiday greeting assignments for weekly schedule {schedule_id}")
+                        meeting_dates_only = self.holiday_integration.scheduler.config.get('auto_populate_meeting_dates_only', False) if self.holiday_integration.scheduler else False
+                        logger.info(f"Meeting dates only = {meeting_dates_only}")
+                        self.holiday_integration.auto_populate_daily_assignments(
+                            schedule_id, 
+                            start_date_obj.date(),
+                            is_weekly=True,
+                            meeting_dates_only=meeting_dates_only
+                        )
+                        logger.info("Auto-population call completed")
+                    except Exception as e:
+                        logger.error(f"Error auto-populating holiday greetings: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        # Don't fail the schedule creation for this error
+                else:
+                    logger.info("Holiday integration is DISABLED")
+            else:
+                logger.warning("No holiday_integration attribute found")
+            
             return {
                 'success': True,
                 'message': f'Successfully created weekly schedule starting {start_date_obj.strftime("%Y-%m-%d")}',
@@ -3315,7 +3375,8 @@ class PostgreSQLScheduler:
                                 duration_category, 
                                 exclude_ids=day_scheduled_asset_ids,
                                 schedule_date=current_date.strftime('%Y-%m-%d'),
-                                scheduled_asset_times=None
+                                scheduled_asset_times=None,
+                                last_scheduled_theme=last_scheduled_theme
                             )
                     else:
                         # Not time for featured content yet, get regular content
@@ -3324,7 +3385,8 @@ class PostgreSQLScheduler:
                             duration_category, 
                             exclude_ids=day_scheduled_asset_ids,
                             schedule_date=current_date.strftime('%Y-%m-%d'),
-                            scheduled_asset_times=None
+                            scheduled_asset_times=None,
+                            last_scheduled_theme=last_scheduled_theme
                         )
                     
                     if not available_content:
@@ -3394,10 +3456,24 @@ class PostgreSQLScheduler:
                             content = candidate
                             break
                         
-                        # If no content found without theme conflict, use the first available
+                        # If no content found without theme conflict, check if we should use first available
                         if not content and available_content:
-                            content = available_content[0]
-                            logger.warning(f"No content available without theme conflict, using first available")
+                            # Check if the first available item is a holiday greeting with theme conflict
+                            first_item = available_content[0]
+                            first_theme = first_item.get('theme', '').strip() if first_item.get('theme') else None
+                            first_file = first_item.get('file_name', '')
+                            
+                            # Check if it's a holiday greeting
+                            is_holiday_greeting = (first_theme and first_theme.lower() == 'holidaygreeting') or \
+                                                ('holiday' in first_file.lower() and 'greeting' in first_file.lower())
+                            
+                            # If it's a holiday greeting and last item was also holiday greeting, skip
+                            if is_holiday_greeting and last_scheduled_theme and last_scheduled_theme.lower() == 'holidaygreeting':
+                                logger.warning(f"Preventing back-to-back holiday greetings in fallback - skipping {first_file}")
+                                # Don't select anything
+                            else:
+                                content = available_content[0]
+                                logger.warning(f"No content available without theme conflict, using first available")
                     
                     if not content:
                         # This shouldn't happen if available_content has items

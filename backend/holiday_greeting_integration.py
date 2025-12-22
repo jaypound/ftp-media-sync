@@ -10,7 +10,7 @@ import os
 from typing import List, Dict, Optional, Any
 from holiday_greeting_scheduler import get_holiday_scheduler
 from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Set up dedicated holiday greeting logger
 holiday_logger = logging.getLogger('holiday_greeting')
@@ -47,6 +47,9 @@ class HolidayGreetingIntegration:
         # Track greetings used in current scheduling session
         self.session_used_greetings = {}  # {duration_category: [asset_ids]}
         self.session_greeting_index = {}  # {duration_category: current_index}
+        # Daily rotation pool - tracks which greetings to use for each date
+        self.daily_rotation_pools = {}  # {date_str: [greeting_dicts]}
+        self.daily_rotation_indexes = {}  # {date_str: current_index}
         # Daily assignments manager
         self.daily_assignments = HolidayGreetingDailyAssignments(db_manager)
         self.current_schedule_id = None
@@ -58,10 +61,12 @@ class HolidayGreetingIntegration:
     def _load_config_and_init(self):
         """Load configuration and initialize scheduler if enabled"""
         try:
+            logger.warning(f"[HOLIDAY DEBUG] Looking for config file: {self.config_file}")
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r') as f:
                     config = json.load(f)
                     self.enabled = config.get('enabled', False)
+                    logger.warning(f"[HOLIDAY DEBUG] Config loaded, enabled={self.enabled}")
                     
                     if self.enabled:
                         self.scheduler = get_holiday_scheduler(self.db_manager)
@@ -69,21 +74,153 @@ class HolidayGreetingIntegration:
                         self.scheduler.config.update(config)
                         # Explicitly set enabled in the scheduler config
                         self.scheduler.config['enabled'] = True
-                        logger.info("Holiday Greeting Fair Rotation: ENABLED")
+                        logger.warning(f"[HOLIDAY DEBUG] Holiday Greeting Fair Rotation: ENABLED")
                         logger.info(f"Scheduler config after update: enabled={self.scheduler.config.get('enabled')}")
                     else:
-                        logger.info("Holiday Greeting Fair Rotation: DISABLED (config file exists but enabled=false)")
+                        logger.warning(f"[HOLIDAY DEBUG] Holiday Greeting Fair Rotation: DISABLED (config file exists but enabled=false)")
             else:
-                logger.info("Holiday Greeting Fair Rotation: DISABLED (no config file)")
+                logger.warning(f"[HOLIDAY DEBUG] Holiday Greeting Fair Rotation: DISABLED (no config file at {self.config_file})")
         except Exception as e:
-            logger.error(f"Error loading holiday greeting config: {e}")
+            logger.error(f"[HOLIDAY DEBUG] Error loading holiday greeting config: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             self.enabled = False
     
     def reset_session(self):
         """Reset session tracking for a new scheduling run"""
         self.session_used_greetings = {}
         self.session_greeting_index = {}
-        logger.info("Holiday greeting session tracking reset")
+        # Clear daily rotation pools to force reload with corrected logic
+        self.daily_rotation_pools = {}
+        self.daily_rotation_indexes = {}
+        logger.info("Holiday greeting session tracking and daily pools reset")
+    
+    def auto_populate_daily_assignments(self, schedule_id: int, base_date, is_weekly: bool = False, meeting_dates_only: bool = False):
+        """
+        Auto-populate holiday_greetings_days table based on schedule
+        
+        Args:
+            schedule_id: The schedule ID
+            base_date: The start date of the schedule
+            is_weekly: Whether this is a weekly schedule (7 days) or daily (1 day)
+            meeting_dates_only: If True, only populate for days that have meetings
+        """
+        if not self.enabled or not self.db_manager:
+            return
+        
+        logger.info(f"Auto-populating holiday greeting assignments for schedule {schedule_id}")
+        logger.info(f"Base date: {base_date}, Is weekly: {is_weekly}, Meeting dates only: {meeting_dates_only}")
+        
+        conn = None
+        try:
+            conn = self.db_manager._get_connection()
+            cursor = conn.cursor()
+            
+            # Determine date range
+            days_to_populate = []
+            
+            if meeting_dates_only:
+                # Get dates that have meetings in the schedule
+                cursor.execute("""
+                    SELECT DISTINCT DATE(start_datetime) as meeting_date
+                    FROM schedule_items
+                    WHERE schedule_id = %s
+                    AND content_title ILIKE '%meeting%'
+                    ORDER BY meeting_date
+                """, (schedule_id,))
+                
+                meeting_rows = cursor.fetchall()
+                days_to_populate = [row[0] for row in meeting_rows]
+                
+                if not days_to_populate:
+                    logger.warning(f"No meetings found in schedule {schedule_id} for auto-population")
+                    return
+                    
+                logger.info(f"Found meetings on {len(days_to_populate)} days")
+            else:
+                # Populate all days in the schedule range
+                if is_weekly:
+                    for i in range(7):
+                        days_to_populate.append(base_date + timedelta(days=i))
+                else:
+                    days_to_populate = [base_date]
+            
+            # Get all available holiday greetings
+            cursor.execute("""
+                SELECT DISTINCT 
+                    a.id as asset_id,
+                    i.file_name,
+                    a.content_title
+                FROM assets a
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                JOIN holiday_greeting_rotation hgr ON a.id = hgr.asset_id
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE a.duration_category = 'spots'
+                AND (
+                    i.file_name ILIKE '%holiday%greeting%' 
+                    OR a.content_title ILIKE '%holiday%greeting%'
+                )
+                AND COALESCE(sm.available_for_scheduling, TRUE) = TRUE
+                ORDER BY i.file_name
+            """)
+            
+            all_greetings = cursor.fetchall()
+            if not all_greetings:
+                logger.warning("No holiday greetings available for auto-population")
+                return
+            
+            logger.info(f"Found {len(all_greetings)} holiday greetings for distribution")
+            
+            # Clear existing assignments for these dates
+            for day_date in days_to_populate:
+                cursor.execute("""
+                    DELETE FROM holiday_greetings_days 
+                    WHERE start_date = %s
+                """, (day_date,))
+            
+            # Distribute greetings evenly
+            greetings_per_day = min(4, len(all_greetings))
+            usage_count = {g[0]: 0 for g in all_greetings}  # g[0] is asset_id
+            
+            for day_num, day_date in enumerate(days_to_populate):
+                day_end = day_date + timedelta(days=1)
+                
+                # Sort by usage to ensure even distribution
+                sorted_greetings = sorted(
+                    all_greetings,
+                    key=lambda x: usage_count[x[0]]
+                )
+                
+                # Assign greetings for this day
+                for i in range(greetings_per_day):
+                    greeting = sorted_greetings[i]
+                    cursor.execute("""
+                        INSERT INTO holiday_greetings_days 
+                        (asset_id, day_number, start_date, end_date)
+                        VALUES (%s, %s, %s, %s)
+                    """, (
+                        greeting[0],  # asset_id
+                        day_num + 1,
+                        day_date,
+                        day_end
+                    ))
+                    usage_count[greeting[0]] += 1
+            
+            conn.commit()
+            logger.info(f"Auto-populated holiday greetings for {len(days_to_populate)} days")
+            logger.info(f"Days populated: {[d.strftime('%Y-%m-%d') for d in days_to_populate]}")
+            
+            # Clear cached pools to force reload
+            self.daily_rotation_pools = {}
+            self.daily_rotation_indexes = {}
+            
+        except Exception as e:
+            logger.error(f"Error auto-populating holiday days: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                self.db_manager._put_connection(conn)
     
     def set_current_schedule(self, schedule_id: int):
         """Set the current schedule ID for daily assignments lookup"""
@@ -93,7 +230,8 @@ class HolidayGreetingIntegration:
     def filter_available_content(self, available_content: List[Dict[str, Any]], 
                                duration_category: str, 
                                exclude_ids: List[int],
-                               schedule_date: str = None) -> List[Dict[str, Any]]:
+                               schedule_date: str = None,
+                               last_scheduled_theme: str = None) -> List[Dict[str, Any]]:
         """
         Filter available content to ensure fair holiday greeting rotation
         
@@ -106,13 +244,18 @@ class HolidayGreetingIntegration:
             available_content: List of content items from normal selection
             duration_category: The duration category being filled
             exclude_ids: Asset IDs already scheduled
+            schedule_date: The date being scheduled
+            last_scheduled_theme: Theme of the last scheduled item (for conflict checking)
             
         Returns:
             Filtered/modified content list
         """
-        holiday_logger.info(f"=== FILTER CONTENT CALLED ===")
-        holiday_logger.info(f"Category: {duration_category}, Available content: {len(available_content)}, Excluded IDs: {len(exclude_ids)}")
-        holiday_logger.debug(f"filter_available_content called: category={duration_category}, available={len(available_content)}, exclude={len(exclude_ids)}")
+        holiday_logger.warning(f"=== FILTER CONTENT CALLED ===")
+        holiday_logger.warning(f"Category: {duration_category}, Available content: {len(available_content)}, Excluded IDs: {len(exclude_ids)}")
+        holiday_logger.warning(f"Schedule date passed: {schedule_date}")
+        holiday_logger.warning(f"Current schedule_id: {getattr(self, 'current_schedule_id', 'NOT SET')}")
+        holiday_logger.warning(f"Last scheduled theme: {last_scheduled_theme}")
+        logger.warning(f"[HOLIDAY DEBUG] filter_available_content called with {len(available_content)} items")
         
         # Check if this is a content type or duration category
         duration_categories = ['id', 'spots', 'short_form', 'long_form']
@@ -122,11 +265,13 @@ class HolidayGreetingIntegration:
             return available_content
         
         if not self.enabled:
-            holiday_logger.debug("Holiday greeting filtering DISABLED")
+            holiday_logger.warning("Holiday greeting filtering DISABLED - returning original content")
+            logger.warning("[HOLIDAY DEBUG] Integration disabled, returning all content unchanged")
             return available_content
             
         if not self.scheduler:
             holiday_logger.warning("Holiday greeting filtering enabled but scheduler not initialized")
+            logger.warning("[HOLIDAY DEBUG] No scheduler, returning all content unchanged")
             return available_content
         
         try:
@@ -142,6 +287,9 @@ class HolidayGreetingIntegration:
                 is_greeting = self.scheduler.is_holiday_greeting(file_name, content_title)
                 
                 if is_greeting:
+                    # Normalize the content to ensure it has asset_id
+                    if 'asset_id' not in content and 'id' in content:
+                        content['asset_id'] = content['id']
                     removed_greetings.append(content)
                     holiday_logger.debug(f"  - HOLIDAY GREETING: {file_name}")
                 else:
@@ -150,12 +298,13 @@ class HolidayGreetingIntegration:
                     if len(other_content) <= 3:
                         holiday_logger.debug(f"  - NOT greeting: {file_name}")
             
-            holiday_logger.info(f"Found {len(removed_greetings)} holiday greetings, {len(other_content)} other content")
+            holiday_logger.warning(f"[HOLIDAY DEBUG] Found {len(removed_greetings)} holiday greetings, {len(other_content)} other content")
+            logger.warning(f"[HOLIDAY DEBUG] Removed {len(removed_greetings)} holiday greetings from pool")
             
             if removed_greetings:
                 logger.info(f"Found {len(removed_greetings)} holiday greetings in {duration_category}")
                 logger.info(f"Session tracking: {len(self.session_used_greetings.get(duration_category, []))} greetings used so far")
-                holiday_logger.info(f"Removed greetings: {[g.get('file_name', 'unknown') for g in removed_greetings[:5]]}")
+                holiday_logger.warning(f"[HOLIDAY DEBUG] Removed greetings: {[g.get('file_name', 'unknown') for g in removed_greetings[:5]]}")
                 # Debug: Check structure of greetings
                 if removed_greetings:
                     sample = removed_greetings[0]
@@ -163,45 +312,42 @@ class HolidayGreetingIntegration:
                     holiday_logger.info(f"Sample greeting asset_id: {sample.get('asset_id', 'NO ASSET_ID')}")
             
             # Step 2: Get the NEXT holiday greeting
-            # First check if we have daily assignments for this schedule
             next_greeting = None
             
-            if self.current_schedule_id and schedule_date:
-                # Try to use daily assignments
-                try:
-                    schedule_date_obj = datetime.strptime(schedule_date, '%Y-%m-%d')
-                    daily_asset_ids = self.daily_assignments.get_greetings_for_date(
-                        self.current_schedule_id, schedule_date_obj
-                    )
-                    
-                    if daily_asset_ids:
-                        holiday_logger.info(f"Using daily assignments: {len(daily_asset_ids)} greetings for {schedule_date}")
-                        # Get greeting details for the allowed asset IDs
-                        next_greeting = self._get_greeting_from_daily_assignments(
-                            daily_asset_ids, duration_category, exclude_ids
-                        )
-                except Exception as e:
-                    logger.warning(f"Error using daily assignments: {e}, falling back to rotation")
+            # For SPOTS category with a schedule date, use daily rotation pool
+            if duration_category == 'spots' and schedule_date:
+                holiday_logger.info(f"Checking daily rotation pool for {schedule_date}")
+                next_greeting = self._get_next_from_daily_pool(schedule_date)
+                
+                if next_greeting:
+                    holiday_logger.info(f"Selected from daily pool: {next_greeting.get('file_name')}")
+                else:
+                    holiday_logger.info("No daily pool available, falling back to standard rotation")
             
+            # If no daily pool greeting, use standard rotation
             if not next_greeting:
-                # Fall back to rotation method
-                holiday_logger.info("Using rotation method (no daily assignments or none available)")
                 next_greeting = self.get_next_holiday_greeting_rotation(
                     duration_category, 
                     exclude_ids,
                     None,  # Pass None to force database lookup of ALL greetings
-                    schedule_date
+                    schedule_date,
+                    last_scheduled_theme
                 )
             
-            # Step 3: Return our selected greeting + all non-greeting content
+            # Step 3: Return ONLY our selected greeting (not all removed ones) + all non-greeting content
             if next_greeting:
-                logger.info(f"ENHANCED ROTATION: Selected holiday greeting: {next_greeting.get('file_name')} "
+                logger.warning(f"[HOLIDAY DEBUG] ENHANCED ROTATION: Selected holiday greeting: {next_greeting.get('file_name')} "
                           f"(asset_id: {next_greeting.get('asset_id')})")
-                return [next_greeting] + other_content
+                # IMPORTANT: Return ONLY the selected greeting, not all holiday greetings
+                result = [next_greeting] + other_content
+                logger.warning(f"[HOLIDAY DEBUG] Returning {len(result)} items: 1 selected greeting + {len(other_content)} non-greetings")
+                holiday_logger.warning(f"[HOLIDAY DEBUG] Final result has {len(result)} items")
+                return result
             else:
-                # No suitable holiday greeting found, just return non-greeting content
+                # No suitable holiday greeting found, return non-greeting content only
                 if removed_greetings:
-                    logger.warning(f"ENHANCED ROTATION: Could not find suitable holiday greeting to replace {len(removed_greetings)} removed items")
+                    logger.warning(f"[HOLIDAY DEBUG] ENHANCED ROTATION: Could not find suitable holiday greeting to replace {len(removed_greetings)} removed items")
+                logger.warning(f"[HOLIDAY DEBUG] Returning {len(other_content)} non-greeting items (no greeting selected)")
                 return other_content
             
         except Exception as e:
@@ -212,7 +358,8 @@ class HolidayGreetingIntegration:
     def get_next_holiday_greeting_rotation(self, duration_category: str,
                                           exclude_ids: List[int],
                                           available_greetings: List[Dict[str, Any]] = None,
-                                          schedule_date: str = None) -> Optional[Dict[str, Any]]:
+                                          schedule_date: str = None,
+                                          last_scheduled_theme: str = None) -> Optional[Dict[str, Any]]:
         """
         Get the next holiday greeting in rotation for this duration category.
         This ensures variety within a single scheduling session.
@@ -221,6 +368,8 @@ class HolidayGreetingIntegration:
             duration_category: The duration category needed
             exclude_ids: Asset IDs to exclude (already scheduled in this timeslot)
             available_greetings: Pre-filtered greetings available for selection
+            schedule_date: The date being scheduled (YYYY-MM-DD format)
+            last_scheduled_theme: Theme of the last scheduled item (for conflict checking)
             
         Returns:
             The next greeting in rotation, or None if no suitable greeting found
@@ -230,6 +379,16 @@ class HolidayGreetingIntegration:
         holiday_logger.info(f"Duration category: {duration_category}")
         holiday_logger.info(f"Exclude IDs: {exclude_ids}")
         holiday_logger.info(f"Available greetings passed in: {len(available_greetings) if available_greetings else 'None'}")
+        holiday_logger.info(f"Schedule date: {schedule_date}")
+        
+        # FIRST: Check daily rotation pool for this date
+        if schedule_date and duration_category == 'spots':  # Daily assignments are only for spots
+            next_greeting = self._get_next_from_daily_pool(schedule_date)
+            if next_greeting:
+                holiday_logger.info(f"Using daily rotation pool for {schedule_date}")
+                return next_greeting
+            else:
+                holiday_logger.info(f"No daily assignments found for {schedule_date}, falling back to rotation")
         
         # Initialize session tracking for this category if needed
         if duration_category not in self.session_used_greetings:
@@ -285,6 +444,18 @@ class HolidayGreetingIntegration:
                 'recently_used_in_category': greeting['asset_id'] in session_used[-5:] if session_used else False
             })
         
+        # Theme conflict check - only skip if the IMMEDIATELY PREVIOUS item has the same theme
+        # AND it's a holiday greeting (not other content with same theme)
+        if last_scheduled_theme and duration_category in ['spots', 'id', 'short_form']:
+            # Check if last scheduled theme is "HolidayGreeting" - this means a holiday greeting was just placed
+            if last_scheduled_theme.lower() == 'holidaygreeting':
+                holiday_logger.warning(f"Last scheduled item was a holiday greeting (theme: {last_scheduled_theme})")
+                holiday_logger.warning("Returning None to prevent back-to-back holiday greetings")
+                return None
+            
+            # If last theme wasn't HolidayGreeting, we can place a holiday greeting
+            holiday_logger.info(f"Last scheduled theme '{last_scheduled_theme}' is not a holiday greeting, OK to place one")
+        
         # Sort by: 
         # 1. Not recently used in this category (last 5)
         # 2. Lowest session count (times used in current schedule)
@@ -329,6 +500,210 @@ class HolidayGreetingIntegration:
             return selected
         
         return None
+    
+    def _get_or_init_daily_rotation_pool(self, schedule_date: str) -> List[Dict[str, Any]]:
+        """
+        Get or initialize the rotation pool for a specific date.
+        This ensures we rotate through the same 4 greetings all day.
+        
+        Args:
+            schedule_date: Date in YYYY-MM-DD format
+            
+        Returns:
+            List of greetings to rotate through for this date
+        """
+        # Check if we already have a pool for this date
+        if schedule_date in self.daily_rotation_pools:
+            pool = self.daily_rotation_pools[schedule_date]
+            # If the pool is empty, clear it and reinitialize
+            if not pool:
+                holiday_logger.info(f"Found EMPTY rotation pool for {schedule_date}, clearing and reinitializing")
+                del self.daily_rotation_pools[schedule_date]
+                if schedule_date in self.daily_rotation_indexes:
+                    del self.daily_rotation_indexes[schedule_date]
+            else:
+                holiday_logger.info(f"Found existing rotation pool for {schedule_date} with {len(pool)} greetings")
+                return pool
+        
+        # Initialize the pool with daily assignments
+        holiday_logger.info(f"Initializing daily rotation pool for {schedule_date}")
+        holiday_logger.info(f"Current pools in memory: {list(self.daily_rotation_pools.keys())}")
+        
+        # Get ALL assigned greetings for this date (ignore exclude_ids)
+        assigned_greetings = self._get_daily_assigned_greetings(schedule_date, [])
+        
+        if assigned_greetings:
+            holiday_logger.info(f"Created rotation pool with {len(assigned_greetings)} greetings for {schedule_date}")
+            self.daily_rotation_pools[schedule_date] = assigned_greetings
+            self.daily_rotation_indexes[schedule_date] = 0
+            return assigned_greetings
+        
+        # No daily assignments - return empty list
+        holiday_logger.warning(f"No daily assignments found for {schedule_date}")
+        self.daily_rotation_pools[schedule_date] = []
+        return []
+    
+    def _get_next_from_daily_pool(self, schedule_date: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the next greeting from the daily rotation pool.
+        Rotates through the pool evenly.
+        
+        Args:
+            schedule_date: Date in YYYY-MM-DD format
+            
+        Returns:
+            Next greeting from the pool, or None if pool is empty
+        """
+        pool = self._get_or_init_daily_rotation_pool(schedule_date)
+        
+        if not pool:
+            return None
+        
+        # Get current index
+        current_index = self.daily_rotation_indexes.get(schedule_date, 0)
+        
+        # Get the greeting at current index
+        greeting = pool[current_index]
+        
+        # Move to next index (wrap around)
+        next_index = (current_index + 1) % len(pool)
+        self.daily_rotation_indexes[schedule_date] = next_index
+        
+        holiday_logger.info(f"Selected greeting {current_index + 1}/{len(pool)} from daily pool: {greeting.get('file_name')}")
+        
+        return greeting
+
+    def _get_daily_assigned_greetings(self, schedule_date: str, exclude_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Get daily assigned greetings for a specific date
+        
+        Args:
+            schedule_date: Date in YYYY-MM-DD format
+            exclude_ids: Asset IDs to exclude (already used)
+            
+        Returns:
+            List of assigned greetings not in exclude_ids
+        """
+        holiday_logger.info(f"=== _get_daily_assigned_greetings called for date: {schedule_date} ===")
+        holiday_logger.info("=== _GET_DAILY_ASSIGNED_GREETINGS CALLED ===")
+        holiday_logger.info(f"Schedule date: {schedule_date}")
+        holiday_logger.info(f"Exclude IDs count: {len(exclude_ids)}")
+        
+        conn = None
+        try:
+            from psycopg2.extras import RealDictCursor
+            from datetime import datetime
+            
+            # Parse the schedule date
+            try:
+                date_obj = datetime.strptime(schedule_date, '%Y-%m-%d').date()
+                holiday_logger.info(f"Parsed date: {date_obj}")
+            except ValueError:
+                logger.warning(f"Invalid date format: {schedule_date}")
+                holiday_logger.error(f"Failed to parse date: {schedule_date}")
+                return []
+            
+            conn = self.db_manager._get_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # First check if there are ANY assignments for this date
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM holiday_greetings_days hgd
+                JOIN assets a ON hgd.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                WHERE hgd.start_date <= %s AND hgd.end_date > %s
+            """, (date_obj, date_obj))
+            
+            count_result = cursor.fetchone()
+            holiday_logger.info(f"Total assignments for {date_obj}: {count_result['count']}")
+            
+            # Query daily assignments for this date
+            # No schedule_id needed - assignments are purely date-based
+            cursor.execute("""
+                SELECT 
+                    hgd.asset_id,
+                    a.id,
+                    a.content_title,
+                    i.file_name,
+                    i.file_path,
+                    a.duration_seconds,
+                    a.duration_category,
+                    a.content_type,
+                    i.id as instance_id,
+                    a.engagement_score,
+                    a.created_at,
+                    a.updated_at,
+                    json_build_object(
+                        'content_expiry_date', sm.content_expiry_date::text,
+                        'featured', COALESCE(sm.featured, false),
+                        'available_for_scheduling', COALESCE(sm.available_for_scheduling, true)
+                    ) as scheduling
+                FROM holiday_greetings_days hgd
+                JOIN assets a ON hgd.asset_id = a.id
+                JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE hgd.start_date <= %s 
+                AND hgd.end_date > %s
+                AND (sm.content_expiry_date IS NULL OR sm.content_expiry_date > %s)
+                ORDER BY hgd.asset_id
+            """, (date_obj, date_obj, date_obj))
+            
+            results = cursor.fetchall()
+            cursor.close()
+            
+            greetings = []
+            for r in results:
+                greeting = dict(r)
+                # Ensure both 'id' and 'asset_id' are present for compatibility
+                if 'asset_id' in greeting and 'id' not in greeting:
+                    greeting['id'] = greeting['asset_id']
+                elif 'id' in greeting and 'asset_id' not in greeting:
+                    greeting['asset_id'] = greeting['id']
+                greetings.append(greeting)
+                
+            holiday_logger.info(f"Daily assignments query found {len(greetings)} greetings for {schedule_date}")
+            
+            # Also check how many were filtered out due to expiration
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT COUNT(*) as total_assigned,
+                       SUM(CASE WHEN sm.content_expiry_date <= %s THEN 1 ELSE 0 END) as expired_count
+                FROM holiday_greetings_days hgd
+                JOIN assets a ON hgd.asset_id = a.id
+                LEFT JOIN scheduling_metadata sm ON a.id = sm.asset_id
+                WHERE hgd.start_date <= %s AND hgd.end_date > %s
+            """, (date_obj, date_obj, date_obj))
+            stats = cursor.fetchone()
+            cursor.close()
+            
+            if stats['expired_count'] > 0:
+                holiday_logger.warning(f"Filtered out {stats['expired_count']} expired greetings from {stats['total_assigned']} total assignments for {schedule_date}")
+            
+            if greetings:
+                holiday_logger.info(f"Daily assigned greetings: {[g['file_name'] for g in greetings]}")
+            else:
+                # Debug why no assignments found
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                cursor.execute("""
+                    SELECT COUNT(*) as total, 
+                           MIN(start_date) as min_date, 
+                           MAX(start_date) as max_date
+                    FROM holiday_greetings_days
+                """)
+                stats = cursor.fetchone()
+                holiday_logger.warning(f"No assignments found for {date_obj}. Table has {stats['total']} total assignments")
+                holiday_logger.warning(f"Date range in table: {stats['min_date']} to {stats['max_date']}")
+                cursor.close()
+            
+            return greetings
+            
+        except Exception as e:
+            logger.error(f"Error getting daily assigned greetings: {e}")
+            return []
+        finally:
+            if conn:
+                self.db_manager._put_connection(conn)
     
     def _get_greeting_stats(self, asset_id: int) -> Dict[str, Any]:
         """Get scheduling stats for a holiday greeting"""
@@ -384,14 +759,32 @@ class HolidayGreetingIntegration:
             else:
                 compare_date = datetime.now()
             
+            # First check how many are in rotation table
+            cursor.execute("SELECT COUNT(*) FROM holiday_greeting_rotation")
+            total_in_rotation = cursor.fetchone()[0]
+            holiday_logger.info(f"Total greetings in rotation table: {total_in_rotation}")
+            
             cursor.execute("""
                 SELECT 
                     a.id as asset_id,
+                    a.id,
                     i.id as instance_id,
                     i.file_name,
+                    i.file_path,
                     a.content_title,
                     a.duration_seconds,
-                    a.duration_category
+                    a.duration_category,
+                    a.content_type,
+                    a.active,
+                    a.engagement_score,
+                    a.created_at,
+                    a.updated_at,
+                    a.theme,
+                    json_build_object(
+                        'content_expiry_date', sm.content_expiry_date::text,
+                        'featured', COALESCE(sm.featured, false),
+                        'available_for_scheduling', COALESCE(sm.available_for_scheduling, true)
+                    ) as scheduling
                 FROM assets a
                 JOIN instances i ON a.id = i.asset_id AND i.is_primary = true
                 JOIN holiday_greeting_rotation hgr ON a.id = hgr.asset_id
@@ -404,9 +797,48 @@ class HolidayGreetingIntegration:
             """, (duration_category, compare_date, compare_date))
             
             greetings = cursor.fetchall()
+            holiday_logger.info(f"Found {len(greetings)} greetings for category {duration_category} with date {compare_date}")
+            
+            # If no greetings found, check why
+            if not greetings:
+                cursor.execute("""
+                    SELECT COUNT(*) 
+                    FROM assets a
+                    JOIN holiday_greeting_rotation hgr ON a.id = hgr.asset_id
+                    WHERE a.duration_category = %s
+                """, (duration_category,))
+                category_count = cursor.fetchone()[0]
+                holiday_logger.warning(f"No greetings found! {category_count} exist for {duration_category} in rotation table")
+            
             cursor.close()
             
-            return [dict(g) for g in greetings]
+            # Normalize the results
+            normalized_greetings = []
+            for g in greetings:
+                greeting = dict(g)
+                # Ensure both 'id' and 'asset_id' are present for compatibility
+                if 'asset_id' in greeting and 'id' not in greeting:
+                    greeting['id'] = greeting['asset_id']
+                elif 'id' in greeting and 'asset_id' not in greeting:
+                    greeting['asset_id'] = greeting['id']
+                    
+                # Add theme to top level if not already there
+                if 'theme' not in greeting and 'theme' in g:
+                    greeting['theme'] = g['theme']
+                    
+                # Log if this greeting is expired
+                if greeting.get('scheduling', {}).get('content_expiry_date'):
+                    expiry_str = greeting['scheduling']['content_expiry_date']
+                    try:
+                        expiry_date = datetime.strptime(expiry_str, '%Y-%m-%d')
+                        if expiry_date < compare_date:
+                            holiday_logger.error(f"WARNING: Expired greeting included: {greeting['file_name']} expired on {expiry_str}")
+                    except:
+                        pass
+                        
+                normalized_greetings.append(greeting)
+                
+            return normalized_greetings
             
         except Exception as e:
             logger.error(f"Error getting all holiday greetings: {e}")

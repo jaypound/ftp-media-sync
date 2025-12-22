@@ -13,5 +13,7 @@
     },
     "priority_boost_unplayed": 1000,
     "replay_delay_minutes": 120,
-    "log_level": "INFO"
+    "log_level": "INFO",
+    "auto_populate_meeting_dates_only": false,
+    "auto_populate_comment": "Set to true to only populate holiday greetings for days with meetings"
 }

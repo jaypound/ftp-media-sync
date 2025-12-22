@@ -5339,6 +5339,38 @@ def export_schedule():
                                                         import_log.write(f"  Schedule ID: {created_schedule['id']}\n")
                                                         import_log.write(f"  Items saved: {created_schedule.get('items_count', 0)}\n")
                                                     
+                                                    # Create holiday greeting daily assignments for the imported schedule
+                                                    try:
+                                                        from holiday_greeting_daily_assignments import HolidayGreetingDailyAssignments
+                                                        daily_assignments = HolidayGreetingDailyAssignments(db_manager)
+                                                        
+                                                        # Convert import_date string to datetime
+                                                        import_date_obj = datetime.strptime(import_date, '%Y-%m-%d')
+                                                        
+                                                        # For weekly schedules, create assignments for 7 days
+                                                        num_days = 7 if schedule_type == 'weekly' else 1
+                                                        
+                                                        success = daily_assignments.assign_greetings_for_schedule(
+                                                            created_schedule['id'],
+                                                            import_date_obj,
+                                                            num_days=num_days
+                                                        )
+                                                        
+                                                        if success:
+                                                            with open(import_log_path, 'a') as import_log:
+                                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Holiday greeting daily assignments created successfully!\n")
+                                                            logger.info(f"Created holiday greeting daily assignments for schedule {created_schedule['id']}")
+                                                        else:
+                                                            with open(import_log_path, 'a') as import_log:
+                                                                import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: Failed to create holiday greeting daily assignments\n")
+                                                            logger.warning(f"Failed to create holiday greeting daily assignments for schedule {created_schedule['id']}")
+                                                    
+                                                    except Exception as hg_error:
+                                                        # Log but don't fail the import if holiday greeting assignment fails
+                                                        with open(import_log_path, 'a') as import_log:
+                                                            import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR creating holiday greeting assignments: {str(hg_error)}\n")
+                                                        logger.error(f"Error creating holiday greeting daily assignments: {str(hg_error)}")
+                                                    
                                                     auto_import_result = {
                                                         'imported': True,
                                                         'filename': newest_file['name'],
@@ -7330,6 +7362,12 @@ def fill_template_gaps():
         gaps = data.get('gaps', [])
         post_meeting_delay = data.get('post_meeting_delay', 0)
         
+        # Get schedule_id from template if available and set in holiday greeting integration
+        schedule_id = template.get('id') if template else None
+        if schedule_id and hasattr(scheduler_postgres, 'holiday_integration') and scheduler_postgres.holiday_integration:
+            scheduler_postgres.holiday_integration.set_current_schedule(schedule_id)
+            logger.info(f"Set holiday greeting integration schedule_id to: {schedule_id}")
+        
         # Debug: Log what content was received
         logger.info(f"Fill gaps request received with {len(available_content)} content items")
         content_by_category = {}
@@ -7913,6 +7951,13 @@ def fill_template_gaps():
         
         # Initialize scheduler for rotation logic
         scheduler = scheduler_postgres
+        
+        # Ensure holiday integration is initialized
+        logger.info(f"Before _ensure_holiday_integration: holiday_integration = {scheduler.holiday_integration}")
+        scheduler._ensure_holiday_integration()
+        logger.info(f"After _ensure_holiday_integration: holiday_integration = {scheduler.holiday_integration}")
+        if scheduler.holiday_integration:
+            logger.info(f"Holiday integration enabled: {scheduler.holiday_integration.enabled}")
         
         # Reset rotation to ensure consistent behavior between fills
         scheduler._reset_rotation()
@@ -8538,6 +8583,7 @@ def fill_template_gaps():
                             wrong_category += 1
                             continue
                     
+                    
                     # Special debug logging for PSLA meeting
                     content_title = content.get('content_title', content.get('file_name', 'Unknown'))
                     if 'PSLA' in content_title:
@@ -8780,6 +8826,35 @@ def fill_template_gaps():
                       (20 if x.get('shelf_life_score') == 'high' else 10 if x.get('shelf_life_score') == 'medium' else 0))
                 ))
                 
+                # Apply holiday greeting filter if enabled and this is a duration category
+                logger.info(f"Holiday filter check: integration={scheduler.holiday_integration is not None}, "
+                          f"enabled={scheduler.holiday_integration.enabled if scheduler.holiday_integration else 'N/A'}, "
+                          f"is_duration={is_duration_category}, category={duration_category}, "
+                          f"has_content={len(category_content) > 0}")
+                if (scheduler.holiday_integration and scheduler.holiday_integration.enabled and 
+                    is_duration_category and category_content):
+                    # Calculate the schedule date for this position
+                    if schedule_type == 'weekly':
+                        gap_day_offset = int(current_position // 86400)
+                        schedule_date = (base_date + timedelta(days=gap_day_offset)).strftime('%Y-%m-%d')
+                    else:
+                        schedule_date = base_date.strftime('%Y-%m-%d')
+                    
+                    # Get IDs of all assets already scheduled
+                    exclude_ids = list(asset_schedule_times.keys())
+                    
+                    # Apply holiday greeting filter
+                    filtered_content = scheduler.holiday_integration.filter_available_content(
+                        category_content, 
+                        duration_category, 
+                        exclude_ids,
+                        schedule_date
+                    )
+                    
+                    if filtered_content:
+                        category_content = filtered_content
+                        logger.info(f"Holiday greeting filter applied, {len(category_content)} items after filtering")
+                
                 # For ID content, add variety by selecting from top candidates randomly
                 if is_duration_category and duration_category == 'id' and len(category_content) > 1:
                     # Take top 40% of available IDs (at least 3) to add variety
@@ -8787,7 +8862,7 @@ def fill_template_gaps():
                     top_count = max(3, int(len(category_content) * 0.4))
                     top_candidates = category_content[:top_count]
                     selected = random.choice(top_candidates)
-                    logger.debug(f"Selected ID from top {top_count} candidates for variety")
+                    logger.info(f"Selected ID from top {top_count} candidates for variety")
                 else:
                     # Select the best content for other categories
                     selected = category_content[0]
@@ -15974,9 +16049,16 @@ def scan_default_graphics():
                     logger.info(f"  - ID: {r['id']}, File: {r['file_name']}")
             db_manager._put_connection(conn2)
         
-        message_parts = [f'Added {added_count} new graphics', f'updated {updated_count} existing']
+        message_parts = []
+        if added_count > 0:
+            message_parts.append(f'Added {added_count} new graphics')
+        if updated_count > 0:
+            message_parts.append(f'updated {updated_count} existing')
         if missing_count > 0:
             message_parts.append(f'marked {missing_count} as missing')
+        
+        if not message_parts:
+            message_parts.append('No changes needed')
         
         return jsonify({
             'success': True,
