@@ -5531,6 +5531,12 @@ def generate_castus_schedule(schedule, items, date, format_type='daily', templat
     # Reset day counter for weekly schedules
     generate_castus_schedule.current_day = 0
     """Generate schedule content in Castus format"""
+    logger.info(f"=== GENERATE CASTUS SCHEDULE CALLED ===")
+    logger.info(f"Format type: {format_type}, Items count: {len(items)}")
+    
+    # Log first 3 items to see structure
+    for i, item in enumerate(items[:3]):
+        logger.info(f"Item {i}: file_name={item.get('file_name')}, file_path={item.get('file_path')}, title={item.get('title')}")
     
     lines = []
     
@@ -5564,7 +5570,46 @@ def generate_castus_schedule(schedule, items, date, format_type='daily', templat
         lines.append("filter script = ")
         # Use template defaults if available, otherwise use empty string
         if template and 'defaults' in template and 'global_default' in template['defaults']:
-            lines.append(f"global default={template['defaults']['global_default']}")
+            global_default = template['defaults']['global_default']
+            
+            # Check if this is a video in the Videos folder - replace with newest
+            if '/mnt/main/Videos/' in global_default and global_default.endswith('.mp4'):
+                logger.info(f"=== WEEKLY DEFAULT VIDEO DETECTED ===")
+                logger.info(f"Original: {global_default}")
+                
+                # Get the newest video file from the Videos folder via FTP
+                try:
+                    # Get source FTP manager
+                    source_ftp = ftp_managers.get('source')
+                    if not source_ftp:
+                        # Create connection if needed
+                        source_config = config_manager.get_all_config().get('servers', {}).get('source')
+                        if source_config:
+                            source_ftp = FTPManager(source_config)
+                            if source_ftp.connect():
+                                ftp_managers['source'] = source_ftp
+                    
+                    if source_ftp and source_ftp.connected:
+                        # List files in Videos folder
+                        videos_path = '/mnt/main/Videos'
+                        files = source_ftp.list_files(videos_path)
+                        
+                        # Filter for MP4 files and sort by filename (newest first)
+                        mp4_files = [f for f in files if f['name'].endswith('.mp4')]
+                        mp4_files.sort(key=lambda x: x['name'], reverse=True)
+                        
+                        if mp4_files:
+                            newest_filename = mp4_files[0]['name']
+                            global_default = f"{videos_path}/{newest_filename}"
+                            logger.info(f"✓ Replaced with newest: {global_default}")
+                        else:
+                            logger.warning("✗ No MP4 files found in Videos folder, keeping original")
+                    else:
+                        logger.warning("✗ Could not connect to FTP to check Videos folder")
+                except Exception as e:
+                    logger.error(f"Error finding newest video via FTP: {str(e)}")
+            
+            lines.append(f"global default={global_default}")
         else:
             lines.append("global default=")
         lines.append("global default section=item duration=;")
@@ -6033,6 +6078,17 @@ def generate_castus_schedule(schedule, items, date, format_type='daily', templat
         # Get the file path from the database
         file_path = item.get('file_path', '')
         
+        # Debug logging for Videos folder
+        file_name = item.get('file_name', '') or item.get('filename', '')
+        # Log ALL video files for debugging
+        if file_name.endswith('.mp4'):
+            logger.info(f"=== DEBUG MP4 ITEM ===")
+            logger.info(f"file_name: {file_name}")
+            logger.info(f"file_path: {file_path}")
+            # Check various patterns
+            if any(pattern in str(file_path) for pattern in ['/mnt/main/Videos', 'Videos/', '_FILL_', '251107_RANDOM']):
+                logger.info("*** This looks like a default video! ***")
+        
         # Check if this is a live input (placeholder asset or metadata flag)
         # Live inputs use asset_id=300 (placeholder) or have is_live_input in metadata
         if item.get('asset_id') == 300 or (metadata and metadata.get('is_live_input')):
@@ -6094,6 +6150,52 @@ def generate_castus_schedule(schedule, items, date, format_type='daily', templat
                     relative_path = path_parts[-1]
             
             file_path = f"/mnt/main/ATL26 On-Air Content/{relative_path}"
+        
+        # If file_path is empty but we have a file_name, construct the path
+        if not file_path and file_name:
+            # For videos without a path, construct a default path
+            file_path = f"/mnt/main/ATL26 On-Air Content/Videos/{file_name}"
+            logger.info(f"Constructed file_path from file_name: {file_path}")
+        
+        # Check if this is a video in the Videos folder - replace with newest
+        if (('/Videos/' in file_path or file_path.startswith('/mnt/main/Videos/')) and file_path.endswith('.mp4')):
+            logger.info("=== VIDEO IN VIDEOS FOLDER DETECTED ===")
+            logger.info(f"Original path: {file_path}")
+            
+            # Extract just the filename from the path
+            import os
+            old_filename = os.path.basename(file_path)
+            
+            # Query for the newest video file in the Videos folder
+            conn = db_manager._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT i.file_name 
+                    FROM instances i 
+                    WHERE i.file_path LIKE '%/Videos/%' 
+                    AND i.file_name LIKE '%.mp4'
+                    ORDER BY i.file_name DESC 
+                    LIMIT 1
+                """)
+                
+                newest_video = cursor.fetchone()
+                cursor.close()
+                
+                if newest_video:
+                    newest_filename = newest_video[0]
+                    # Replace just the filename part
+                    file_path = file_path.replace(old_filename, newest_filename)
+                    logger.info(f"✓ Replaced '{old_filename}' with newest: '{newest_filename}'")
+                    logger.info(f"New path: {file_path}")
+                else:
+                    logger.warning("✗ No videos found in Videos folder, keeping original")
+            except Exception as e:
+                logger.error(f"Error finding newest video: {str(e)}")
+            finally:
+                db_manager._put_connection(conn)
+            
+            logger.info("=== VIDEO REPLACEMENT COMPLETE ===")
         
         lines.append("{")
         # Explicitly use TAB character (ASCII 9) to ensure it's not converted
@@ -6235,20 +6337,98 @@ def load_schedule_template():
                 filename = item.get('filename')
                 if filename:
                     logger.debug(f"Processing asset for: {filename}")
-                    asset_match = asset_matches.get(filename)
-                    if asset_match:
-                        item['asset_id'] = asset_match['id']
-                        item['content_id'] = asset_match['id']  # For backwards compatibility
-                        item['content_type'] = asset_match.get('content_type')
-                        item['content_title'] = asset_match.get('content_title')
-                        # Use the duration from the database
-                        if asset_match.get('duration_seconds'):
-                            item['duration_seconds'] = asset_match['duration_seconds']
-                        item['matched'] = True
-                        logger.debug(f"Found match for {filename}: asset_id={asset_match['id']}, duration={asset_match.get('duration_seconds')}")
+                    
+                    # Special handling for placeholder video - find the newest video instead
+                    if filename == '251107_RANDOM.mp4':
+                        logger.info(f"=== PLACEHOLDER VIDEO DETECTION ===")
+                        logger.info(f"Detected placeholder video {filename}, finding newest FILL video...")
+                        
+                        # Query for the newest video file directly
+                        conn = db_manager._get_connection()
+                        try:
+                            cursor = conn.cursor()
+                            # Find newest video based on filename pattern (YYMMDDHHMI_FILL_*.mp4)
+                            logger.info("Executing query to find newest FILL video...")
+                            
+                            # First, let's see what FILL videos exist
+                            cursor.execute("""
+                                SELECT i.file_name 
+                                FROM instances i 
+                                WHERE i.file_name LIKE '%_FILL_%%.mp4' 
+                                ORDER BY i.file_name DESC 
+                                LIMIT 10
+                            """)
+                            fill_videos = cursor.fetchall()
+                            logger.info(f"Top 10 FILL videos in database:")
+                            for video in fill_videos:
+                                logger.info(f"  - {video[0]}")
+                            
+                            cursor.execute("""
+                                SELECT 
+                                    a.id,
+                                    a.guid,
+                                    a.content_type,
+                                    a.content_title,
+                                    a.duration_seconds,
+                                    i.file_name,
+                                    i.file_path
+                                FROM assets a
+                                JOIN instances i ON a.id = i.asset_id
+                                WHERE i.file_name LIKE '%_FILL_%%.mp4'
+                                ORDER BY i.file_name DESC
+                                LIMIT 1
+                            """)
+                            
+                            newest_video = cursor.fetchone()
+                            cursor.close()
+                            
+                            if newest_video:
+                                asset_match = {
+                                    'id': newest_video[0],
+                                    'guid': newest_video[1],
+                                    'content_type': newest_video[2],
+                                    'content_title': newest_video[3],
+                                    'duration_seconds': newest_video[4],
+                                    'file_name': newest_video[5],
+                                    'file_path': newest_video[6]
+                                }
+                                item['asset_id'] = asset_match['id']
+                                item['content_id'] = asset_match['id']  # For backwards compatibility
+                                item['content_type'] = asset_match.get('content_type')
+                                item['content_title'] = asset_match.get('content_title')
+                                # Update the filename to the actual newest video
+                                item['filename'] = asset_match['file_name']
+                                item['file_name'] = asset_match['file_name']
+                                # Use the duration from the database
+                                if asset_match.get('duration_seconds'):
+                                    item['duration_seconds'] = asset_match['duration_seconds']
+                                item['matched'] = True
+                                logger.info(f"✓ FOUND NEWEST FILL VIDEO: {asset_match['file_name']}")
+                                logger.info(f"  Asset ID: {asset_match['id']}")
+                                logger.info(f"  Duration: {asset_match['duration_seconds']} seconds")
+                                logger.info(f"=== PLACEHOLDER REPLACEMENT COMPLETE ===")
+                            else:
+                                item['matched'] = False
+                                logger.warning(f"✗ NO FILL VIDEOS FOUND in database for placeholder {filename}")
+                                logger.warning(f"=== PLACEHOLDER REPLACEMENT FAILED ===")
+                        finally:
+                            db_manager._put_connection(conn)
                     else:
-                        item['matched'] = False
-                        logger.debug(f"No match found for {filename}")
+                        # Normal asset lookup
+                        asset_match = asset_matches.get(filename)
+                        if asset_match:
+                            item['asset_id'] = asset_match['id']
+                            item['content_id'] = asset_match['id']  # For backwards compatibility
+                            item['content_type'] = asset_match.get('content_type')
+                            item['content_title'] = asset_match.get('content_title')
+                            # Use the duration from the database
+                            if asset_match.get('duration_seconds'):
+                                item['duration_seconds'] = asset_match['duration_seconds']
+                            item['matched'] = True
+                            logger.debug(f"Found match for {filename}: asset_id={asset_match['id']}, duration={asset_match.get('duration_seconds')}")
+                        else:
+                            item['matched'] = False
+                            logger.debug(f"No match found for {filename}")
             
             # Final debug before sending
             if schedule_data['type'] == 'weekly':
@@ -17244,17 +17424,71 @@ def test_schedule_import():
                         with open(import_log_path, 'a') as import_log:
                             import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Looking up asset: {file_name}\n")
                         
-                        asset = db_manager.find_asset_by_filename(file_name)
-                        if asset:
-                            item['asset_id'] = asset['id']
-                            item['duration_seconds'] = asset['duration_seconds']
-                            matched_items.append(item)
+                        # Special handling for placeholder video - find the newest video instead
+                        if file_name == '251107_RANDOM.mp4':
                             with open(import_log_path, 'a') as import_log:
-                                import_log.write(f"  ✓ Found asset ID: {asset['id']}\n")
+                                import_log.write(f"  → Detected placeholder video, finding newest video file...\n")
+                            
+                            # Query for the newest video file
+                            conn = db_manager._get_connection()
+                            try:
+                                cursor = conn.cursor()
+                                # Find newest video based on filename pattern (YYMMDDHHMI_FILL_*.mp4)
+                                cursor.execute("""
+                                    SELECT 
+                                        a.id,
+                                        a.guid,
+                                        a.content_type,
+                                        a.content_title,
+                                        a.duration_seconds,
+                                        i.file_name,
+                                        i.file_path
+                                    FROM assets a
+                                    JOIN instances i ON a.id = i.asset_id
+                                    WHERE i.file_name LIKE '%_FILL_%%.mp4'
+                                    ORDER BY i.file_name DESC
+                                    LIMIT 1
+                                """)
+                                
+                                newest_video = cursor.fetchone()
+                                cursor.close()
+                                
+                                if newest_video:
+                                    asset = {
+                                        'id': newest_video[0],
+                                        'guid': newest_video[1],
+                                        'content_type': newest_video[2],
+                                        'content_title': newest_video[3],
+                                        'duration_seconds': newest_video[4],
+                                        'file_name': newest_video[5],
+                                        'file_path': newest_video[6]
+                                    }
+                                    item['asset_id'] = asset['id']
+                                    item['duration_seconds'] = asset['duration_seconds']
+                                    # Update the filename to the actual newest video
+                                    item['filename'] = asset['file_name']
+                                    item['file_name'] = asset['file_name']
+                                    matched_items.append(item)
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"  ✓ Found newest video: {asset['file_name']} (Asset ID: {asset['id']})\n")
+                                else:
+                                    with open(import_log_path, 'a') as import_log:
+                                        import_log.write(f"  ✗ No FILL videos found in database\n")
+                                    unmatched_items.append(item)
+                            finally:
+                                db_manager._put_connection(conn)
                         else:
-                            unmatched_items.append(item)
-                            with open(import_log_path, 'a') as import_log:
-                                import_log.write(f"  ✗ Asset not found in database\n")
+                            asset = db_manager.find_asset_by_filename(file_name)
+                            if asset:
+                                item['asset_id'] = asset['id']
+                                item['duration_seconds'] = asset['duration_seconds']
+                                matched_items.append(item)
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"  ✓ Found asset ID: {asset['id']}\n")
+                            else:
+                                unmatched_items.append(item)
+                                with open(import_log_path, 'a') as import_log:
+                                    import_log.write(f"  ✗ Asset not found in database\n")
                     
                     with open(import_log_path, 'a') as import_log:
                         import_log.write(f"[{datetime.now().strftime('%H:%M:%S')}] Asset matching complete - Matched: {len(matched_items)}, Unmatched: {len(unmatched_items)}\n")

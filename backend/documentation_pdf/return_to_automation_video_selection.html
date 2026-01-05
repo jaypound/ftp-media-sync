@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Return to Automation Video Selection</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Return to Automation Video Selection</h1>
+</header>
+<h1
+id="return-to-automation-video-selection---technical-documentation">Return
+to Automation Video Selection - Technical Documentation</h1>
+<h2 id="overview">Overview</h2>
+<p>The return to automation workflow ensures that weekly schedules
+always use the newest default video file from the
+<code>/mnt/main/Videos/</code> folder when exporting schedules. This
+document describes the technical implementation and debugging
+procedures.</p>
+<h2 id="problem-statement">Problem Statement</h2>
+<p>When creating weekly schedules, the system was selecting older video
+files (e.g., <code>2512261404_FILL_alphabetical_430.mp4</code> from Dec
+26, 2025) instead of the newest ones (e.g.,
+<code>2601050923_FILL_alphabetical_420.mp4</code> from Jan 5, 2026) for
+the “Weekly Default” content in Castus.</p>
+<h2 id="solution-architecture">Solution Architecture</h2>
+<h3 id="video-storage-location">1. Video Storage Location</h3>
+<ul>
+<li><strong>Path</strong>: <code>/mnt/main/Videos/</code></li>
+<li><strong>Naming Convention</strong>:
+<code>YYMMDDHHMI_FILL_&lt;sort_order&gt;_&lt;duration&gt;.mp4</code>
+<ul>
+<li>YY: Year (2 digits)</li>
+<li>MM: Month</li>
+<li>DD: Day</li>
+<li>HH: Hour (24-hour format)</li>
+<li>MI: Minutes</li>
+<li>Example: <code>2601050923</code> = January 5, 2026, 09:23 AM</li>
+</ul></li>
+</ul>
+<h3 id="key-components">2. Key Components</h3>
+<h4
+id="weekly-template-generation-generate_weekly_schedule_template">Weekly
+Template Generation
+(<code>generate_weekly_schedule_template</code>)</h4>
+<ul>
+<li>Located in: <code>backend/app.py</code> (line ~12582)</li>
+<li>Adds placeholder video after meetings:</li>
+</ul>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>template_lines.extend([</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="st">&#39;{&#39;</span>,</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="ss">f&#39;</span><span class="ch">\t</span><span class="ss">item=/mnt/main/Videos/251107_RANDOM.mp4&#39;</span>,</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">&#39;</span><span class="ch">\t</span><span class="st">loop=0&#39;</span>,</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="ss">f&#39;</span><span class="ch">\t</span><span class="ss">guid=</span><span class="sc">{</span>video_guid<span class="sc">}</span><span class="ss">&#39;</span>,</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    <span class="ss">f&#39;</span><span class="ch">\t</span><span class="ss">start=</span><span class="sc">{</span>day_name<span class="sc">}</span><span class="ss"> </span><span class="sc">{</span>video_start_time_lower<span class="sc">}</span><span class="ss">&#39;</span>,</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="ss">f&#39;</span><span class="ch">\t</span><span class="ss">end=</span><span class="sc">{</span>day_name<span class="sc">}</span><span class="ss"> </span><span class="sc">{</span>video_end_time_lower<span class="sc">}</span><span class="ss">&#39;</span>,</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="st">&#39;}&#39;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>])</span></code></pre></div>
+<h4 id="template-defaults-update-update_template_defaults">Template
+Defaults Update (<code>update_template_defaults</code>)</h4>
+<ul>
+<li>Located in: <code>backend/app.py</code> (line ~14662)</li>
+<li>Sets the global default video:</li>
+</ul>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>template[<span class="st">&#39;defaults&#39;</span>][<span class="st">&#39;global_default&#39;</span>] <span class="op">=</span> default_project</span></code></pre></div>
+<h4 id="schedule-export-generate_castus_schedule">Schedule Export
+(<code>generate_castus_schedule</code>)</h4>
+<ul>
+<li>Located in: <code>backend/app.py</code> (lines 5572-5610)</li>
+<li>Critical section that performs the video replacement:</li>
+</ul>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> template <span class="kw">and</span> <span class="st">&#39;defaults&#39;</span> <span class="kw">in</span> template <span class="kw">and</span> <span class="st">&#39;global_default&#39;</span> <span class="kw">in</span> template[<span class="st">&#39;defaults&#39;</span>]:</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    global_default <span class="op">=</span> template[<span class="st">&#39;defaults&#39;</span>][<span class="st">&#39;global_default&#39;</span>]</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Check if this is a video in the Videos folder - replace with newest</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="st">&#39;/mnt/main/Videos/&#39;</span> <span class="kw">in</span> global_default <span class="kw">and</span> global_default.endswith(<span class="st">&#39;.mp4&#39;</span>):</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        logger.info(<span class="ss">f&quot;=== WEEKLY DEFAULT VIDEO DETECTED ===&quot;</span>)</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        logger.info(<span class="ss">f&quot;Original: </span><span class="sc">{</span>global_default<span class="sc">}</span><span class="ss">&quot;</span>)</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Get the newest video file from the Videos folder via FTP</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>        <span class="cf">try</span>:</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>            <span class="co"># Get source FTP manager</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>            source_ftp <span class="op">=</span> ftp_managers.get(<span class="st">&#39;source&#39;</span>)</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>            <span class="cf">if</span> <span class="kw">not</span> source_ftp:</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>                <span class="co"># Create connection if needed</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>                source_config <span class="op">=</span> config_manager.get_all_config().get(<span class="st">&#39;servers&#39;</span>, {}).get(<span class="st">&#39;source&#39;</span>)</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>                <span class="cf">if</span> source_config:</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>                    source_ftp <span class="op">=</span> FTPManager(source_config)</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>                    <span class="cf">if</span> source_ftp.<span class="ex">connect</span>():</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>                        ftp_managers[<span class="st">&#39;source&#39;</span>] <span class="op">=</span> source_ftp</span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>            </span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>            <span class="cf">if</span> source_ftp <span class="kw">and</span> source_ftp.connected:</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>                <span class="co"># List files in Videos folder</span></span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>                videos_path <span class="op">=</span> <span class="st">&#39;/mnt/main/Videos&#39;</span></span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>                files <span class="op">=</span> source_ftp.list_files(videos_path)</span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>                </span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>                <span class="co"># Filter for MP4 files and sort by filename (newest first)</span></span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>                mp4_files <span class="op">=</span> [f <span class="cf">for</span> f <span class="kw">in</span> files <span class="cf">if</span> f[<span class="st">&#39;name&#39;</span>].endswith(<span class="st">&#39;.mp4&#39;</span>)]</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>                mp4_files.sort(key<span class="op">=</span><span class="kw">lambda</span> x: x[<span class="st">&#39;name&#39;</span>], reverse<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>                </span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>                <span class="cf">if</span> mp4_files:</span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>                    newest_filename <span class="op">=</span> mp4_files[<span class="dv">0</span>][<span class="st">&#39;name&#39;</span>]</span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>                    global_default <span class="op">=</span> <span class="ss">f&quot;</span><span class="sc">{</span>videos_path<span class="sc">}</span><span class="ss">/</span><span class="sc">{</span>newest_filename<span class="sc">}</span><span class="ss">&quot;</span></span>
+<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>                    logger.info(<span class="ss">f&quot;✓ Replaced with newest: </span><span class="sc">{</span>global_default<span class="sc">}</span><span class="ss">&quot;</span>)</span>
+<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>                <span class="cf">else</span>:</span>
+<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>                    logger.warning(<span class="st">&quot;✗ No MP4 files found in Videos folder, keeping original&quot;</span>)</span>
+<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a>            <span class="cf">else</span>:</span>
+<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>                logger.warning(<span class="st">&quot;✗ Could not connect to FTP to check Videos folder&quot;</span>)</span>
+<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>        <span class="cf">except</span> <span class="pp">Exception</span> <span class="im">as</span> e:</span>
+<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>            logger.error(<span class="ss">f&quot;Error finding newest video via FTP: </span><span class="sc">{</span><span class="bu">str</span>(e)<span class="sc">}</span><span class="ss">&quot;</span>)</span></code></pre></div>
+<h2 id="process-flow">Process Flow</h2>
+<ol type="1">
+<li><strong>Weekly Schedule Creation</strong>
+<ul>
+<li>User creates a weekly schedule template</li>
+<li>System adds meetings and places default videos after each
+meeting</li>
+<li>Template is saved with placeholder or existing video reference</li>
+</ul></li>
+<li><strong>Fill Gaps Process</strong>
+<ul>
+<li>Template gaps are filled with content from the database</li>
+<li>The placeholder video (<code>251107_RANDOM.mp4</code>) may be
+replaced with an actual video file</li>
+</ul></li>
+<li><strong>Schedule Export</strong>
+<ul>
+<li>User exports the schedule</li>
+<li><code>generate_castus_schedule</code> function is called</li>
+<li>System checks if the global default is a video in
+<code>/mnt/main/Videos/</code></li>
+<li>If yes, connects to FTP and lists all files in the Videos
+folder</li>
+<li>Sorts files by filename (descending) to get the newest</li>
+<li>Replaces the old video path with the newest one</li>
+<li>Exports the schedule with the updated video reference</li>
+</ul></li>
+</ol>
+<h2 id="castus-schedule-format">Castus Schedule Format</h2>
+<p>The weekly default video appears in the Castus schedule header
+as:</p>
+<pre><code>defaults, day of the week{
+}
+day = 0
+time slot length = 30
+scrolltime = 12:00 am
+filter script = 
+global default=/mnt/main/Videos/2601050923_FILL_alphabetical_420.mp4
+global default section=item duration=;
+text encoding = UTF-8
+schedule format version = 5.0.0.4 2021/01/15</code></pre>
+<h2 id="important-notes">Important Notes</h2>
+<ol type="1">
+<li><p><strong>Videos Not in Database</strong>: Files in
+<code>/mnt/main/Videos/</code> are NOT scanned into the database. This
+is why the solution uses FTP to list files directly from the
+folder.</p></li>
+<li><p><strong>FTP Connection</strong>: The system reuses existing FTP
+connections when possible, creating new ones only when needed.</p></li>
+<li><p><strong>Sorting Logic</strong>: Files are sorted by filename in
+descending order. Since filenames start with YYMMDDHHMI, this
+effectively sorts by creation timestamp.</p></li>
+<li><p><strong>Default Videos vs Regular Content</strong>:</p>
+<ul>
+<li>Default videos: Stored in <code>/mnt/main/Videos/</code>, used for
+return to automation</li>
+<li>Regular content: Stored in various subfolders, tracked in the
+database</li>
+</ul></li>
+</ol>
+<h2 id="debugging-steps">Debugging Steps</h2>
+<h3 id="check-if-video-detection-is-triggered">1. Check if Video
+Detection is Triggered</h3>
+<p>Look for these log messages:</p>
+<pre><code>=== WEEKLY DEFAULT VIDEO DETECTED ===
+Original: /mnt/main/Videos/[old_filename]
+✓ Replaced with newest: /mnt/main/Videos/[new_filename]</code></pre>
+<h3 id="common-issues-and-solutions">2. Common Issues and Solutions</h3>
+<p><strong>Issue</strong>: “No videos found in Videos folder” -
+<strong>Cause</strong>: FTP connection failed or folder is empty -
+<strong>Solution</strong>: Check FTP connection and verify folder
+contents</p>
+<p><strong>Issue</strong>: Wrong video selected -
+<strong>Cause</strong>: Filename doesn’t follow expected pattern -
+<strong>Solution</strong>: Verify all videos follow YYMMDDHHMI naming
+convention</p>
+<p><strong>Issue</strong>: Detection not triggered -
+<strong>Cause</strong>: Global default path doesn’t match expected
+pattern - <strong>Solution</strong>: Check
+template[‘defaults’][‘global_default’] value</p>
+<h3 id="manual-testing">3. Manual Testing</h3>
+<ol type="1">
+<li>Create a weekly schedule template with meetings</li>
+<li>Fill gaps if needed</li>
+<li>Export the template</li>
+<li>Check console logs for replacement messages</li>
+<li>Verify the exported .sch file contains the newest video path</li>
+</ol>
+<h3 id="log-locations">4. Log Locations</h3>
+<ul>
+<li>Console output: Check terminal or redirect to file with
+<code>tee</code></li>
+<li>Debug logs show:
+<ul>
+<li>When <code>generate_castus_schedule</code> is called</li>
+<li>Template structure and items</li>
+<li>FTP connection status</li>
+<li>File listing results</li>
+<li>Replacement operations</li>
+</ul></li>
+</ul>
+<h2 id="code-locations-summary">Code Locations Summary</h2>
+<table>
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 16%" />
+<col style="width: 27%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Component</th>
+<th>File</th>
+<th>Function</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Weekly Template</td>
+<td>app.py:~12582</td>
+<td><code>generate_weekly_schedule_template</code></td>
+<td>Adds placeholder videos</td>
+</tr>
+<tr>
+<td>Template Defaults</td>
+<td>app.py:~14662</td>
+<td><code>update_template_defaults</code></td>
+<td>Sets global default</td>
+</tr>
+<tr>
+<td>Export Logic</td>
+<td>app.py:5572-5610</td>
+<td><code>generate_castus_schedule</code></td>
+<td>Replaces with newest video</td>
+</tr>
+<tr>
+<td>FTP Manager</td>
+<td>ftp_manager.py</td>
+<td><code>list_files</code></td>
+<td>Lists Videos folder contents</td>
+</tr>
+</tbody>
+</table>
+<h2 id="testing-checklist">Testing Checklist</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" />Create weekly schedule with
+meetings</label></li>
+<li><label><input type="checkbox" />Verify placeholder video is added
+after meetings</label></li>
+<li><label><input type="checkbox" />Export schedule</label></li>
+<li><label><input type="checkbox" />Check logs for “WEEKLY DEFAULT VIDEO
+DETECTED”</label></li>
+<li><label><input type="checkbox" />Verify newest video is
+selected</label></li>
+<li><label><input type="checkbox" />Import schedule in
+Castus</label></li>
+<li><label><input type="checkbox" />Confirm Weekly Default shows newest
+video</label></li>
+</ul>
+<hr />
+<p><em>Last Updated: January 5, 2026</em> <em>Author: Claude
+Assistant</em></p>
+</body>
+</html>
