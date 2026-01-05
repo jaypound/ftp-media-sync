@@ -25,6 +25,16 @@ function meetingScheduleInit() {
     window.meetingScheduleLoadMeetings = meetingScheduleLoadMeetings;
     window.meetingScheduleDisplayMeetings = meetingScheduleDisplayMeetings;
     
+    // Prevent form submission on Enter key
+    const meetingForm = document.getElementById('meetingForm');
+    if (meetingForm) {
+        meetingForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            console.log('Form submit prevented');
+            return false;
+        });
+    }
+    
     // Load meetings
     meetingScheduleLoadMeetings();
     
@@ -187,9 +197,16 @@ function meetingScheduleOpenAddModal() {
     const modalTitle = document.getElementById('meetingModalTitle');
     if (modalTitle) modalTitle.textContent = 'Add Meeting';
     
-    // Clear form
-    document.getElementById('meetingId').value = '';
-    document.getElementById('meetingForm').reset();
+    // Clear form - ensure meetingId is explicitly cleared first
+    const meetingIdField = document.getElementById('meetingId');
+    if (meetingIdField) meetingIdField.value = '';
+    
+    // Reset the form
+    const meetingForm = document.getElementById('meetingForm');
+    if (meetingForm) meetingForm.reset();
+    
+    // Double-check meetingId is cleared after reset
+    if (meetingIdField) meetingIdField.value = '';
     
     // Set default date to today in local timezone
     const today = new Date();
@@ -346,6 +363,9 @@ async function meetingScheduleSaveMeeting() {
     
     const meetingId = document.getElementById('meetingId').value;
     
+    // Debug log
+    console.log('Saving meeting - meetingId:', meetingId || 'NEW');
+    
     // Get the save button to show loading state
     const saveBtn = event.target || document.querySelector('[onclick*="meetingScheduleSaveMeeting"]');
     const originalBtnText = saveBtn ? saveBtn.innerHTML : '';
@@ -388,11 +408,14 @@ async function meetingScheduleSaveMeeting() {
     
     try {
         let response;
-        if (meetingId) {
+        // Only treat as update if meetingId is a non-empty string
+        if (meetingId && meetingId.trim() !== '') {
             // Update existing
+            console.log('Updating meeting:', meetingId);
             response = await window.API.put(`/meetings/${meetingId}`, formData);
         } else {
             // Create new
+            console.log('Creating new meeting');
             response = await window.API.post('/meetings', formData);
         }
         
@@ -441,6 +464,10 @@ async function meetingScheduleDeleteMeeting(meetingId) {
 function meetingScheduleCloseMeetingModal() {
     const modal = document.getElementById('meetingModal');
     if (modal) modal.classList.remove('active');
+    
+    // Clear the form to prevent stale data
+    document.getElementById('meetingId').value = '';
+    document.getElementById('meetingForm').reset();
 }
 
 // Load trim settings
