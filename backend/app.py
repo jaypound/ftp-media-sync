@@ -13187,6 +13187,7 @@ def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_p
         with open(audio_concat, 'w') as f:
             for audio in region3_files:
                 f.write(f"file '{audio}'\n")
+        # Use concat demuxer for audio files
         cmd.extend(['-f', 'concat', '-safe', '0', '-i', audio_concat])
     
     # Video settings based on format
@@ -13265,7 +13266,26 @@ def generate_ffmpeg_command(region1_files, region2_file, region3_files, output_p
     # Map audio if available and use shortest input stream duration
     if region3_files:
         audio_index = num_region1_inputs + (1 if region2_file else 0)
-        cmd.extend(['-map', f'{audio_index}:a'])
+        
+        # Check if we already have a filter_complex
+        if '-filter_complex' in cmd:
+            # Find the filter_complex index and modify it to include audio processing
+            fc_index = cmd.index('-filter_complex')
+            existing_filter = cmd[fc_index + 1]
+            
+            # Add audio normalization filter to handle 16/24-bit WAV files
+            audio_filter = f'[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates=48000,aresample=48000[aout]'
+            cmd[fc_index + 1] = existing_filter + ';' + audio_filter
+            
+            # Map the filtered audio
+            map_index = cmd.index('-map')
+            cmd.insert(map_index + 2, '-map')
+            cmd.insert(map_index + 3, '[aout]')
+        else:
+            # No existing filter_complex, create one for audio
+            audio_filter = f'[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates=48000,aresample=48000[aout]'
+            cmd.extend(['-filter_complex', audio_filter, '-map', '[aout]'])
+        
         # Make the output duration match the audio duration or max_length, whichever is shorter
         cmd.extend(['-shortest'])
         # Also apply max_length as a hard limit

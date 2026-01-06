@@ -4,7 +4,7 @@ export BASE="/opt/$APP_NAME"
 
 # update version
 
-export TAG="v1.85"
+export TAG="v1.87"
 
 export REL="$BASE/releases/$(date +%Y%m%d_%H%M%S)_$TAG"
 
