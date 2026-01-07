@@ -7407,6 +7407,78 @@ def load_schedule_from_ftp():
         logger.error(f"Error loading schedule from FTP: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
+def seconds_to_time_str(seconds, include_ms=True):
+    """Convert seconds to HH:MM:SS or HH:MM:SS.mmm format"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    
+    if include_ms:
+        milliseconds = int((secs % 1) * 1000)
+        secs = int(secs)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{milliseconds:03d}"
+    else:
+        secs = int(secs)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+def get_active_meeting_promos(schedule_date, db_manager):
+    """Get active meeting promos for a given date
+    
+    Returns:
+        dict: {'pre': [promo_list], 'post': [promo_list]}
+    """
+    try:
+        from meeting_promos import MeetingPromosManager
+        promos_mgr = MeetingPromosManager(db_manager)
+        
+        # Get settings
+        settings = promos_mgr.get_settings()
+        
+        result = {'pre': [], 'post': []}
+        
+        if not settings:
+            return result
+            
+        # Get active promos for the date
+        all_promos = promos_mgr.get_promos(active_only=True)
+        
+        # Convert schedule_date to date object for comparison
+        if isinstance(schedule_date, str):
+            schedule_date = datetime.strptime(schedule_date, '%Y-%m-%d').date()
+        elif hasattr(schedule_date, 'date'):
+            schedule_date = schedule_date.date()
+            
+        for promo in all_promos:
+            # Check go live and expiration dates
+            go_live = promo.get('go_live_date')
+            expiration = promo.get('expiration_date')
+            
+            if go_live:
+                go_live_date = datetime.strptime(go_live, '%Y-%m-%d').date() if isinstance(go_live, str) else go_live
+                if schedule_date < go_live_date:
+                    continue
+                    
+            if expiration:
+                expiration_date = datetime.strptime(expiration, '%Y-%m-%d').date() if isinstance(expiration, str) else expiration
+                if schedule_date > expiration_date:
+                    continue
+            
+            # Add to appropriate list based on type
+            if promo['promo_type'] == 'pre' and settings.get('pre_meeting_enabled', False):
+                result['pre'].append(promo)
+            elif promo['promo_type'] == 'post' and settings.get('post_meeting_enabled', False):
+                result['post'].append(promo)
+                
+        # Sort by sort_order
+        result['pre'].sort(key=lambda x: x.get('sort_order', 999))
+        result['post'].sort(key=lambda x: x.get('sort_order', 999))
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting active meeting promos: {e}")
+        return {'pre': [], 'post': []}
+
 @app.route('/api/fill-template-gaps', methods=['POST'])
 def fill_template_gaps():
     """Fill gaps in a template using the same logic as schedule creation"""
@@ -8039,6 +8111,13 @@ def fill_template_gaps():
             
             gaps = unique_gaps
             logger.info(f"After adjustment and deduplication: {len(gaps)} gaps remain")
+            
+            # Meeting promos disabled - feature needs more work
+            # schedule_date = data.get('schedule_date') or data.get('date', datetime.now().strftime('%Y-%m-%d'))
+            # active_promos = get_active_meeting_promos(schedule_date, db_manager)
+            
+            # Meeting promos processing removed - feature needs more work
+            
             gap_logger.info(f"\n=== FINAL ADJUSTED GAPS ===")
             gap_logger.info(f"Total adjusted gaps: {len(gaps)}")
             for i, gap in enumerate(gaps):
@@ -9991,6 +10070,9 @@ def fill_template_gaps():
             })
         
         logger.info("VERIFICATION PASSED: All original items preserved, no overlaps detected")
+        
+        # Meeting promo handling removed - feature needs more work
+            
         gap_logger.info(f"\n=== FILL GAPS COMPLETED SUCCESSFULLY ===")
         gap_logger.info(f"Total items added: {len(items_added)}")
         gap_logger.info(f"Debug log saved to: {debug_log_file}")
@@ -17989,6 +18071,330 @@ def auto_generation_history():
             'success': False,
             'message': str(e)
         })
+
+# Meeting Promos Management Endpoints
+@app.route('/api/meeting-promos/settings', methods=['GET'])
+def get_meeting_promo_settings():
+    """Get meeting promo settings"""
+    try:
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        settings = promos_manager.get_settings()
+        
+        return jsonify({
+            'success': True,
+            'settings': settings
+        })
+    except Exception as e:
+        logger.error(f"Error getting promo settings: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos/settings', methods=['POST'])
+def update_meeting_promo_settings():
+    """Update meeting promo settings"""
+    try:
+        data = request.json
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        success = promos_manager.update_settings(
+            pre_enabled=data.get('pre_meeting_enabled', False),
+            post_enabled=data.get('post_meeting_enabled', False),
+            pre_limit=data.get('pre_meeting_duration_limit'),
+            post_limit=data.get('post_meeting_duration_limit'),
+            updated_by=request.remote_addr
+        )
+        
+        return jsonify({
+            'success': success,
+            'message': 'Settings updated' if success else 'Failed to update settings'
+        })
+    except Exception as e:
+        logger.error(f"Error updating promo settings: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos', methods=['GET'])
+def get_meeting_promos():
+    """Get all meeting promos"""
+    try:
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        promo_type = request.args.get('type')
+        active_only = request.args.get('active_only', 'true').lower() == 'true'
+        include_expired = request.args.get('include_expired', 'false').lower() == 'true'
+        
+        promos = promos_manager.get_promos(
+            promo_type=promo_type,
+            active_only=active_only,
+            include_expired=include_expired
+        )
+        
+        return jsonify({
+            'success': True,
+            'promos': promos
+        })
+    except Exception as e:
+        logger.error(f"Error getting promos: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos', methods=['POST'])
+def add_meeting_promo():
+    """Add a new meeting promo"""
+    try:
+        data = request.json
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        # Parse dates
+        go_live_date = None
+        if data.get('go_live_date'):
+            go_live_date = datetime.strptime(data['go_live_date'], '%Y-%m-%d').date()
+        
+        expiration_date = None
+        if data.get('expiration_date'):
+            expiration_date = datetime.strptime(data['expiration_date'], '%Y-%m-%d').date()
+        
+        promo_id = promos_manager.add_promo(
+            file_path=data['file_path'],
+            file_name=data['file_name'],
+            promo_type=data['promo_type'],
+            duration_seconds=data['duration_seconds'],
+            go_live_date=go_live_date,
+            expiration_date=expiration_date,
+            is_active=data.get('is_active', True),
+            sort_order=data.get('sort_order', 0),
+            created_by=request.remote_addr,
+            notes=data.get('notes')
+        )
+        
+        # Check if promo_id is valid (not None and not 0)
+        success = promo_id is not None and promo_id > 0
+        
+        return jsonify({
+            'success': success,
+            'promo_id': promo_id,
+            'message': 'Promo added successfully' if success else 'Failed to add promo'
+        })
+    except Exception as e:
+        logger.error(f"Error adding promo: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos/<int:promo_id>', methods=['PUT'])
+def update_meeting_promo(promo_id):
+    """Update an existing meeting promo"""
+    try:
+        data = request.json
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        # Parse dates if provided
+        if 'go_live_date' in data and data['go_live_date']:
+            data['go_live_date'] = datetime.strptime(data['go_live_date'], '%Y-%m-%d').date()
+        elif 'go_live_date' in data and data['go_live_date'] is None:
+            data['go_live_date'] = None
+            
+        if 'expiration_date' in data and data['expiration_date']:
+            data['expiration_date'] = datetime.strptime(data['expiration_date'], '%Y-%m-%d').date()
+        elif 'expiration_date' in data and data['expiration_date'] is None:
+            data['expiration_date'] = None
+        
+        success = promos_manager.update_promo(promo_id, **data)
+        
+        return jsonify({
+            'success': success,
+            'message': 'Promo updated successfully' if success else 'Failed to update promo'
+        })
+    except Exception as e:
+        logger.error(f"Error updating promo: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos/<int:promo_id>', methods=['DELETE'])
+def delete_meeting_promo(promo_id):
+    """Delete a meeting promo"""
+    try:
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        success = promos_manager.delete_promo(promo_id)
+        
+        return jsonify({
+            'success': success,
+            'message': 'Promo deleted successfully' if success else 'Failed to delete promo'
+        })
+    except Exception as e:
+        logger.error(f"Error deleting promo: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos/<int:promo_id>/toggle', methods=['POST'])
+def toggle_meeting_promo(promo_id):
+    """Toggle active status of a meeting promo"""
+    try:
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        success = promos_manager.toggle_promo_active(promo_id)
+        
+        return jsonify({
+            'success': success,
+            'message': 'Promo toggled successfully' if success else 'Failed to toggle promo'
+        })
+    except Exception as e:
+        logger.error(f"Error toggling promo: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+@app.route('/api/meeting-promos/sort', methods=['POST'])
+def update_promo_sort_order():
+    """Update sort order for multiple promos"""
+    try:
+        data = request.json
+        promo_ids = data.get('promo_ids', [])
+        
+        from meeting_promos import MeetingPromosManager
+        promos_manager = MeetingPromosManager(db_manager)
+        
+        success = promos_manager.update_sort_order(promo_ids)
+        
+        return jsonify({
+            'success': success,
+            'message': 'Sort order updated' if success else 'Failed to update sort order'
+        })
+    except Exception as e:
+        logger.error(f"Error updating sort order: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        })
+
+
+@app.route('/api/meeting-promos/available-content', methods=['GET'])
+def get_available_promo_content():
+    """Get available content that could be used as promos"""
+    conn = None
+    cursor = None
+    try:
+        # Get query parameters
+        content_type = request.args.get('type', 'all')
+        search_term = request.args.get('search', '')
+        limit = int(request.args.get('limit', 100))
+        
+        conn = db_manager._get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Base query - look for content that could be promos
+        query = """
+            SELECT 
+                a.id,
+                i.file_path,
+                i.file_name,
+                a.content_title,
+                a.content_type,
+                a.duration_seconds,
+                i.file_duration,
+                i.file_name as display_name
+            FROM assets a
+            JOIN instances i ON a.id = i.asset_id AND i.is_primary = TRUE
+            WHERE 1=1
+                AND a.analysis_completed = TRUE
+                AND (a.duration_seconds > 0 OR i.file_duration > 0)
+                AND i.file_path IS NOT NULL
+        """
+        
+        params = []
+        
+        # Filter by content type if specified
+        if content_type != 'all':
+            if content_type == 'spots':
+                query += " AND a.duration_category = 'spots'"
+            elif content_type == 'promo':
+                query += " AND (a.duration_category = 'spots' OR UPPER(i.file_name) LIKE %s OR UPPER(i.file_name) LIKE %s)"
+                params.extend(['%PROMO%', '%PMO%'])
+            elif content_type == 'short':
+                query += " AND (a.duration_seconds BETWEEN 15 AND 120 OR i.file_duration BETWEEN 15 AND 120)"
+        
+        # Search filter
+        if search_term:
+            query += """ 
+                AND (
+                    UPPER(i.file_name) LIKE UPPER(%s) 
+                    OR UPPER(a.content_title) LIKE UPPER(%s)
+                    OR UPPER(i.file_path) LIKE UPPER(%s)
+                )
+            """
+            search_pattern = f'%{search_term}%'
+            params.extend([search_pattern, search_pattern, search_pattern])
+        
+        # Order by relevance for promos
+        query += """
+            ORDER BY 
+                CASE 
+                    WHEN UPPER(i.file_name) LIKE %s THEN 1
+                    WHEN UPPER(i.file_name) LIKE %s THEN 2
+                    WHEN a.duration_category = 'spots' THEN 3
+                    ELSE 4
+                END,
+                i.file_name
+            LIMIT %s
+        """
+        params.extend(['%PROMO%', '%PMO%'])
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        content = cursor.fetchall()
+        
+        # Format results
+        results = []
+        for row in content:
+            duration = row.get('duration_seconds') or row.get('file_duration') or 0
+            results.append({
+                'id': row.get('id'),
+                'file_path': row.get('file_path'),
+                'file_name': row.get('file_name'),
+                'display_name': row.get('display_name'),
+                'content_type': row.get('content_type'),
+                'duration_seconds': int(duration),
+                'duration_display': f"{int(duration//60)}:{int(duration%60):02d}"
+            })
+        
+        cursor.close()
+        return jsonify({
+            'success': True,
+            'content': results,
+            'count': len(results)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching available promo content: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            db_manager._put_connection(conn)
 
 @app.route('/api/holiday-greeting-stats', methods=['GET'])
 def get_holiday_greeting_stats():
