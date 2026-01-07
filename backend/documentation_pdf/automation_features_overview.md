@@ -242,6 +242,32 @@ The next phase of automation will leverage AI agentic workflows to eliminate man
   - Time to fulfillment metrics
   - Historical compliance rates
 
+**Dynamic Schedule Adjustment System**
+- Real-time schedule modifications based on live meeting duration changes
+- Automatic content shifting when meetings end early or run long
+- Minimal disruption approach - only adjusts affected time slots
+- Preserves original schedule integrity while accommodating live variations
+- Smart fill content selection for unexpected gaps
+- Automatic compression of subsequent content for overruns
+- Maintains schedule continuity without requiring full regeneration
+- Permits publishing of an updateable HTML schedule to the city website
+
+**SNS EVO Video Archive Integration**
+- AI-powered metadata generation for enhanced content discovery
+- Automatic tagging to leverage EVO's advanced search capabilities
+- Intelligent lifecycle management with automated shelf life enforcement
+- Bit rate optimization based on content priority (high/medium/low interest)
+- Custom retention policies for preservation or automated purging
+- Multi-location asset tracking across distributed archive systems
+- Computer vision analysis of b-roll footage for automatic metadata creation
+- Advanced content categorization by:
+  - Project association and dependencies
+  - Topic classification and keyword extraction
+  - Facial recognition for speaker identification
+  - Location detection and geotagging
+- Automated compliance with storage policies and retention schedules
+- Integration with existing broadcast workflow for seamless archival
+
 ---
 
 ## Conclusion
