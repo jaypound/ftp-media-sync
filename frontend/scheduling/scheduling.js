@@ -317,14 +317,19 @@ function displayAuditLogs(logs) {
     html += '<tbody>';
     
     logs.forEach((log, index) => {
-        const changeDate = new Date(log.changed_at);
-        const formattedDate = changeDate.toLocaleDateString('en-US', {
+        // Parse the timestamp assuming it's already in local time (Eastern)
+        // The backend stores timestamps without timezone info, so they're in server local time
+        const timestampStr = log.changed_at;
+        const changeDate = new Date(timestampStr + ' EST');
+        
+        const formattedDate = changeDate.toLocaleString('en-US', {
             month: 'short',
             day: 'numeric',
             year: 'numeric',
             hour: 'numeric',
             minute: '2-digit',
-            hour12: true
+            hour12: true,
+            timeZone: 'America/New_York' // Ensure Eastern Time display
         });
         
         const rowStyle = index % 2 === 0 ? 'background: var(--bg-color);' : 'background: var(--card-bg);';
@@ -336,8 +341,46 @@ function displayAuditLogs(logs) {
         html += `<td style="padding: 12px;">`;
         
         if (log.old_value || log.new_value) {
-            const oldVal = log.old_value || '<em>empty</em>';
-            const newVal = log.new_value || '<em>empty</em>';
+            // Function to format date values from GMT to Eastern Time
+            const formatValue = (value) => {
+                if (!value) return '<em>empty</em>';
+                
+                // Check if the value looks like a date with GMT timezone
+                if (typeof value === 'string' && value.includes('GMT')) {
+                    try {
+                        // Parse the date string
+                        const dateMatch = value.match(/^(.*?)(\s+\d{2}:\d{2}:\d{2})?\s*GMT$/);
+                        if (dateMatch) {
+                            const datePart = dateMatch[1] + (dateMatch[2] || ' 00:00:00');
+                            const date = new Date(datePart + ' GMT');
+                            
+                            // Format to Eastern Time
+                            const formatted = date.toLocaleString('en-US', {
+                                weekday: 'short',
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                timeZone: 'America/New_York',
+                                hour12: false
+                            });
+                            
+                            return formatted + ' ET';
+                        }
+                    } catch (e) {
+                        // If parsing fails, return original value
+                        return value;
+                    }
+                }
+                
+                return value;
+            };
+            
+            const oldVal = formatValue(log.old_value);
+            const newVal = formatValue(log.new_value);
+            
             html += `<div style="font-size: 0.85em;">`;
             html += `<div><span style="color: var(--text-secondary);">From:</span> ${oldVal}</div>`;
             html += `<div><span style="color: var(--text-secondary);">To:</span> ${newVal}</div>`;
